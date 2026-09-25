@@ -1,0 +1,229 @@
+--- a/internal/storage/jsonstore.go
++++ b/internal/storage/jsonstore.go
+@@ -212,6 +212,9 @@
+ func (s *JSONStore) GetMatch(ctx context.Context, matchGUID string) (*MatchRecord, error) {
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
+ 	if matchGUID == "" {
+ 		return nil, ErrInvalidGUID
+ 	}
+@@ -234,6 +237,9 @@
+ func (s *JSONStore) ListPendingDownloads(ctx context.Context) ([]*MatchRecord, error) {
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
+ 	s.mu.RLock()
+ 	defer s.mu.RUnlock()
+@@ -261,6 +267,9 @@
+ func (s *JSONStore) ListPendingUploads(ctx context.Context) ([]*MatchRecord, error) {
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
+ 	s.mu.RLock()
+ 	defer s.mu.RUnlock()
+@@ -288,6 +297,9 @@
+ func (s *JSONStore) UpsertDiscoveredMatches(ctx context.Context, matches []*MatchRecord) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if len(matches) == 0 {
+ 		return nil
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -310,6 +322,9 @@
+ 		if exists {
+ 			// Idempotency guarantee: preserve existing progress and statuses
+ 			if existing.ReplayURL == "" && m.ReplayURL != "" {
+ 				existing.ReplayURL = m.ReplayURL
++				if existing.DownloadStatus == DownloadSkipped {
++					existing.DownloadStatus = DownloadPending
++				}
+ 				existing.UpdatedAt = now
+ 				modified = true
+ 			}
+@@ -352,6 +367,9 @@
+ func (s *JSONStore) MarkDownloading(ctx context.Context, matchGUID string) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if matchGUID == "" {
+ 		return ErrInvalidGUID
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -376,6 +394,9 @@
+ func (s *JSONStore) MarkDownloaded(ctx context.Context, matchGUID, localPath string) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if matchGUID == "" {
+ 		return ErrInvalidGUID
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -404,6 +425,9 @@
+ func (s *JSONStore) MarkDownloadFailed(ctx context.Context, matchGUID, errMsg string) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if matchGUID == "" {
+ 		return ErrInvalidGUID
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -431,6 +455,9 @@
+ func (s *JSONStore) MarkUploading(ctx context.Context, matchGUID string) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if matchGUID == "" {
+ 		return ErrInvalidGUID
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -455,6 +482,9 @@
+ func (s *JSONStore) MarkUploaded(ctx context.Context, matchGUID, ballchasingID, ballchasingURL string) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if matchGUID == "" {
+ 		return ErrInvalidGUID
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -484,6 +514,9 @@
+ func (s *JSONStore) MarkDuplicate(ctx context.Context, matchGUID, ballchasingID, ballchasingURL string) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if matchGUID == "" {
+ 		return ErrInvalidGUID
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -513,6 +546,9 @@
+ func (s *JSONStore) MarkUploadFailed(ctx context.Context, matchGUID, errMsg string) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if matchGUID == "" {
+ 		return ErrInvalidGUID
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -540,6 +576,9 @@
+ func (s *JSONStore) RecoverInFlight(ctx context.Context) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -574,6 +613,9 @@
+ func (s *JSONStore) SaveAuthState(ctx context.Context, provider, refreshToken, accountID, displayName string) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	if provider == "" {
+ 		return errors.New("provider cannot be empty")
+ 	}
+ 
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++
++	if err := ctx.Err(); err != nil {
++		return err
+ 	}
+ 
+ 	if s.closed {
+ 		return ErrStoreClosed
+ 	}
+@@ -598,6 +640,9 @@
+ func (s *JSONStore) GetAuthState(ctx context.Context, provider string) (refreshToken, accountID, displayName string, err error) {
++	if err := ctx.Err(); err != nil {
++		return "", "", "", err
++	}
+ 	if provider == "" {
+ 		return "", "", "", errors.New("provider cannot be empty")
+ 	}

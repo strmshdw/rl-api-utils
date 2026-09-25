@@ -1,0 +1,268 @@
+package auth
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/dank/rl-api-utils/internal/config"
+	"github.com/dank/rl-api-utils/internal/storage"
+	"github.com/dank/rlapi"
+)
+
+// EpicAuthProvider implements AuthProvider for Epic Games Store accounts.
+type EpicAuthProvider struct {
+	cfg       config.EpicConfig
+	store     storage.StateStore
+	egsClient EGSClient
+	clock     func() time.Time
+
+	mu        sync.RWMutex
+	tokenInfo *TokenInfo
+}
+
+// NewEpicProvider creates a new EpicAuthProvider with the given configuration and options.
+func NewEpicProvider(cfg config.EpicConfig, store storage.StateStore, opts ...Option) (*EpicAuthProvider, error) {
+	options := defaultOptions()
+	options.store = store
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	return &EpicAuthProvider{
+		cfg:       cfg,
+		store:     options.store,
+		egsClient: options.egsClient,
+		clock:     options.clock,
+	}, nil
+}
+
+// Name returns the provider identifier.
+func (p *EpicAuthProvider) Name() string {
+	return "epic"
+}
+
+// Validate checks whether configuration contains the required Epic credentials.
+func (p *EpicAuthProvider) Validate() error {
+	if strings.TrimSpace(p.cfg.RefreshToken) == "" && strings.TrimSpace(p.cfg.AuthCode) == "" {
+		return fmt.Errorf("%w: epic provider requires either 'refresh_token' or 'auth_code'", ErrMissingCredentials)
+	}
+	return nil
+}
+
+// Authenticate executes the full Epic Games OAuth and EOS token exchange sequence.
+func (p *EpicAuthProvider) Authenticate(ctx context.Context) (*TokenInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// 1. Resolve credentials: check config, then check persistent StateStore fallback
+	refreshToken := strings.TrimSpace(p.cfg.RefreshToken)
+	authCode := strings.TrimSpace(p.cfg.AuthCode)
+
+	if refreshToken == "" && authCode == "" && p.store != nil {
+		storedToken, _, _, err := p.store.GetAuthState(ctx, "epic")
+		if err == nil && strings.TrimSpace(storedToken) != "" {
+			refreshToken = strings.TrimSpace(storedToken)
+		}
+	}
+
+	if refreshToken == "" && authCode == "" {
+		return nil, fmt.Errorf("%w: epic provider requires either 'refresh_token' or 'auth_code'", ErrMissingCredentials)
+	}
+
+	// 2. Perform EGS OAuth token grant
+	var tokenResp *rlapi.TokenResponse
+	var err error
+
+	if refreshToken != "" {
+		tokenResp, err = p.egsClient.AuthenticateWithRefreshToken(refreshToken)
+		if err != nil && authCode != "" {
+			// Fallback to auth code if refresh token failed but auth code is present
+			tokenResp, err = p.egsClient.AuthenticateWithCode(authCode)
+		}
+	} else {
+		tokenResp, err = p.egsClient.AuthenticateWithCode(authCode)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("%w: epic oauth failed: %v", ErrAuthFailed, err)
+	}
+	if tokenResp == nil {
+		return nil, fmt.Errorf("%w: received nil token response from epic", ErrAuthFailed)
+	}
+
+	// 3. Acquire short-lived exchange code
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	exchangeCode, err := p.egsClient.GetExchangeCode(tokenResp.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to obtain exchange code: %v", ErrExchangeFailed, err)
+	}
+
+	// 4. Exchange for Rocket League scoped EOS access token
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	eosResp, err := p.egsClient.ExchangeEOSToken(exchangeCode)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to exchange EOS token: %v", ErrExchangeFailed, err)
+	}
+	if eosResp == nil {
+		return nil, fmt.Errorf("%w: received nil EOS token response", ErrExchangeFailed)
+	}
+
+	// 5. Build TokenInfo
+	now := p.clock()
+	expiresIn := eosResp.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	expiresAt := now.Add(time.Duration(expiresIn) * time.Second)
+
+	accountID := tokenResp.AccountID
+	if accountID == "" {
+		accountID = eosResp.AccountID
+	}
+	displayName := tokenResp.DisplayName
+	if displayName == "" {
+		displayName = p.cfg.DisplayName
+	}
+
+	newRefreshToken := tokenResp.RefreshToken
+	if newRefreshToken == "" {
+		newRefreshToken = refreshToken
+	}
+
+	info := &TokenInfo{
+		Provider:      "epic",
+		AccessToken:   eosResp.AccessToken,
+		RefreshToken:  newRefreshToken,
+		AccountID:     accountID,
+		EpicAccountID: accountID,
+		DisplayName:   displayName,
+		TokenType:     eosResp.TokenType,
+		ExpiresAt:     expiresAt,
+		RawEOS:        eosResp,
+	}
+
+	// 6. Persist to StateStore if configured
+	if p.store != nil && newRefreshToken != "" {
+		_ = p.store.SaveAuthState(ctx, "epic", newRefreshToken, accountID, displayName)
+	}
+
+	p.mu.Lock()
+	p.tokenInfo = info
+	p.mu.Unlock()
+
+	return info, nil
+}
+
+// Refresh renews the EOS session token using the provided or cached refresh token.
+func (p *EpicAuthProvider) Refresh(ctx context.Context, refreshToken string) (*TokenInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	tokenToUse := strings.TrimSpace(refreshToken)
+	if tokenToUse == "" {
+		p.mu.RLock()
+		if p.tokenInfo != nil && p.tokenInfo.RefreshToken != "" {
+			tokenToUse = p.tokenInfo.RefreshToken
+		}
+		p.mu.RUnlock()
+	}
+	if tokenToUse == "" && p.store != nil {
+		storedToken, _, _, err := p.store.GetAuthState(ctx, "epic")
+		if err == nil && strings.TrimSpace(storedToken) != "" {
+			tokenToUse = strings.TrimSpace(storedToken)
+		}
+	}
+	if tokenToUse == "" {
+		tokenToUse = strings.TrimSpace(p.cfg.RefreshToken)
+	}
+
+	if tokenToUse == "" {
+		return nil, fmt.Errorf("%w: no refresh token available for epic session renewal", ErrMissingCredentials)
+	}
+
+	// 1. Authenticate with refresh token
+	tokenResp, err := p.egsClient.AuthenticateWithRefreshToken(tokenToUse)
+	if err != nil {
+		return nil, fmt.Errorf("%w: egs refresh failed: %v", ErrRefreshFailed, err)
+	}
+
+	// 2. Obtain exchange code
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	exchangeCode, err := p.egsClient.GetExchangeCode(tokenResp.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to obtain exchange code during refresh: %v", ErrExchangeFailed, err)
+	}
+
+	// 3. Exchange for fresh EOS token
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	eosResp, err := p.egsClient.ExchangeEOSToken(exchangeCode)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to exchange EOS token during refresh: %v", ErrExchangeFailed, err)
+	}
+
+	now := p.clock()
+	expiresIn := eosResp.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	expiresAt := now.Add(time.Duration(expiresIn) * time.Second)
+
+	accountID := tokenResp.AccountID
+	if accountID == "" {
+		accountID = eosResp.AccountID
+	}
+	displayName := tokenResp.DisplayName
+	if displayName == "" {
+		displayName = p.cfg.DisplayName
+	}
+	newRefreshToken := tokenResp.RefreshToken
+	if newRefreshToken == "" {
+		newRefreshToken = tokenToUse
+	}
+
+	info := &TokenInfo{
+		Provider:      "epic",
+		AccessToken:   eosResp.AccessToken,
+		RefreshToken:  newRefreshToken,
+		AccountID:     accountID,
+		EpicAccountID: accountID,
+		DisplayName:   displayName,
+		TokenType:     eosResp.TokenType,
+		ExpiresAt:     expiresAt,
+		RawEOS:        eosResp,
+	}
+
+	if p.store != nil && newRefreshToken != "" {
+		_ = p.store.SaveAuthState(ctx, "epic", newRefreshToken, accountID, displayName)
+	}
+
+	p.mu.Lock()
+	p.tokenInfo = info
+	p.mu.Unlock()
+
+	return info, nil
+}
+
+// TokenInfo returns the current cached TokenInfo, or nil if not authenticated.
+func (p *EpicAuthProvider) TokenInfo() *TokenInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.tokenInfo == nil {
+		return nil
+	}
+	cp := *p.tokenInfo
+	return &cp
+}

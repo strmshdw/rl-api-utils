@@ -1,0 +1,36 @@
+{
+  "auth": {
+    "provider": "epic",
+    "epic": {
+      "refresh_token": "your-epic-refresh-token",
+      "auth_code": "",
+      "account_id": "",
+      "display_name": ""
+    },
+    "steam": {
+      "session_ticket": "",
+      "steam_id_64": "",
+      "account_name": ""
+    }
+  },
+  "ballchasing": {
+    "api_key": "your-ballchasing-api-key",
+    "visibility": "public",
+    "base_url": "https://ballchasing.com/api",
+    "timeout": "60s",
+    "max_retries": 3
+  },
+  "sync": {
+    "poll_interval": "5m",
+    "replay_dir": "./replays",
+    "db_path": "./rl-sync.db",
+    "keep_local_files": true,
+    "download_timeout": "30s",
+    "dry_run": false,
+    "once": false
+  },
+  "logging": {
+    "level": "info",
+    "format": "text"
+  }
+}

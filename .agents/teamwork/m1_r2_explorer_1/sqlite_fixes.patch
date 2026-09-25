@@ -1,0 +1,35 @@
+diff --git a/internal/storage/sqlite.go b/internal/storage/sqlite.go
+--- a/internal/storage/sqlite.go
++++ b/internal/storage/sqlite.go
+@@ -206,8 +206,9 @@ func (s *SQLiteStore) UpsertDiscoveredMatches(ctx context.Context, matches []*Ma
+ 	    last_error, created_at, updated_at
+ 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ 	ON CONFLICT(match_guid) DO UPDATE SET
++	    download_status = CASE WHEN matches.download_status = 'SKIPPED' AND matches.replay_url = '' AND excluded.replay_url != '' THEN 'PENDING' ELSE matches.download_status END,
+ 	    replay_url = CASE WHEN matches.replay_url = '' AND excluded.replay_url != '' THEN excluded.replay_url ELSE matches.replay_url END,
+ 	    updated_at = excluded.updated_at;
+ 	`
+ 
+ 	stmt, err := tx.PrepareContext(ctx, upsertSQL)
+@@ -402,6 +403,10 @@ func (s *SQLiteStore) RecoverInFlight(ctx context.Context) error {
+ 
+ // SaveAuthState upserts authentication tokens and metadata for a provider.
+ func (s *SQLiteStore) SaveAuthState(ctx context.Context, provider, refreshToken, accountID, displayName string) error {
++	if provider == "" {
++		return errors.New("provider cannot be empty")
++	}
++
+ 	now := time.Now().UTC().Unix()
+ 	const query = `
+ 	INSERT INTO auth_state (provider, refresh_token, account_id, display_name, updated_at)
+@@ -420,6 +425,10 @@ func (s *SQLiteStore) SaveAuthState(ctx context.Context, provider, refreshToken,
+ 
+ // GetAuthState retrieves persisted authentication metadata for a given provider.
+ func (s *SQLiteStore) GetAuthState(ctx context.Context, provider string) (refreshToken, accountID, displayName string, err error) {
++	if provider == "" {
++		return "", "", "", errors.New("provider cannot be empty")
++	}
++
+ 	const query = `
+ 	SELECT refresh_token, account_id, display_name
+ 	FROM auth_state

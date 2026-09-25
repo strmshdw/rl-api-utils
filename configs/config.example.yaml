@@ -1,0 +1,81 @@
+# ==============================================================================
+# Rocket League Replay Synchronizer Daemon Configuration Template
+# ==============================================================================
+
+# Authentication Settings
+# Supported providers: "epic" or "steam"
+auth:
+  provider: "epic" # Override with RL_SYNC_AUTH_PROVIDER
+
+  # Epic Games Authentication
+  # Required if provider is "epic". Provide either refresh_token OR auth_code.
+  epic:
+    # Long-term OAuth refresh token (recommended for daemon mode)
+    refresh_token: "your-epic-refresh-token" # Override with RL_SYNC_EPIC_REFRESH_TOKEN
+    
+    # One-time login exchange code (used for initial bootstrap)
+    auth_code: ""                           # Override with RL_SYNC_EPIC_AUTH_CODE
+    
+    # Optional account identifiers
+    account_id: ""                          # Override with RL_SYNC_EPIC_ACCOUNT_ID
+    display_name: ""                        # Override with RL_SYNC_EPIC_DISPLAY_NAME
+
+  # Steam Authentication
+  # Required if provider is "steam". Both session_ticket and steam_id_64 are required.
+  steam:
+    # Hex-encoded Steam session ticket obtained from Steamworks API
+    session_ticket: ""                      # Override with RL_SYNC_STEAM_SESSION_TICKET
+    
+    # 64-bit Steam ID (e.g. 76561198000000000)
+    steam_id_64: ""                         # Override with RL_SYNC_STEAM_ID_64
+    
+    # Optional Steam account username
+    account_name: ""                        # Override with RL_SYNC_STEAM_ACCOUNT_NAME
+
+# Ballchasing.com Upload Settings
+ballchasing:
+  # User upload API key from https://ballchasing.com/upload
+  api_key: "your-ballchasing-api-key"      # Override with RL_SYNC_BALLCHASING_API_KEY
+  
+  # Upload visibility: "public", "unlisted", or "private"
+  visibility: "public"                     # Override with RL_SYNC_BALLCHASING_VISIBILITY
+  
+  # Base API URL (defaults to production; change for mock testing)
+  base_url: "https://ballchasing.com/api"   # Override with RL_SYNC_BALLCHASING_BASE_URL
+  
+  # HTTP request timeout for multipart uploads
+  timeout: "60s"                           # Override with RL_SYNC_BALLCHASING_TIMEOUT
+  
+  # Maximum retry attempts on HTTP 429 rate limit or network error
+  max_retries: 3                           # Override with RL_SYNC_BALLCHASING_MAX_RETRIES
+
+# Synchronization Engine Settings
+sync:
+  # Polling interval between PsyNet match history checks
+  poll_interval: "5m"                      # Override with RL_SYNC_POLL_INTERVAL
+  
+  # Local filesystem directory where downloaded .replay files are stored
+  replay_dir: "./replays"                  # Override with RL_SYNC_REPLAY_DIR
+  
+  # Path to SQLite persistence database (or .json for JSON state store)
+  db_path: "./rl-sync.db"                  # Override with RL_SYNC_DB_PATH
+  
+  # Whether to retain .replay files on disk after successful upload
+  keep_local_files: true                   # Override with RL_SYNC_KEEP_LOCAL_FILES
+  
+  # HTTP download timeout for streaming replay binary payload
+  download_timeout: "30s"                  # Override with RL_SYNC_DOWNLOAD_TIMEOUT
+  
+  # Dry-run mode: discover and diff matches, but do not download or upload
+  dry_run: false                           # Override with RL_SYNC_DRY_RUN or --dry-run
+  
+  # Once mode: run exactly one polling pass and then terminate
+  once: false                              # Override with RL_SYNC_ONCE or --once
+
+# Structured Logging Settings
+logging:
+  # Minimum log level: "debug", "info", "warn", or "error"
+  level: "info"                            # Override with RL_SYNC_LOG_LEVEL or --log-level
+  
+  # Log format: "text" (human-friendly console) or "json" (structured production)
+  format: "text"                           # Override with RL_SYNC_LOG_FORMAT or --log-format
