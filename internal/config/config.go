@@ -78,7 +78,20 @@ type Config struct {
 	Auth        AuthConfig        `yaml:"auth" json:"auth"`
 	Ballchasing BallchasingConfig `yaml:"ballchasing" json:"ballchasing"`
 	Sync        SyncConfig        `yaml:"sync" json:"sync"`
+	StatsAPI    StatsAPIConfig    `yaml:"stats_api" json:"stats_api"`
 	Logging     LoggingConfig     `yaml:"logging" json:"logging"`
+}
+
+// StatsAPIConfig configures connection to Rocket League's local Stats API (MatchStatsExporter_TA).
+type StatsAPIConfig struct {
+	Enabled            bool   `yaml:"enabled" json:"enabled"`                                 // default: true
+	Address            string `yaml:"address" json:"address"`                                 // default: "127.0.0.1:49124"
+	Protocol           string `yaml:"protocol" json:"protocol"`                               // "websocket" or "tcp", default: "websocket"
+	TriggerThreshold   int    `yaml:"trigger_threshold" json:"trigger_threshold"`             // default: 15
+	ForceSyncOnTrigger bool   `yaml:"force_sync_on_trigger" json:"force_sync_on_trigger"`     // default: false
+	EnableToast        bool   `yaml:"enable_toast" json:"enable_toast"`                       // default: true
+	HTTPTriggerPort    int    `yaml:"http_trigger_port" json:"http_trigger_port"`             // default: 49125 (0 to disable)
+	AutoSyncOnExit     bool   `yaml:"auto_sync_on_exit" json:"auto_sync_on_exit"`             // default: true
 }
 
 // AuthConfig configures authentication for Rocket League PsyNet RPC.
@@ -131,15 +144,18 @@ type LoggingConfig struct {
 
 // CLIFlags captures optional command-line flag overrides.
 type CLIFlags struct {
-	ConfigPath   string
-	Once         *bool
-	DryRun       *bool
-	LogLevel     *string
-	LogFormat    *string
-	PollInterval *time.Duration
-	ReplayDir    *string
-	DBPath       *string
-	Provider     *string
+	ConfigPath         string
+	Once               *bool
+	DryRun             *bool
+	LogLevel           *string
+	LogFormat          *string
+	PollInterval       *time.Duration
+	ReplayDir          *string
+	DBPath             *string
+	Provider           *string
+	TriggerThreshold   *int
+	ForceSyncOnTrigger *bool
+	StatsAPIEnabled    *bool
 }
 
 // NewDefaultConfig returns a Config populated with baseline default settings.
@@ -162,6 +178,16 @@ func NewDefaultConfig() *Config {
 			DownloadTimeout: Duration(30 * time.Second),
 			DryRun:          false,
 			Once:            false,
+		},
+		StatsAPI: StatsAPIConfig{
+			Enabled:            true,
+			Address:            "127.0.0.1:49124",
+			Protocol:           "websocket",
+			TriggerThreshold:   15,
+			ForceSyncOnTrigger: false,
+			EnableToast:        true,
+			HTTPTriggerPort:    49125,
+			AutoSyncOnExit:     true,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -332,6 +358,54 @@ func (c *Config) applyEnv() error {
 		}
 		c.Sync.Once = b
 	}
+	if val := getEnv("RL_SYNC_STATS_API_ENABLED"); val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid RL_SYNC_STATS_API_ENABLED %q: %w", val, err)
+		}
+		c.StatsAPI.Enabled = b
+	}
+	if val := getEnv("RL_SYNC_STATS_API_ADDRESS"); val != "" {
+		c.StatsAPI.Address = strings.TrimSpace(val)
+	}
+	if val := getEnv("RL_SYNC_STATS_API_PROTOCOL"); val != "" {
+		c.StatsAPI.Protocol = strings.ToLower(strings.TrimSpace(val))
+	}
+	if val := getEnv("RL_SYNC_TRIGGER_THRESHOLD"); val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid RL_SYNC_TRIGGER_THRESHOLD %q: %w", val, err)
+		}
+		c.StatsAPI.TriggerThreshold = n
+	}
+	if val := getEnv("RL_SYNC_FORCE_SYNC_ON_TRIGGER"); val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid RL_SYNC_FORCE_SYNC_ON_TRIGGER %q: %w", val, err)
+		}
+		c.StatsAPI.ForceSyncOnTrigger = b
+	}
+	if val := getEnv("RL_SYNC_ENABLE_TOAST"); val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid RL_SYNC_ENABLE_TOAST %q: %w", val, err)
+		}
+		c.StatsAPI.EnableToast = b
+	}
+	if val := getEnv("RL_SYNC_HTTP_TRIGGER_PORT"); val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid RL_SYNC_HTTP_TRIGGER_PORT %q: %w", val, err)
+		}
+		c.StatsAPI.HTTPTriggerPort = n
+	}
+	if val := getEnv("RL_SYNC_AUTO_SYNC_ON_EXIT"); val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid RL_SYNC_AUTO_SYNC_ON_EXIT %q: %w", val, err)
+		}
+		c.StatsAPI.AutoSyncOnExit = b
+	}
 
 	if val := getEnv("RL_SYNC_LOG_LEVEL"); val != "" {
 		c.Logging.Level = strings.ToLower(strings.TrimSpace(val))
@@ -367,6 +441,15 @@ func (c *Config) applyCLI(cli CLIFlags) {
 	}
 	if cli.Provider != nil && *cli.Provider != "" {
 		c.Auth.Provider = strings.ToLower(strings.TrimSpace(*cli.Provider))
+	}
+	if cli.TriggerThreshold != nil && *cli.TriggerThreshold > 0 {
+		c.StatsAPI.TriggerThreshold = *cli.TriggerThreshold
+	}
+	if cli.ForceSyncOnTrigger != nil {
+		c.StatsAPI.ForceSyncOnTrigger = *cli.ForceSyncOnTrigger
+	}
+	if cli.StatsAPIEnabled != nil {
+		c.StatsAPI.Enabled = *cli.StatsAPIEnabled
 	}
 }
 

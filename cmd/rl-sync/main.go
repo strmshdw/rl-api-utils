@@ -18,6 +18,7 @@ import (
 	"github.com/dank/rl-api-utils/internal/config"
 	"github.com/dank/rl-api-utils/internal/daemon"
 	"github.com/dank/rl-api-utils/internal/psynet"
+	"github.com/dank/rl-api-utils/internal/statsapi"
 	"github.com/dank/rl-api-utils/internal/storage"
 	"github.com/dank/rl-api-utils/internal/syncer"
 )
@@ -118,11 +119,14 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		pollInterval time.Duration
 		replayDir    string
 		dbPath       string
-		provider     string
-		showVersion  bool
-		showVersionV bool
-		showHelp     bool
-		showHelpH    bool
+		provider           string
+		triggerThreshold   int
+		forceSyncOnTrigger bool
+		statsAPIEnabled    bool
+		showVersion        bool
+		showVersionV       bool
+		showHelp           bool
+		showHelpH          bool
 	)
 
 	fs.StringVar(&configPath, "config", "", "Path to configuration file (YAML or JSON)")
@@ -135,6 +139,9 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	fs.StringVar(&replayDir, "replay-dir", "", "Directory to store downloaded replays")
 	fs.StringVar(&dbPath, "db-path", "", "Path to SQLite database or JSON state store")
 	fs.StringVar(&provider, "provider", "", "Authentication provider override ('epic' or 'steam')")
+	fs.IntVar(&triggerThreshold, "trigger-threshold", 0, "Threshold of un-downloaded matches to fire notification/trigger (default 15)")
+	fs.BoolVar(&forceSyncOnTrigger, "force-sync", false, "Force immediate PsyNet sync when trigger threshold is reached")
+	fs.BoolVar(&statsAPIEnabled, "stats-api", true, "Enable Rocket League Stats API event tracking")
 	fs.BoolVar(&showVersion, "version", false, "Display application version and exit")
 	fs.BoolVar(&showVersionV, "v", false, "Display application version (shorthand)")
 	fs.BoolVar(&showHelp, "help", false, "Display usage help and exit")
@@ -191,6 +198,12 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 			cli.DBPath = &dbPath
 		case "provider":
 			cli.Provider = &provider
+		case "trigger-threshold":
+			cli.TriggerThreshold = &triggerThreshold
+		case "force-sync":
+			cli.ForceSyncOnTrigger = &forceSyncOnTrigger
+		case "stats-api":
+			cli.StatsAPIEnabled = &statsAPIEnabled
 		}
 	})
 
@@ -317,7 +330,36 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	syncerEngine := r.NewSyncer(store, psyClient, downloader, bcClient, syncerConfig)
 
 	// 10. Initialize Daemon Engine
-	daemonEngine, err := r.NewDaemon(syncerEngine, cfg, daemon.WithLogger(logger))
+	var daemonOpts []daemon.Option
+	daemonOpts = append(daemonOpts, daemon.WithLogger(logger))
+
+	if cfg.StatsAPI.Enabled && !cfg.Sync.Once {
+		trackerCfg := statsapi.TrackerConfig{
+			TriggerThreshold:   cfg.StatsAPI.TriggerThreshold,
+			ForceSyncOnTrigger: cfg.StatsAPI.ForceSyncOnTrigger,
+			EnableToast:        cfg.StatsAPI.EnableToast,
+		}
+		tracker, trackerErr := statsapi.NewTracker(store, trackerCfg, statsapi.WithLogger(logger))
+		if trackerErr != nil {
+			logger.Warn("failed to initialize stats tracker", slog.Any("error", trackerErr))
+		} else {
+			listenerCfg := statsapi.ListenerConfig{
+				Address:  cfg.StatsAPI.Address,
+				Protocol: cfg.StatsAPI.Protocol,
+			}
+			listener, listenerErr := statsapi.NewListener(listenerCfg, tracker, logger)
+			if listenerErr != nil {
+				logger.Warn("failed to initialize stats listener", slog.Any("error", listenerErr))
+			} else {
+				daemonOpts = append(daemonOpts,
+					daemon.WithStatsTracker(tracker),
+					daemon.WithStatsListener(listener),
+				)
+			}
+		}
+	}
+
+	daemonEngine, err := r.NewDaemon(syncerEngine, cfg, daemonOpts...)
 	if err != nil {
 		logger.Error("failed to initialize daemon engine", slog.Any("error", err))
 		return 1

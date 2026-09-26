@@ -29,6 +29,16 @@
     "dry_run": false,
     "once": false
   },
+  "stats_api": {
+    "enabled": true,
+    "address": "127.0.0.1:49124",
+    "protocol": "websocket",
+    "trigger_threshold": 15,
+    "force_sync_on_trigger": false,
+    "enable_toast": true,
+    "http_trigger_port": 49125,
+    "auto_sync_on_exit": true
+  },
   "logging": {
     "level": "info",
     "format": "text"

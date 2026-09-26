@@ -68,6 +68,9 @@ go run ./cmd/rl-sync -config config.yaml
 | `-provider` | | `""` | Override authentication provider (`epic` or `steam`). |
 | `-replay-dir` | | `""` | Path to local directory where `.replay` files are saved. |
 | `-db-path` | | `""` | Path to SQLite database file or JSON state store file. |
+| `-stats-api` | | `true` | Enable Rocket League Stats API real-time match tracking. |
+| `-trigger-threshold` | | `15` | Threshold of un-downloaded matches to fire toast notification / trigger. |
+| `-force-sync` | | `false` | Force immediate PsyNet sync when trigger threshold is reached. |
 | `-log-level` | | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`). |
 | `-log-format` | | `text` | Log output format (`text`, `json`). |
 | `-version` | `-v` | `false` | Display application version and exit. |
@@ -137,6 +140,51 @@ If using Steam authentication (`provider: "steam"`), you can generate a valid Ro
 5. **Copy the session ticket**:
    Copy the generated hex ticket from the terminal output and paste it into your `config.yaml` under `auth.steam.session_ticket` (or set `$env:RL_SYNC_STEAM_SESSION_TICKET`). Also ensure your 64-bit Steam ID is configured under `auth.steam.steam_id_64`.
 
+---
+
+## In-Game Match Tracking & Alert System (Rocket League Stats API)
+
+To prevent **duplicate login errors** and party disconnects while playing (since Psyonix restricts an account to a single concurrent session token), `rl-sync` integrates with Rocket League's official local **[Stats API](https://www.rocketleague.com/developer/stats-api#overview)** (`MatchStatsExporter_TA`).
+
+### 1. Enabling the Stats API in Rocket League
+Locate your Rocket League installation directory (e.g. `D:\epic\rocketleague\TAGame\Config\`) and open or create `TAStatsAPI.ini`:
+
+```ini
+[TAGame.MatchStatsExporter_TA]
+Port=49123
+WebPort=49124
+PacketSendRate=30
+```
+*Restart Rocket League for changes to take effect.*
+
+### 2. How `rl-sync` Tracks Matches
+- While Rocket League is running, `rl-sync` connects locally to `ws://127.0.0.1:49124` (or TCP `49123`) without sending any PsyNet authentication tokens.
+- Whenever you enter or complete a match, the game client emits `MatchCreated` / `MatchEnded` containing the online `MatchGuid`.
+- `rl-sync` evaluates each match against the local SQLite database. If the match is not already downloaded or uploaded, it adds it to an in-memory pending queue.
+- Scheduled 5-minute background PsyNet polling is paused while you are in-game to keep your party intact.
+
+### 3. Threshold Warning & Windows Toast Notification
+- When pending matches reach the configured threshold (default: **15 matches** out of the 20-match rolling buffer):
+  - A native **Windows Toast Notification** alerts you:  
+    `"15 matches in queue! Replays at risk of being lost. Run sync soon to backup."`
+  - A warning is recorded in the application log.
+
+### 4. Manual Triggering
+You can trigger an immediate sync at any convenient moment (e.g., between matches or games) via the built-in local HTTP endpoint:
+```powershell
+# Trigger a sync pass on demand
+Invoke-RestMethod -Uri "http://127.0.0.1:49125/sync" -Method POST
+
+# Check tracker status and pending matches
+Invoke-RestMethod -Uri "http://127.0.0.1:49125/status"
+```
+
+### 5. Configurable Overrides
+- **Force Sync Override**: If `stats_api.force_sync_on_trigger: true` (or CLI flag `--force-sync`), `rl-sync` will immediately query PsyNet match history and sync replays as soon as the threshold is breached, regardless of in-game state.
+- **Auto-Sync on Game Exit**: If `stats_api.auto_sync_on_exit: true` (default), `rl-sync` automatically runs a sync cycle the moment you close Rocket League, backing up all pending matches while you are safely offline.
+
+---
+
 
 ### Environment Variable Overrides
 
@@ -154,6 +202,13 @@ Any configuration field can also be supplied via environment variables:
 | `RL_SYNC_POLL_INTERVAL` | Polling frequency (e.g., `5m`) |
 | `RL_SYNC_REPLAY_DIR` | Replay destination directory |
 | `RL_SYNC_DB_PATH` | Path to persistence database |
+| `RL_SYNC_STATS_API_ENABLED` | Enable Stats API match tracking (`true`/`false`) |
+| `RL_SYNC_STATS_API_ADDRESS` | Stats API address (e.g. `127.0.0.1:49124`) |
+| `RL_SYNC_TRIGGER_THRESHOLD` | Threshold of pending matches before trigger (e.g. `15`) |
+| `RL_SYNC_FORCE_SYNC_ON_TRIGGER` | Force sync when threshold reached (`true`/`false`) |
+| `RL_SYNC_ENABLE_TOAST` | Enable Windows toast alerts (`true`/`false`) |
+| `RL_SYNC_HTTP_TRIGGER_PORT` | Local HTTP trigger endpoint port (default `49125`) |
+| `RL_SYNC_AUTO_SYNC_ON_EXIT` | Auto-sync replays when game exits (`true`/`false`) |
 
 ---
 

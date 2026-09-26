@@ -72,6 +72,41 @@ sync:
   # Once mode: run exactly one polling pass and then terminate
   once: false                              # Override with RL_SYNC_ONCE or --once
 
+# Rocket League Local Stats API (MatchStatsExporter_TA) Settings
+# The game client can broadcast match events locally without using PsyNet auth tokens,
+# preventing duplicate login errors and party disconnects while playing in-game.
+# Enable in Rocket League by editing TAGame\Config\TAStatsAPI.ini:
+#   [TAGame.MatchStatsExporter_TA]
+#   Port=49123
+#   WebPort=49124
+#   PacketSendRate=30
+stats_api:
+  # Enable listening to Rocket League's local Stats API stream
+  enabled: true                            # Override with RL_SYNC_STATS_API_ENABLED or --stats-api
+
+  # Local address of Rocket League Stats API (default WebPort is 49124, TCP Port is 49123)
+  address: "127.0.0.1:49124"               # Override with RL_SYNC_STATS_API_ADDRESS
+
+  # Protocol to use: "websocket" or "tcp"
+  protocol: "websocket"                    # Override with RL_SYNC_STATS_API_PROTOCOL
+
+  # Number of un-downloaded matches in queue before triggering toast/warning
+  trigger_threshold: 15                    # Override with RL_SYNC_TRIGGER_THRESHOLD or --trigger-threshold
+
+  # Force immediate PsyNet match history query and replay sync when trigger fires
+  # If false, displays toast notification and awaits manual trigger or game exit
+  force_sync_on_trigger: false             # Override with RL_SYNC_FORCE_SYNC_ON_TRIGGER or --force-sync
+
+  # Enable Windows desktop toast notification when threshold is reached
+  enable_toast: true                       # Override with RL_SYNC_ENABLE_TOAST
+
+  # Local port for manual HTTP trigger endpoint (http://127.0.0.1:49125/sync)
+  # Set to 0 to disable
+  http_trigger_port: 49125                 # Override with RL_SYNC_HTTP_TRIGGER_PORT
+
+  # Automatically trigger a sync pass when Rocket League game client closes
+  auto_sync_on_exit: true                  # Override with RL_SYNC_AUTO_SYNC_ON_EXIT
+
 # Structured Logging Settings
 logging:
   # Minimum log level: "debug", "info", "warn", or "error"
