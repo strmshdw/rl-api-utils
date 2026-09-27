@@ -1,6 +1,6 @@
 module github.com/dank/rl-api-utils
 
-go 1.24.5
+go 1.27.1
 
 require (
 	github.com/dank/rlapi v0.1.26
