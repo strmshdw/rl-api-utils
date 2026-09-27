@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dank/rl-api-utils/internal/config"
 	"github.com/dank/rl-api-utils/internal/storage"
@@ -477,5 +478,26 @@ func TestSteam_SilentBackgroundReauth_UsingLoginKey(t *testing.T) {
 
 	if info.AccessToken != "fresh-eos-access" {
 		t.Errorf("expected AccessToken 'fresh-eos-access', got %q", info.AccessToken)
+	}
+}
+
+func TestNodeSteamTicketGenerator_Execution_ResolvesScriptPath(t *testing.T) {
+	gen := NewNodeSteamTicketGenerator("")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := gen.GenerateTicket(ctx, SteamTicketOptions{
+		Username:     "test_nonexistent_user",
+		Password:     "test_invalid_pass",
+		AccountLabel: "Primary Account",
+	})
+
+	if err == nil {
+		t.Fatal("expected error with dummy credentials, got nil")
+	}
+
+	// Must NOT fail with "Cannot find module" or "steam-auth.js not found"
+	if strings.Contains(err.Error(), "Cannot find module") || strings.Contains(err.Error(), "not found") {
+		t.Fatalf("script resolution failed: %v", err)
 	}
 }
