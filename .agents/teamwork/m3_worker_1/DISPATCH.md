@@ -1,64 +1,60 @@
 # Dispatch: m3_worker_1
 
-**Milestone**: M3 - Ballchasing Replay Uploader
-**Role**: Implementation Worker (internal/ballchasing)
+## 2026-09-26T01:15:00Z
+- **Role**: Milestone M3 Implementation Worker
+- **Milestone**: M3 (Player Tracker Engine & Lifecycle)
+- **Target Files**:
+  - `internal/playertrack/tracker.go` (Implementation)
+  - `internal/playertrack/tracker_test.go` (Unit & Race Tests)
+- **Inputs**:
+  - `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-09-26T00:19:44Z`)
+  - `c:\Users\strms\.gemini\antigravity\brain\11baea32-4a41-4d49-b959-d518322eea18\player_tracking_plan.md`
+  - `d:\code\rl-api-utils\.agents\teamwork\orchestrator_3\PROJECT.md`
+  - `d:\code\rl-api-utils\.agents\teamwork\m3_pt_explorer_1\analysis.md`
+  - `d:\code\rl-api-utils\.agents\teamwork\m3_pt_explorer_2\analysis.md`
+  - `d:\code\rl-api-utils\.agents\teamwork\m3_pt_explorer_3\analysis.md`
 
-## Objectives
-Implement the complete Ballchasing client subsystem for Milestone 3:
-1. `internal/ballchasing/types.go`:
-   - `UploadResult` (`ID`, `Location`, `IsDuplicate`).
-   - `ReplayUploader` interface (`UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error)`).
-   - `Client` configuration types (`ClientConfig`, `Visibility`, options).
-   - Sentinel errors (`ErrInvalidAPIKey`, `ErrRateLimitExhausted`, `ErrEmptyFilePath`, `ErrEmptyMatchGUID`, `ErrInvalidVisibility`, `ErrEmptyFile`).
-   (Reference: `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1\proposed_types.go` and `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2\handoff.md`).
+MANDATORY INTEGRITY WARNING:
+DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_preview_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
 
-2. `internal/ballchasing/client.go`:
-   - `NewClient(apiKey string, opts ...Option) *Client`.
-   - `UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error)`.
-   - `Ping(ctx context.Context) error`.
-   - Multipart form construction with file part name `"file"`, filename `<matchGUID>.replay`, and query parameter `visibility`.
-   - Raw Authorization header: `Authorization: <apiKey>` (strictly WITHOUT `Bearer ` prefix).
-   - Status code handling:
-     - 201 Created -> `UploadResult{ID: id, Location: loc, IsDuplicate: false}`, nil error.
-     - 409 Conflict -> `UploadResult{ID: id, Location: loc, IsDuplicate: true}`, nil error (idempotent, 0 retries).
-     - 429 Too Many Requests -> parse `Retry-After` (integer seconds & HTTP-date), exponential backoff with retry budget (default 3 retries), context-aware sleep.
-     - 401 Unauthorized -> immediate fatal `ErrInvalidAPIKey` (0 retries).
-     - 400 Bad Request -> immediate descriptive error (0 retries).
-     - 5xx Server Error -> transient retry within budget.
-   - Windows file descriptor safety: file handle closed immediately after reading inside each attempt; no open handles during backoff sleep.
-   (Reference: `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1\proposed_client.go` and `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2\handoff.md`).
+Core Requirements to Implement:
+1. `playertrack.Tracker`:
+   - Implements `statsapi.PlayerEventHandler` (`OnUpdateState`, `OnMatchEnded`).
+   - 4-Tier Local Player Resolution hierarchy:
+     - Tier 1: Config `LocalPlayerID` (`PrimaryId` or `AccountID` match).
+     - Tier 2: Primary auth ID (`Epic|<id>|0` or `Steam|<id>|0`).
+     - Tier 3: Config `LocalPlayerName` (case-insensitive name match).
+     - Tier 4: Primary auth display name (`Epic.DisplayName` or `Steam.AccountName`).
+     - Rejects any player where `player.IsBot() == true`.
+   - Team resolution (`myTeamNum = localPlayer.TeamNum`) and Teammate vs. Opponent classification.
+   - Non-bot human player upsert to `store.UpsertPlayer`, with in-memory caching to avoid 120Hz SQLite thrashing.
+   - In-memory current match snapshot (`sync.RWMutex`) with `GetCurrentMatch() *CurrentMatchResponse` returning deep clones.
+   - Asynchronous rank retrieval via `SkillFetcher.GetPlayersSkills` when `AutoFetchRanks` is enabled:
+     - Debounce with in-memory TTL cache and in-flight tracking (no redundant PsyNet RPC calls during 120Hz events).
+     - Asynchronous DB update via `store.UpdatePlayerRanks` (with fallback `UpsertPlayer` if `ErrPlayerNotFound`).
+   - Match outcome compilation on `OnMatchEnded`:
+     - `myTeamWon = (*winnerTeamNum == myTeamNum)`.
+     - Compiles `[]storage.PlayerOutcome` setting `outcome.Won = myTeamWon`.
+     - Calls `store.RecordMatchResults(ctx, matchGUID, playlistID, outcomes)`.
+     - Idempotent: returns `nil` on `storage.ErrMatchAlreadyProcessed`.
+     - Safe fallback on nil `winnerTeamNum` or unresolved local player.
+   - Clean shutdown with `Tracker.Close()`.
+2. `playertrack.Tracker` Unit Tests (`tracker_test.go`):
+   - Dual-backend parameterization testing both `SQLiteStore` and `JSONStore`.
+   - Test double setup (`TestSkillFetcher` with synchronization channels).
+   - Test all 4 resolution tiers and fallbacks.
+   - Test bot exclusion (`Unknown|0|0`).
+   - Test 120Hz debounce (1,000 `OnUpdateState` calls -> 1 rank RPC call).
+   - Test `OnMatchEnded` outcome calculation (teammate win/loss, opponent win/loss).
+   - Test duplicate `OnMatchEnded` idempotency (`ErrMatchAlreadyProcessed` -> zero counter drift).
+   - Heavy concurrency stress test with Go race detector (`go test -race ./internal/playertrack/...`).
 
-3. `internal/ballchasing/client_test.go`:
-   - Comprehensive unit test suite utilizing `testutil.NewMockBallchasingServer`.
-   (Reference: `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_3\proposed_client_test.go`).
+Verification Commands:
+- `go build ./cmd/rl-sync`
+- `go test -v -count=1 ./internal/playertrack/...`
+- `go test -v -race -count=1 ./internal/playertrack/...`
+- `go test -count=1 ./...` (all 12 packages must pass 100%)
+- `go vet ./...`
 
-4. Exclusive write ownership:
-   - `internal/ballchasing/types.go`
-   - `internal/ballchasing/client.go`
-   - `internal/ballchasing/client_test.go`
-   Do NOT modify any files outside `internal/ballchasing`.
-
-5. Verification:
-   - Run tests:
-     ```powershell
-     $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-     cd d:\code\rl-api-utils
-     go test -v -count=1 ./internal/ballchasing/...
-     go test -count=1 ./...
-     go vet ./internal/ballchasing/...
-     ```
-   - Ensure 100% test pass on all tests and zero vet warnings.
-
-6. MANDATORY INTEGRITY WARNING:
-   DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_preview_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
-
-7. Report completion to `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md` and notify parent via `send_message`.
-
-## 2026-09-25T04:06:28Z
-Implement Milestone 3 (Ballchasing Replay Uploader):
-1. Review the explorer handoffs and proposals.
-2. Exclusive write ownership: internal/ballchasing/types.go, internal/ballchasing/client.go, internal/ballchasing/client_test.go.
-3. Implement types.go, client.go, and client_test.go.
-4. Execute verification commands (go test, go vet).
-5. Mandatory Integrity Warning.
-6. Write handoff.md and notify parent via send_message.
+Write complete handoff report to `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md`.
+Send message to parent when done.

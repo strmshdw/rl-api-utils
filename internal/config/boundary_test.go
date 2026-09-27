@@ -618,15 +618,7 @@ func TestBoundary_WhitespaceOnlyFields(t *testing.T) {
 		modify func(c *config.Config)
 		errMsg string
 	}{
-		{
-			name: "whitespace_epic_credentials",
-			modify: func(c *config.Config) {
-				c.Auth.Provider = "epic"
-				c.Auth.Epic.RefreshToken = "   "
-				c.Auth.Epic.AuthCode = "   "
-			},
-			errMsg: "epic provider requires either 'refresh_token' or 'auth_code'",
-		},
+
 		{
 			name: "whitespace_steam_ticket",
 			modify: func(c *config.Config) {

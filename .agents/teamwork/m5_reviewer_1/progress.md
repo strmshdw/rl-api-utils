@@ -1,18 +1,24 @@
-# Progress: m5_reviewer_1
+# Progress — M5 Reviewer 1 (E2E & Backend Architecture Reviewer)
 
-**Last visited**: 2026-09-25T05:10:30Z
-**Status**: COMPLETED
+Last visited: 2026-09-26T07:07:00Z
 
-## Steps Completed
-- Executed and verified `go test -v -count=1 ./test/e2e/...` -> 100% pass across all tiers.
-- Executed and verified `go vet ./...` -> 0 warnings/errors.
-- Verified test counts:
-  - Tier 1: 85 tests (Features 1-17, 5 tests each)
-  - Tier 2: 30 tests (Areas 1-6)
-  - Tier 3: 8 tests (Pairwise interactions)
-  - Tier 4: 5 scenarios (Dynamic multi-cycle, cold restart, outages, soak)
-- Verified clean architecture separation: `internal/testutil` does not leak into production binaries (`cmd/rl-sync`).
-- Verified idempotency invariants: zero duplicate downloads, zero duplicate uploads.
-- Performed adversarial integrity audit: no hardcoded test outputs, no facade implementations, genuine domain logic.
-- Updated BRIEFING.md.
-- Writing handoff.md report.
+## Status
+COMPLETE
+
+## Steps
+- [x] Initialized DISPATCH.md and updated BRIEFING.md
+- [x] Inspected code under review:
+  - `test/e2e/tier5_dashboard_adversarial_test.go`
+  - `internal/session/`
+  - `internal/storage/`
+  - `internal/daemon/`
+  - `internal/playertrack/` (telemetry decoupling via MatchStateListener)
+- [x] Checked for integrity violations (hardcoded results, dummy/facade implementations, bypassed logic) — Zero violations found
+- [x] Ran test commands:
+  - `go test -v -count=1 ./test/e2e -run TestTier5_Dashboard` — 100% pass across all 6 scenarios
+  - `go test -p 1 -count=1 ./...` — 100% pass across all 14 packages
+  - `go vet ./...` — 100% pass, 0 errors/warnings
+  - `cd web; npm test; npm run build` — 112/112 Vitest pass, bundle built cleanly
+  - Standalone build `rl-sync.exe` (~18.3 MB) — verified `--help` and `--version`
+- [x] Evaluated adversarial resilience, edge cases, parity, and concurrency safety
+- [x] Wrote handoff.md and reported to orchestrator_5

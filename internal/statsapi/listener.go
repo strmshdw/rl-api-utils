@@ -24,12 +24,30 @@ type ListenerConfig struct {
 	ReconnectDelay time.Duration // Reconnection backoff interval (default: 3s)
 }
 
+// PlayerEventHandler receives decoded real-time match and player events from the Stats API Listener.
+type PlayerEventHandler interface {
+	OnUpdateState(ctx context.Context, matchGUID string, playlistID int, players []StatsPlayer) error
+	OnMatchEnded(ctx context.Context, matchGUID string, winnerTeamNum *int) error
+}
+
+// ListenerOption configures Listener behavior.
+type ListenerOption func(*Listener)
+
+// WithPlayerEventHandler sets the PlayerEventHandler callback for the Listener.
+func WithPlayerEventHandler(h PlayerEventHandler) ListenerOption {
+	return func(l *Listener) {
+		l.playerEvents = h
+	}
+}
+
 // Listener connects to Rocket League's local Stats API (MatchStatsExporter_TA),
-// parses real-time match events, and delivers observed match GUIDs to the Tracker.
+// parses real-time match events, delivers observed match GUIDs to the Tracker,
+// and optionally forwards match state updates and outcomes to a PlayerEventHandler.
 type Listener struct {
-	cfg     ListenerConfig
-	tracker *Tracker
-	logger  *slog.Logger
+	cfg          ListenerConfig
+	tracker      *Tracker
+	playerEvents PlayerEventHandler
+	logger       *slog.Logger
 
 	mu        sync.RWMutex
 	running   bool
@@ -38,7 +56,7 @@ type Listener struct {
 }
 
 // NewListener constructs a new Listener instance.
-func NewListener(cfg ListenerConfig, tracker *Tracker, logger *slog.Logger) (*Listener, error) {
+func NewListener(cfg ListenerConfig, tracker *Tracker, logger *slog.Logger, opts ...ListenerOption) (*Listener, error) {
 	if tracker == nil {
 		return nil, errors.New("listener: tracker cannot be nil")
 	}
@@ -55,11 +73,33 @@ func NewListener(cfg ListenerConfig, tracker *Tracker, logger *slog.Logger) (*Li
 		cfg.ReconnectDelay = 3 * time.Second
 	}
 
-	return &Listener{
+	l := &Listener{
 		cfg:     cfg,
 		tracker: tracker,
 		logger:  logger,
-	}, nil
+	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(l)
+		}
+	}
+
+	return l, nil
+}
+
+// SetPlayerEventHandler safely sets or updates the PlayerEventHandler at runtime.
+func (l *Listener) SetPlayerEventHandler(h PlayerEventHandler) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.playerEvents = h
+}
+
+// PlayerEventHandler returns the currently registered PlayerEventHandler, or nil if none is set.
+func (l *Listener) PlayerEventHandler() PlayerEventHandler {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.playerEvents
 }
 
 // Start initiates the background listener loop. It runs until the provided context is canceled.
@@ -232,9 +272,10 @@ func (l *Listener) handleRawMessage(ctx context.Context, data []byte) {
 		return
 	}
 
-	// Rocket League emits "MatchCreated" when joining a match and "MatchEnded" upon finish
-	if msg.Event == "MatchCreated" || msg.Event == "MatchEnded" {
-		guid := strings.TrimSpace(msg.Data.MatchGuid)
+	guid := strings.TrimSpace(msg.Data.MatchGuid)
+
+	switch msg.Event {
+	case "MatchCreated":
 		if guid != "" {
 			l.logger.Info("match event detected via Stats API",
 				slog.String("event", msg.Event),
@@ -243,6 +284,44 @@ func (l *Listener) handleRawMessage(ctx context.Context, data []byte) {
 			if _, _, err := l.tracker.RecordMatch(ctx, guid); err != nil {
 				l.logger.Warn("error recording match in tracker",
 					slog.String("match_guid", guid),
+					slog.Any("error", err),
+				)
+			}
+		}
+
+	case "UpdateState":
+		handler := l.PlayerEventHandler()
+		if handler != nil {
+			playlistID := msg.Data.GetPlaylist()
+			if err := handler.OnUpdateState(ctx, guid, playlistID, msg.Data.Players); err != nil {
+				l.logger.Warn("error handling UpdateState in player tracker",
+					slog.String("match_guid", guid),
+					slog.Int("playlist_id", playlistID),
+					slog.Any("error", err),
+				)
+			}
+		}
+
+	case "MatchEnded":
+		if guid != "" {
+			l.logger.Info("match event detected via Stats API",
+				slog.String("event", msg.Event),
+				slog.String("match_guid", guid),
+			)
+			if _, _, err := l.tracker.RecordMatch(ctx, guid); err != nil {
+				l.logger.Warn("error recording match in tracker",
+					slog.String("match_guid", guid),
+					slog.Any("error", err),
+				)
+			}
+		}
+
+		handler := l.PlayerEventHandler()
+		if handler != nil {
+			if err := handler.OnMatchEnded(ctx, guid, msg.Data.WinnerTeamNum); err != nil {
+				l.logger.Warn("error handling MatchEnded in player tracker",
+					slog.String("match_guid", guid),
+					slog.Any("winner_team", msg.Data.WinnerTeamNum),
 					slog.Any("error", err),
 				)
 			}

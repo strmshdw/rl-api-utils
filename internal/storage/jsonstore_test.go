@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Ensure compile-time interface implementation.
@@ -602,5 +603,592 @@ func TestJSONStore_Close(t *testing.T) {
 	}
 	if _, _, _, err := store.GetAuthState(ctx, "epic"); !errors.Is(err, ErrStoreClosed) {
 		t.Errorf("expected ErrStoreClosed from GetAuthState, got %v", err)
+	}
+}
+
+func TestJSONStore_PlayerUpsertAndGet(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// 1. Get non-existent player
+	_, err = store.GetPlayer(ctx, "non-existent")
+	if !errors.Is(err, ErrPlayerNotFound) {
+		t.Fatalf("expected ErrPlayerNotFound, got %v", err)
+	}
+
+	// 2. Empty or nil inputs
+	if _, err := store.GetPlayer(ctx, ""); !errors.Is(err, ErrPlayerNotFound) {
+		t.Fatalf("expected ErrPlayerNotFound for empty ID, got %v", err)
+	}
+	if err := store.UpsertPlayer(ctx, nil); err == nil {
+		t.Fatal("expected error on nil player, got nil")
+	}
+	if err := store.UpsertPlayer(ctx, &PlayerRecord{}); err == nil {
+		t.Fatal("expected error on empty player_id, got nil")
+	}
+
+	// 3. Upsert new player
+	now := time.Now().UTC().Truncate(time.Second)
+	p := &PlayerRecord{
+		PlayerID:    "Steam|76561198000000001|0",
+		Platform:    "Steam",
+		PlayerName:  "TestPlayer",
+		RanksJSON:   `{"11":{"tier":15,"division":2}}`,
+		FirstSeenAt: now,
+		LastSeenAt:  now,
+	}
+	if err := store.UpsertPlayer(ctx, p); err != nil {
+		t.Fatalf("UpsertPlayer failed: %v", err)
+	}
+
+	// 4. Retrieve and verify
+	got, err := store.GetPlayer(ctx, "Steam|76561198000000001|0")
+	if err != nil {
+		t.Fatalf("GetPlayer failed: %v", err)
+	}
+	if got.PlayerID != p.PlayerID || got.PlayerName != "TestPlayer" || got.Platform != "Steam" || got.RanksJSON != p.RanksJSON {
+		t.Errorf("retrieved player mismatch: %+v", got)
+	}
+	if !got.FirstSeenAt.Equal(now) || !got.LastSeenAt.Equal(now) {
+		t.Errorf("timestamp mismatch: first=%v, last=%v", got.FirstSeenAt, got.LastSeenAt)
+	}
+}
+
+func TestJSONStore_PlayerUpsert_PreservesFields(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	t1 := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
+
+	// Initial upsert with rank
+	p := &PlayerRecord{
+		PlayerID:    "Epic|abc1234|0",
+		Platform:    "Epic",
+		PlayerName:  "OriginalName",
+		RanksJSON:   `{"11":{"tier":16}}`,
+		FirstSeenAt: t1,
+		LastSeenAt:  t1,
+	}
+	_ = store.UpsertPlayer(ctx, p)
+
+	// Re-upsert with new name, empty ranks JSON, and new timestamp
+	t2 := time.Now().UTC().Truncate(time.Second)
+	reUpdate := &PlayerRecord{
+		PlayerID:   "Epic|abc1234|0",
+		Platform:   "EpicNew",
+		PlayerName: "UpdatedName",
+		RanksJSON:  "", // should preserve existing
+		LastSeenAt: t2,
+	}
+	if err := store.UpsertPlayer(ctx, reUpdate); err != nil {
+		t.Fatalf("UpsertPlayer update failed: %v", err)
+	}
+
+	got, _ := store.GetPlayer(ctx, "Epic|abc1234|0")
+	if got.PlayerName != "UpdatedName" {
+		t.Errorf("expected updated name, got %s", got.PlayerName)
+	}
+	if got.Platform != "EpicNew" {
+		t.Errorf("expected updated platform, got %s", got.Platform)
+	}
+	if got.RanksJSON != `{"11":{"tier":16}}` {
+		t.Errorf("ranks_json was overwritten: %s", got.RanksJSON)
+	}
+	if !got.FirstSeenAt.Equal(t1) {
+		t.Errorf("first_seen_at was clobbered: %v", got.FirstSeenAt)
+	}
+	if !got.LastSeenAt.Equal(t2) {
+		t.Errorf("last_seen_at was not updated: %v", got.LastSeenAt)
+	}
+}
+
+func TestJSONStore_UpdatePlayerRanks(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Update non-existent returns ErrPlayerNotFound
+	err = store.UpdatePlayerRanks(ctx, "non-existent", `{"11":{"tier":16}}`)
+	if !errors.Is(err, ErrPlayerNotFound) {
+		t.Fatalf("expected ErrPlayerNotFound, got %v", err)
+	}
+	if err := store.UpdatePlayerRanks(ctx, "", `{"11":{"tier":16}}`); !errors.Is(err, ErrPlayerNotFound) {
+		t.Fatalf("expected ErrPlayerNotFound for empty ID, got %v", err)
+	}
+
+	// Upsert player
+	p := &PlayerRecord{
+		PlayerID:   "Steam|ranktest|0",
+		PlayerName: "RankTest",
+		RanksJSON:  "{}",
+	}
+	_ = store.UpsertPlayer(ctx, p)
+
+	newRanks := `{"11":{"tier":16,"division":4}}`
+	if err := store.UpdatePlayerRanks(ctx, "Steam|ranktest|0", newRanks); err != nil {
+		t.Fatalf("UpdatePlayerRanks failed: %v", err)
+	}
+
+	got, err := store.GetPlayer(ctx, "Steam|ranktest|0")
+	if err != nil {
+		t.Fatalf("GetPlayer failed: %v", err)
+	}
+	if got.RanksJSON != newRanks {
+		t.Errorf("ranks not updated: got %s, want %s", got.RanksJSON, newRanks)
+	}
+
+	// Empty ranks defaults to "{}"
+	if err := store.UpdatePlayerRanks(ctx, "Steam|ranktest|0", ""); err != nil {
+		t.Fatalf("UpdatePlayerRanks empty string failed: %v", err)
+	}
+	got2, _ := store.GetPlayer(ctx, "Steam|ranktest|0")
+	if got2.RanksJSON != "{}" {
+		t.Errorf("expected ranks_json to default to {}, got %s", got2.RanksJSON)
+	}
+}
+
+func TestJSONStore_RecordMatchResults_MatrixAndIdempotency(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	matchGUID := "match-guid-100"
+	playlistID := 11
+
+	outcomes := []PlayerOutcome{
+		{PlayerID: "p1-tm-won", IsTeammate: true, Won: true, PlayerName: "Mate1", Platform: "Steam"},
+		{PlayerID: "p2-tm-lost", IsTeammate: true, Won: false, PlayerName: "Mate2", Platform: "Epic"},
+		{PlayerID: "p3-op-won", IsTeammate: false, Won: true, PlayerName: "Rival1", Platform: "Steam"},
+		{PlayerID: "p4-op-lost", IsTeammate: false, Won: false, PlayerName: "Rival2", Platform: "Epic"},
+	}
+
+	if err := store.RecordMatchResults(ctx, matchGUID, playlistID, outcomes); err != nil {
+		t.Fatalf("RecordMatchResults failed: %v", err)
+	}
+
+	// Verify p1: Teammate won
+	m1, err := store.GetPlayerMatchup(ctx, "p1-tm-won", playlistID)
+	if err != nil || m1.WinsAsTeammate != 1 || m1.LossesAsTeammate != 0 || m1.TotalMatches != 1 {
+		t.Errorf("p1 unexpected matchup: %+v", m1)
+	}
+
+	// Verify p2: Teammate lost
+	m2, _ := store.GetPlayerMatchup(ctx, "p2-tm-lost", playlistID)
+	if m2.LossesAsTeammate != 1 || m2.WinsAsTeammate != 0 || m2.TotalMatches != 1 {
+		t.Errorf("p2 unexpected matchup: %+v", m2)
+	}
+
+	// Verify p3: Opponent won
+	m3, _ := store.GetPlayerMatchup(ctx, "p3-op-won", playlistID)
+	if m3.WinsAsOpponent != 1 || m3.LossesAsOpponent != 0 || m3.TotalMatches != 1 {
+		t.Errorf("p3 unexpected matchup: %+v", m3)
+	}
+
+	// Verify p4: Opponent lost
+	m4, _ := store.GetPlayerMatchup(ctx, "p4-op-lost", playlistID)
+	if m4.LossesAsOpponent != 1 || m4.WinsAsOpponent != 0 || m4.TotalMatches != 1 {
+		t.Errorf("p4 unexpected matchup: %+v", m4)
+	}
+
+	// Verify referential integrity: player records were created
+	p1Rec, err := store.GetPlayer(ctx, "p1-tm-won")
+	if err != nil || p1Rec.PlayerName != "Mate1" || p1Rec.Platform != "Steam" {
+		t.Errorf("player profile not created: %+v", p1Rec)
+	}
+
+	// IDEMPOTENCY TEST: repeat same matchGUID must return ErrMatchAlreadyProcessed
+	errRepeat := store.RecordMatchResults(ctx, matchGUID, playlistID, outcomes)
+	if !errors.Is(errRepeat, ErrMatchAlreadyProcessed) {
+		t.Fatalf("expected ErrMatchAlreadyProcessed on duplicate, got %v", errRepeat)
+	}
+
+	// Verify counters NOT incremented
+	m1After, _ := store.GetPlayerMatchup(ctx, "p1-tm-won", playlistID)
+	if m1After.WinsAsTeammate != 1 || m1After.TotalMatches != 1 {
+		t.Fatalf("idempotency violated: counters incremented on duplicate match!")
+	}
+
+	// Empty matchGUID returns ErrInvalidGUID
+	if err := store.RecordMatchResults(ctx, "", playlistID, outcomes); !errors.Is(err, ErrInvalidGUID) {
+		t.Fatalf("expected ErrInvalidGUID for empty matchGUID, got %v", err)
+	}
+}
+
+func TestJSONStore_GetPlayerMatchup_MissingReturnsZeroed(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Calling for unknown player and unknown playlist returns zeroed record and nil error
+	m, err := store.GetPlayerMatchup(ctx, "unknown-player", 11)
+	if err != nil {
+		t.Fatalf("expected nil error for missing matchup, got %v", err)
+	}
+	if m == nil {
+		t.Fatal("expected non-nil zeroed PlayerMatchup, got nil")
+	}
+	if m.PlayerID != "unknown-player" || m.PlaylistID != 11 || m.TotalMatches != 0 || m.WinsAsTeammate != 0 || m.WinsAsOpponent != 0 {
+		t.Errorf("expected all zeros, got %+v", m)
+	}
+}
+
+func TestJSONStore_GetPlayerMatchups_OrderedByPlaylist(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Record matches in playlists 13, 11, and 10 in disordered sequence
+	_ = store.RecordMatchResults(ctx, "m-1", 13, []PlayerOutcome{{PlayerID: "player-multi", IsTeammate: true, Won: true}})
+	_ = store.RecordMatchResults(ctx, "m-2", 11, []PlayerOutcome{{PlayerID: "player-multi", IsTeammate: true, Won: false}})
+	_ = store.RecordMatchResults(ctx, "m-3", 10, []PlayerOutcome{{PlayerID: "player-multi", IsTeammate: false, Won: true}})
+
+	matchups, err := store.GetPlayerMatchups(ctx, "player-multi")
+	if err != nil {
+		t.Fatalf("GetPlayerMatchups failed: %v", err)
+	}
+	if len(matchups) != 3 {
+		t.Fatalf("expected 3 matchups, got %d", len(matchups))
+	}
+
+	// Must be ordered by playlist_id ASC: 10, 11, 13
+	if matchups[0].PlaylistID != 10 || matchups[1].PlaylistID != 11 || matchups[2].PlaylistID != 13 {
+		t.Errorf("expected ordered [10, 11, 13], got [%d, %d, %d]",
+			matchups[0].PlaylistID, matchups[1].PlaylistID, matchups[2].PlaylistID)
+	}
+
+	// Unknown player returns empty slice
+	emptyMatchups, err := store.GetPlayerMatchups(ctx, "unknown-nobody")
+	if err != nil || len(emptyMatchups) != 0 {
+		t.Errorf("expected empty slice for unknown player, got %v / %v", emptyMatchups, err)
+	}
+}
+
+func TestJSONStore_ListPlayers_PaginationAndSorting(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Insert 5 players with staggered timestamps
+	for i := 0; i < 5; i++ {
+		_ = store.UpsertPlayer(ctx, &PlayerRecord{
+			PlayerID:    fmt.Sprintf("player-%02d", i),
+			PlayerName:  fmt.Sprintf("Name-%d", i),
+			FirstSeenAt: now.Add(time.Duration(i) * time.Minute),
+			LastSeenAt:  now.Add(time.Duration(i) * time.Minute),
+		})
+	}
+
+	// List limit=2, offset=0 -> expect player-04, player-03 (most recent first)
+	page1, err := store.ListPlayers(ctx, 2, 0)
+	if err != nil {
+		t.Fatalf("ListPlayers page 1 failed: %v", err)
+	}
+	if len(page1) != 2 || page1[0].PlayerID != "player-04" || page1[1].PlayerID != "player-03" {
+		t.Errorf("unexpected page 1 items: %+v", page1)
+	}
+
+	// List limit=2, offset=2 -> expect player-02, player-01
+	page2, err := store.ListPlayers(ctx, 2, 2)
+	if err != nil {
+		t.Fatalf("ListPlayers page 2 failed: %v", err)
+	}
+	if len(page2) != 2 || page2[0].PlayerID != "player-02" || page2[1].PlayerID != "player-01" {
+		t.Errorf("unexpected page 2 items: %+v", page2)
+	}
+
+	// List limit=2, offset=4 -> expect player-00
+	page3, err := store.ListPlayers(ctx, 2, 4)
+	if err != nil {
+		t.Fatalf("ListPlayers page 3 failed: %v", err)
+	}
+	if len(page3) != 1 || page3[0].PlayerID != "player-00" {
+		t.Errorf("unexpected page 3 items: %+v", page3)
+	}
+
+	// List offset beyond total -> empty slice
+	emptyPage, err := store.ListPlayers(ctx, 10, 10)
+	if err != nil {
+		t.Fatalf("ListPlayers empty page failed: %v", err)
+	}
+	if len(emptyPage) != 0 {
+		t.Errorf("expected empty slice for offset >= total, got %d items", len(emptyPage))
+	}
+
+	// Tie-breaking: identical timestamps sort by player_id ASC
+	sameTime := now.Add(10 * time.Minute)
+	_ = store.UpsertPlayer(ctx, &PlayerRecord{
+		PlayerID:   "tie-b",
+		PlayerName: "TieB",
+		LastSeenAt: sameTime,
+	})
+	_ = store.UpsertPlayer(ctx, &PlayerRecord{
+		PlayerID:   "tie-a",
+		PlayerName: "TieA",
+		LastSeenAt: sameTime,
+	})
+	tiePage, err := store.ListPlayers(ctx, 2, 0)
+	if err != nil {
+		t.Fatalf("ListPlayers tiePage failed: %v", err)
+	}
+	if len(tiePage) != 2 || tiePage[0].PlayerID != "tie-a" || tiePage[1].PlayerID != "tie-b" {
+		t.Errorf("expected tie-a before tie-b, got %+v", tiePage)
+	}
+}
+
+func TestJSONStore_ListPlayerSummaries_AggregationAndPagination(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Seed 2 matches in different playlists for player-sum
+	_ = store.RecordMatchResults(ctx, "m-s1", 11, []PlayerOutcome{
+		{PlayerID: "player-sum", IsTeammate: true, Won: true},
+	})
+	_ = store.RecordMatchResults(ctx, "m-s2", 13, []PlayerOutcome{
+		{PlayerID: "player-sum", IsTeammate: false, Won: true},
+	})
+
+	summaries, err := store.ListPlayerSummaries(ctx, 10, 0)
+	if err != nil {
+		t.Fatalf("ListPlayerSummaries failed: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+
+	s := summaries[0]
+	if s.PlayerID != "player-sum" {
+		t.Errorf("expected player-sum, got %s", s.PlayerID)
+	}
+	if s.TotalWinsAsTeammate != 1 || s.TotalWinsAsOpponent != 1 || s.TotalMatches != 2 {
+		t.Errorf("unexpected aggregate stats: tmWins=%d, opWins=%d, total=%d",
+			s.TotalWinsAsTeammate, s.TotalWinsAsOpponent, s.TotalMatches)
+	}
+}
+
+func TestJSONStore_DeepCopyDefense_PlayersAndMatchups(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	_ = store.UpsertPlayer(ctx, &PlayerRecord{
+		PlayerID:   "safe-player",
+		PlayerName: "SafeOriginal",
+	})
+	_ = store.RecordMatchResults(ctx, "safe-match", 11, []PlayerOutcome{
+		{PlayerID: "safe-player", IsTeammate: true, Won: true},
+	})
+
+	// 1. Mutate PlayerRecord outside store
+	p, _ := store.GetPlayer(ctx, "safe-player")
+	p.PlayerName = "MutatedHacked"
+
+	pFresh, _ := store.GetPlayer(ctx, "safe-player")
+	if pFresh.PlayerName != "SafeOriginal" {
+		t.Errorf("deep copy failure: internal PlayerRecord mutated to %s", pFresh.PlayerName)
+	}
+
+	// 2. Mutate PlayerMatchup outside store
+	m, _ := store.GetPlayerMatchup(ctx, "safe-player", 11)
+	m.WinsAsTeammate = 9999
+
+	mFresh, _ := store.GetPlayerMatchup(ctx, "safe-player", 11)
+	if mFresh.WinsAsTeammate != 1 {
+		t.Errorf("deep copy failure: internal PlayerMatchup mutated to %d", mFresh.WinsAsTeammate)
+	}
+
+	// 3. Mutate PlayerSummary outside store
+	sums, _ := store.ListPlayerSummaries(ctx, 10, 0)
+	if len(sums) > 0 {
+		sums[0].TotalMatches = 8888
+		sumsFresh, _ := store.ListPlayerSummaries(ctx, 10, 0)
+		if sumsFresh[0].TotalMatches != 1 {
+			t.Errorf("deep copy failure: internal PlayerSummary mutated to %d", sumsFresh[0].TotalMatches)
+		}
+	}
+}
+
+func TestJSONStore_RestartPersistence_PlayerTracking(t *testing.T) {
+	tempDir := t.TempDir()
+	statePath := filepath.Join(tempDir, "persist_state.json")
+
+	store1, err := NewJSONStore(statePath)
+	if err != nil {
+		t.Fatalf("initial NewJSONStore failed: %v", err)
+	}
+
+	ctx := context.Background()
+	_ = store1.UpsertPlayer(ctx, &PlayerRecord{
+		PlayerID:   "persist-p1",
+		PlayerName: "PersistPlayer",
+		Platform:   "Steam",
+		RanksJSON:  `{"11":{"tier":16}}`,
+	})
+	_ = store1.RecordMatchResults(ctx, "persist-match-1", 11, []PlayerOutcome{
+		{PlayerID: "persist-p1", IsTeammate: true, Won: true},
+	})
+	_ = store1.Close()
+
+	// Reopen with fresh instance
+	store2, err := NewJSONStore(statePath)
+	if err != nil {
+		t.Fatalf("reopening NewJSONStore failed: %v", err)
+	}
+	defer store2.Close()
+
+	// Verify player persisted
+	p, err := store2.GetPlayer(ctx, "persist-p1")
+	if err != nil || p.PlayerName != "PersistPlayer" || p.RanksJSON != `{"11":{"tier":16}}` {
+		t.Errorf("player did not persist properly: %+v", p)
+	}
+
+	// Verify matchup persisted
+	m, err := store2.GetPlayerMatchup(ctx, "persist-p1", 11)
+	if err != nil || m.WinsAsTeammate != 1 {
+		t.Errorf("matchup did not persist properly: %+v", m)
+	}
+
+	// Verify idempotency ledger persisted
+	errDuplicate := store2.RecordMatchResults(ctx, "persist-match-1", 11, []PlayerOutcome{
+		{PlayerID: "persist-p1", IsTeammate: true, Won: true},
+	})
+	if !errors.Is(errDuplicate, ErrMatchAlreadyProcessed) {
+		t.Errorf("idempotency ledger was not persisted across restarts: got %v", errDuplicate)
+	}
+}
+
+func TestJSONStore_ConcurrentPlayerOperations_Race(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "state_race.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	const workers = 20
+	var wg sync.WaitGroup
+	errCh := make(chan error, workers*5)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			playerID := fmt.Sprintf("race-json-p-%d", workerID%5)
+			matchGUID := fmt.Sprintf("race-json-m-%d", workerID)
+
+			// 1. Upsert player
+			if err := store.UpsertPlayer(ctx, &PlayerRecord{
+				PlayerID:   playerID,
+				PlayerName: fmt.Sprintf("Name-%d", workerID),
+				Platform:   "Steam",
+			}); err != nil {
+				errCh <- fmt.Errorf("worker %d UpsertPlayer failed: %w", workerID, err)
+				return
+			}
+
+			// 2. Record match results
+			_ = store.RecordMatchResults(ctx, matchGUID, 11, []PlayerOutcome{
+				{PlayerID: playerID, IsTeammate: workerID%2 == 0, Won: workerID%3 == 0},
+			})
+
+			// 3. Update player ranks
+			if err := store.UpdatePlayerRanks(ctx, playerID, `{"11":{"tier":14}}`); err != nil && !errors.Is(err, ErrPlayerNotFound) {
+				errCh <- fmt.Errorf("worker %d UpdatePlayerRanks failed: %w", workerID, err)
+				return
+			}
+
+			// 4. Query player & matchups
+			_, _ = store.GetPlayer(ctx, playerID)
+			_, _ = store.GetPlayerMatchup(ctx, playerID, 11)
+			_, _ = store.ListPlayerSummaries(ctx, 5, 0)
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("race test error: %v", err)
+	}
+}
+
+func TestJSONStore_ClosedStore_PlayerOperations(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewJSONStore(filepath.Join(tempDir, "closed_state.json"))
+	if err != nil {
+		t.Fatalf("NewJSONStore failed: %v", err)
+	}
+	ctx := context.Background()
+	_ = store.Close()
+
+	if err := store.UpsertPlayer(ctx, &PlayerRecord{PlayerID: "p1"}); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("expected ErrStoreClosed from UpsertPlayer, got %v", err)
+	}
+	if _, err := store.GetPlayer(ctx, "p1"); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("expected ErrStoreClosed from GetPlayer, got %v", err)
+	}
+	if _, err := store.ListPlayers(ctx, 10, 0); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("expected ErrStoreClosed from ListPlayers, got %v", err)
+	}
+	if _, err := store.ListPlayerSummaries(ctx, 10, 0); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("expected ErrStoreClosed from ListPlayerSummaries, got %v", err)
+	}
+	if err := store.UpdatePlayerRanks(ctx, "p1", "{}"); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("expected ErrStoreClosed from UpdatePlayerRanks, got %v", err)
+	}
+	if err := store.RecordMatchResults(ctx, "m1", 11, []PlayerOutcome{}); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("expected ErrStoreClosed from RecordMatchResults, got %v", err)
+	}
+	if _, err := store.GetPlayerMatchup(ctx, "p1", 11); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("expected ErrStoreClosed from GetPlayerMatchup, got %v", err)
+	}
+	if _, err := store.GetPlayerMatchups(ctx, "p1"); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("expected ErrStoreClosed from GetPlayerMatchups, got %v", err)
 	}
 }

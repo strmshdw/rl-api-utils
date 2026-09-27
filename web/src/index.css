@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100 min-h-screen font-sans antialiased;
+  }
+}
+
+/* Defer rendering for long lists (Modern Web Guidance) */
+.deferred-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 120px;
+}
+
+/* Hide scrollbars for pill carousels while keeping scrollability */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Transparent OBS streaming overlay mode */
+html.overlay-mode,
+body.overlay-mode,
+body.overlay-mode #root {
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow: hidden !important;
+}

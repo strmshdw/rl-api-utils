@@ -1,171 +1,92 @@
-# Milestone 3 Handoff Report: Ballchasing Replay Uploader
+# Handoff Report: Milestone M3 Implementation (Player Tracker Engine & Lifecycle)
 
-**Agent**: `m3_worker_1` (Implementer / QA / Specialist)  
-**Milestone**: M3 — Ballchasing Replay Uploader (`internal/ballchasing`)  
-**Date**: 2026-09-25T04:10:00Z  
+- **Agent**: `m3_worker_1`
+- **Role**: Implementer / QA / Specialist
+- **Milestone**: M3 (Player Tracker Engine & Lifecycle)
+- **Target Files**:
+  - `internal/playertrack/tracker.go`
+  - `internal/playertrack/tracker_test.go`
+- **Date**: 2026-09-26T01:17:00Z
 
 ---
 
 ## 1. Observation
 
-Direct inspection and execution in the workspace confirmed the following states and outputs:
+### 1.1 Requirements & Upstream Explorer Analysis
+- Upstream Explorers `m3_pt_explorer_1`, `m3_pt_explorer_2`, and `m3_pt_explorer_3` specified the requirements for `playertrack.Tracker`:
+  - Implementation of `statsapi.PlayerEventHandler` (`OnUpdateState` and `OnMatchEnded`).
+  - 4-Tier Local Player Resolution hierarchy (`LocalPlayerID` -> Auth Account ID -> `LocalPlayerName` -> Auth Display Name) with strict bot rejection (`p.IsBot()`).
+  - Teammate vs. Opponent classification (`myTeamNum = localPlayer.TeamNum`).
+  - Profile upsert on `OnUpdateState` with an in-memory frame cache to prevent 120Hz SQLite lock contention.
+  - In-memory current match snapshot (`sync.RWMutex`) with `GetCurrentMatch() *CurrentMatchResponse` returning deep clones.
+  - Asynchronous rank retrieval via `SkillFetcher.GetPlayersSkills` when `AutoFetchRanks` is enabled, debounced via a 4-tier caching architecture (15m in-memory cache, in-flight tracking, 60s failure backoff, matchup cache) and persisted to `store.UpdatePlayerRanks` (with fallback `UpsertPlayer`).
+  - Match outcome compilation on `OnMatchEnded`: `myTeamWon = (*winnerTeamNum == myTeamNum)`, compiles `[]storage.PlayerOutcome` with `outcome.Won = myTeamWon`, calls `store.RecordMatchResults`, idempotent on `storage.ErrMatchAlreadyProcessed`, and gracefully handles nil `winnerTeamNum` and unresolved local player.
+  - Lifecycle cleanup with `Close()`.
 
-### 1.1 Implemented Files
-Under exclusive write ownership, three files were created and verified inside `internal/ballchasing`:
-1. `internal/ballchasing/types.go` (75 lines):
-   - Defined sentinel errors: `ErrInvalidAPIKey`, `ErrRateLimitExhausted`, `ErrBadRequest`, `ErrNotFound`, `ErrServerError`, `ErrEmptyMatchGUID`, `ErrEmptyFilePath`, `ErrEmptyAPIKey`, `ErrEmptyFile`, `ErrFileNotFound`, `ErrInvalidVisibility`.
-   - Defined `Visibility` type alias and constants: `VisibilityPublic = "public"`, `VisibilityUnlisted = "unlisted"`, `VisibilityPrivate = "private"`.
-   - Defined `UploadResult` with `ID string`, `Location string`, `IsDuplicate bool`.
-   - Defined `ReplayUploader` interface with `UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error)` and `Ping(ctx context.Context) error`.
-   - Defined `ClientConfig` and `PingResponse` structs.
-2. `internal/ballchasing/client.go` (474 lines):
-   - Constructors: `NewClient(cfg ClientConfig, opts ...Option) (*Client, error)`, `New(apiKey string, opts ...Option) (*Client, error)`, and `NewHTTPBallchasingUploader(baseURL, apiKey, visibility, group string, maxRetries int) *Client`.
-   - Options: `WithHTTPClient`, `WithBaseURL`, `WithVisibility`, `WithGroup`, `WithMaxRetries`, `WithTimeout`, `WithBaseBackoff`, `WithMaxBackoff`, `WithStreaming`.
-   - Endpoint: `POST <baseURL>/v2/upload?visibility=<vis>&group=<group>`.
-   - Auth header: `req.Header.Set("Authorization", c.apiKey)` sending raw token strictly without `"Bearer "` prefix.
-   - Multipart payload: Single part field named `"file"`, with filename `<matchGUID>.replay`.
-   - Status code handling:
-     - `201 Created`: unmarshals JSON response, returns `&UploadResult{ID, Location, IsDuplicate: false}, nil`.
-     - `409 Conflict`: unmarshals JSON response, returns `&UploadResult{ID, Location, IsDuplicate: true}, nil` without error and without retrying.
-     - `429 Too Many Requests`: parses integer seconds or HTTP-date from `Retry-After` header, falls back to exponential backoff with full jitter, obeys `maxRetries` budget, sleeps with `ctx.Done()` awareness.
-     - `401 Unauthorized`: returns `ErrInvalidAPIKey` immediately (0 retries).
-     - `400 Bad Request`: returns error wrapping `ErrBadRequest` with server response message immediately (0 retries).
-     - `404 Not Found`: returns `ErrNotFound` immediately.
-     - `5xx Server Error`: retries with exponential backoff up to `maxRetries`.
-   - Windows file descriptor safety: In buffered mode, file is closed immediately after reading into memory before HTTP dispatch. In streaming mode, file is closed upon attempt completion via `onceCloser`. Zero file handles are open during backoff sleeps.
-   - `Ping(ctx context.Context) error`: queries `GET /` with raw `Authorization` header; returns `nil` on 200 OK, `ErrInvalidAPIKey` on 401 Unauthorized.
-3. `internal/ballchasing/client_test.go` (606 lines):
-   - 19 comprehensive unit test scenarios covering all status codes, input validations, retry behaviors, zero-RAM streaming, and options.
+### 1.2 Implementation Details
+- `internal/playertrack/tracker.go`:
+  - Defined types: `CurrentMatchResponse`, `LobbyPlayer`, `PlayerStatsSummary`, `ResolvedPlayer`, `PlayerClassification`.
+  - Implemented `DeepClone()` on `CurrentMatchResponse` and `LobbyPlayer` allocating isolated slices, maps, and struct pointers.
+  - Implemented `NewTracker` supporting `(store, rankClient, cfg, authCfg, opts...)`.
+  - Implemented `OnUpdateState` with high-frequency profile upsert throttling (`upsertedProfiles`), 4-tier local player resolution, non-bot filtering, in-flight rank dispatching, and in-flight matchup warming.
+  - Implemented `OnMatchEnded` compiling `[]storage.PlayerOutcome`, filtering bots and self, delegating atomically to `store.RecordMatchResults`, catching `storage.ErrMatchAlreadyProcessed`, and safely handling nil winners and unresolved players.
+  - Implemented `Close()` canceling internal context and waiting on `sync.WaitGroup` to drain all background workers.
 
-### 1.2 Verification Command Results
-Execution of verification commands:
+- `internal/playertrack/tracker_test.go`:
+  - Implemented test doubles: `testSkillFetcher`, `mockAuthProvider`, `mockFaultStore`.
+  - Implemented dual-backend storage parameterization across `SQLiteStore` and `JSONStore`.
+  - Implemented 11 comprehensive test functions with 22 subtests covering all 4 tiers, bot immunity, spectator fallbacks, 120Hz debounce (1,000 frames -> 1 RPC call), error backoffs, fallback upserts, duplicate `MatchEnded` idempotency, nil winners, and concurrent stress testing.
 
-```powershell
-$env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-cd d:\code\rl-api-utils
-go test -v -count=1 ./internal/ballchasing/...
-```
-Output:
-```
-=== RUN   TestClient_Upload_Success201
---- PASS: TestClient_Upload_Success201 (0.01s)
-=== RUN   TestClient_Upload_Duplicate409
---- PASS: TestClient_Upload_Duplicate409 (0.00s)
-=== RUN   TestClient_Upload_RateLimit429_RetrySuccess
---- PASS: TestClient_Upload_RateLimit429_RetrySuccess (2.01s)
-=== RUN   TestClient_Upload_RateLimit429_Exhaustion
---- PASS: TestClient_Upload_RateLimit429_Exhaustion (0.00s)
-=== RUN   TestClient_Upload_Unauthorized401_ImmediateHalt
---- PASS: TestClient_Upload_Unauthorized401_ImmediateHalt (0.01s)
-=== RUN   TestClient_Upload_BearerPrefixRejected
---- PASS: TestClient_Upload_BearerPrefixRejected (0.00s)
-=== RUN   TestClient_Upload_NonExistentFile
---- PASS: TestClient_Upload_NonExistentFile (0.00s)
-=== RUN   TestClient_Upload_EmptyFile0Byte
---- PASS: TestClient_Upload_EmptyFile0Byte (0.00s)
-=== RUN   TestClient_Upload_ContextCancellation
-=== RUN   TestClient_Upload_ContextCancellation/pre-cancelled_context
-=== RUN   TestClient_Upload_ContextCancellation/cancellation_during_rate_limit_backoff
---- PASS: TestClient_Upload_ContextCancellation (0.10s)
-=== RUN   TestClient_Ping
-=== RUN   TestClient_Ping/valid_API_key_returns_200_OK
-=== RUN   TestClient_Ping/invalid_API_key_returns_401_Unauthorized
-=== RUN   TestClient_Ping/Bearer_prefix_returns_401_Unauthorized
-=== RUN   TestClient_Ping/server_error_returns_status_error
---- PASS: TestClient_Ping (0.00s)
-=== RUN   TestClient_Visibility_Propagation
-=== RUN   TestClient_Visibility_Propagation/public
-=== RUN   TestClient_Visibility_Propagation/unlisted
-=== RUN   TestClient_Visibility_Propagation/private
-=== RUN   TestClient_Visibility_Propagation/invalid-vis
---- PASS: TestClient_Visibility_Propagation (0.01s)
-=== RUN   TestClient_Group_Propagation
---- PASS: TestClient_Group_Propagation (0.00s)
-=== RUN   TestClient_InputValidation
-=== RUN   TestClient_InputValidation/empty_API_key_on_client_creation
-=== RUN   TestClient_InputValidation/empty_match_GUID_on_upload
-=== RUN   TestClient_InputValidation/whitespace_match_GUID_on_upload
-=== RUN   TestClient_InputValidation/empty_file_path_on_upload
---- PASS: TestClient_InputValidation (0.00s)
-=== RUN   TestClient_Upload_RetryAfterVariations
-=== RUN   TestClient_Upload_RetryAfterVariations/Retry-After:_0_causes_immediate_retry_without_sleeping
-=== RUN   TestClient_Upload_RetryAfterVariations/HTTP-date_Retry-After_falls_back_to_exponential_backoff
-=== RUN   TestClient_Upload_RetryAfterVariations/malformed_non-numeric_Retry-After_falls_back_to_exponential_backoff
---- PASS: TestClient_Upload_RetryAfterVariations (0.02s)
-=== RUN   TestClient_Upload_Transient5xxRetry
---- PASS: TestClient_Upload_Transient5xxRetry (0.02s)
-=== RUN   TestClient_Upload_BadRequest400_ImmediateHalt
---- PASS: TestClient_Upload_BadRequest400_ImmediateHalt (0.00s)
-=== RUN   TestClient_Upload_LargePayloadStreaming
---- PASS: TestClient_Upload_LargePayloadStreaming (0.03s)
-=== RUN   TestClient_Upload_ConcurrentUploadSafety
---- PASS: TestClient_Upload_ConcurrentUploadSafety (0.01s)
-=== RUN   TestClient_Upload_ZeroRAMStreamingMode
---- PASS: TestClient_Upload_ZeroRAMStreamingMode (0.01s)
-=== RUN   TestClient_OptionsAndConstructors
---- PASS: TestClient_OptionsAndConstructors (0.01s)
-PASS
-ok  	github.com/dank/rl-api-utils/internal/ballchasing	3.179s
-```
-
-```powershell
-go vet ./internal/ballchasing/...
-```
-Output:
-Exit code 0, zero warnings.
-
-```powershell
-go test -count=1 ./...
-```
-Output:
-```
-ok  	github.com/dank/rl-api-utils/internal/auth	0.239s
-ok  	github.com/dank/rl-api-utils/internal/ballchasing	3.312s
-ok  	github.com/dank/rl-api-utils/internal/config	0.604s
-ok  	github.com/dank/rl-api-utils/internal/psynet	4.449s
-ok  	github.com/dank/rl-api-utils/internal/storage	3.295s
-ok  	github.com/dank/rl-api-utils/internal/testutil	1.002s
-ok  	github.com/dank/rl-api-utils/test/e2e	3.785s
-```
+### 1.3 Command Outputs
+- `go build ./cmd/rl-sync`:
+  - Output: Exit code 0 (clean compilation).
+- `go test -v -count=1 ./internal/playertrack/...`:
+  - Output: Exit code 0. All 11 test suites and fuzz tests passed cleanly in 0.767s.
+- `go vet ./...`:
+  - Output: Exit code 0 (zero errors or warnings across entire repository).
+- `go test -count=1 ./...`:
+  - Output:
+    ```
+    ok  	github.com/dank/rl-api-utils/cmd/rl-sync	0.131s
+    ok  	github.com/dank/rl-api-utils/internal/auth	0.134s
+    ok  	github.com/dank/rl-api-utils/internal/ballchasing	7.754s
+    ok  	github.com/dank/rl-api-utils/internal/config	0.430s
+    ok  	github.com/dank/rl-api-utils/internal/daemon	0.650s
+    ok  	github.com/dank/rl-api-utils/internal/playertrack	0.846s
+    ok  	github.com/dank/rl-api-utils/internal/psynet	4.295s
+    ok  	github.com/dank/rl-api-utils/internal/statsapi	0.861s
+    ok  	github.com/dank/rl-api-utils/internal/storage	6.915s
+    ok  	github.com/dank/rl-api-utils/internal/syncer	0.973s
+    ok  	github.com/dank/rl-api-utils/internal/testutil	0.872s
+    ok  	github.com/dank/rl-api-utils/test/e2e	8.664s
+    ```
+    All 12 packages passed with 100% success rate.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Contract Adherence**:
-   - `PROJECT.md` specifies `ReplayUploader` requiring `UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error)`. `Client` satisfies this interface directly.
-   - `DISPATCH.md` required adding `Ping(ctx context.Context) error`, `UploadResult`, `Visibility` types, and sentinel errors. All were placed in `internal/ballchasing/types.go` and implemented in `internal/ballchasing/client.go`.
-2. **Duplicate Deduplication Logic**:
-   - When a replay already exists on Ballchasing.com, HTTP 409 is returned with the existing replay ID and URL. The client parses these and returns `UploadResult{ID: id, Location: loc, IsDuplicate: true}` with `err == nil`. This satisfies idempotency by preventing error propagation or retry thrashing.
-3. **Throttling & Backoff Logic**:
-   - When rate-limited (HTTP 429), `Retry-After` is parsed. If integer seconds, that duration is respected; if HTTP-date within `maxBackoff`, the interval is respected; otherwise, exponential backoff with random jitter `[backoff/2, backoff]` is applied.
-   - Backoff sleeps honor `ctx.Done()`. If the context is cancelled, the method aborts promptly without hanging.
-   - When `attempt >= maxRetries`, the loop halts and returns `ErrRateLimitExhausted`.
-4. **Fatal vs Transient Error Classification**:
-   - HTTP 401 returns `ErrInvalidAPIKey` on attempt 0 (no retries).
-   - HTTP 400 returns `ErrBadRequest` on attempt 0 (no retries).
-   - HTTP 5xx returns `ErrServerError` and retries within the retry budget.
-5. **Windows File Handle Discipline**:
-   - In buffered mode, `os.Open` is deferred closed and read into `bytes.Buffer` before making any HTTP network calls.
-   - In streaming mode, file descriptor lifetime is managed via `onceCloser`, closing immediately when the attempt terminates.
-   - During backoff sleep intervals, no file descriptors remain open, preventing file lock errors on Windows.
+1. **Resolution Hierarchy**: `resolveLocalPlayer` checks Tier 1 (`cfg.LocalPlayerID`), Tier 2 (`authCfg` AccountID / token / storage), Tier 3 (`cfg.LocalPlayerName`), and Tier 4 (`authCfg` DisplayName / token / storage) in descending priority. If any human matches, it immediately returns `ResolvedPlayer` and `p.TeamNum`. Bots (`p.IsBot()`) are rejected upfront in `humanPlayers`, eliminating false matches on bot names or empty IDs.
+2. **Teammate vs. Opponent Classification**: Once `myTeamNum` is determined, each player `p` is classified: if `isLocal` -> `LocalPlayer`; if `p.TeamNum == myTeamNum` -> `Teammate`; if `p.TeamNum != myTeamNum` and `TeamNum` is 0 or 1 -> `Opponent`; otherwise -> `Spectator`. Bots are marked `IsBot: true`.
+3. **120Hz Event Throttling**: `OnUpdateState` is called up to 120 times per second. By checking `upsertedProfiles[p.PrimaryId] == p.Name`, repeat frames do not invoke `store.UpsertPlayer`. Rank fetching similarly checks `rankCache` (15m TTL), `inFlight` set, and `failBackoff` (60s backoff), guaranteeing that 1,000 ticks in a match result in exactly 1 batch RPC query to PsyNet.
+4. **Thread-Safe Snapshot Reads**: `GetCurrentMatch()` acquires `t.mu.RLock()` and invokes `DeepClone()`, creating deep copies of all structs, slices, pointers, and `PlayerRanksSnapshot` maps. Concurrent callers (such as Web API serialization via `json.Marshal`) cannot trigger data races or concurrent map read/write panics against background updates.
+5. **Atomic Match Outcome Compilation**: On `OnMatchEnded`, `myTeamWon = (*winnerTeamNum == myTeamNum)`. The roster is snapshotted under lock, then compiled outside the lock into `[]storage.PlayerOutcome` setting `outcome.Won = myTeamWon` for teammates and opponents. Calling `store.RecordMatchResults` updates `player_matchups` atomically and registers the match GUID in `processed_match_outcomes`. If a duplicate `MatchEnded` arrives, `store.RecordMatchResults` returns `storage.ErrMatchAlreadyProcessed`, which `Tracker` catches and returns `nil`, ensuring strict idempotency.
 
 ---
 
 ## 3. Caveats
 
-1. **Streaming vs Buffered Mode**: Default is buffered mode (`StreamUpload: false`), which is recommended for typical Rocket League replays (<5MB) and guarantees immediate file descriptor release before network I/O. For high-volume or constrained memory environments, `StreamUpload: true` can be enabled via `WithStreaming(true)`. Both modes were verified to pass.
-2. **Strict Raw Authorization**: As required by Ballchasing API and verified by test scenarios, the API key must not have `"Bearer "` prepended. If a user enters `"Bearer <key>"`, the client preserves it verbatim, allowing the Ballchasing API / mock server to reject it with 401.
+1. **Go Race Detector on Windows**: Running `go test -race` on Windows requires a C compiler (`CGO_ENABLED=1`), which is not installed in the Windows environment (`gcc: command not found`). However, the concurrency stress test `TestTracker_RaceStress_120HzUpdates_And_Reads` was executed under the test suite with 6 concurrent writers and 6 concurrent readers across 300 iterations (1,800 operations each) verifying zero panics, atomic counter completion, and valid snapshot serialization.
+2. **Local Web API Wiring**: The HTTP endpoints (`GET /current-match`, `GET /players`, `GET /players/{id}`) are scheduled for Milestone M4 in `internal/daemon/daemon.go`. `Tracker.GetCurrentMatch()` is fully implemented and ready for M4 consumption.
 
 ---
 
 ## 4. Conclusion
 
-Milestone 3 (Ballchasing Replay Uploader) is 100% complete and fully verified:
-- `internal/ballchasing/types.go` implements all required interfaces, types, constants, and sentinel errors.
-- `internal/ballchasing/client.go` implements the upload client, multipart form construction, raw token authorization, 201/409/429/401/400/5xx handling, Windows file descriptor safety, and Ping endpoint.
-- `internal/ballchasing/client_test.go` provides 19 unit test scenarios passing with 100% success against `testutil.MockBallchasingServer`.
-- All verification commands passed with zero errors and zero vet warnings across the entire repository.
+Milestone M3 (Player Tracker Engine & Lifecycle) is completely implemented, verified, and backward-compatible.
+- `internal/playertrack/tracker.go` genuinely implements the 4-tier resolution hierarchy, 120Hz debounce engine, thread-safe deep cloning, and idempotent outcome compilation.
+- `internal/playertrack/tracker_test.go` exercises the full matrix of tiers, dual storage backends (`SQLiteStore` and `JSONStore`), bot exclusions, debounce mechanics, and concurrency stress scenarios.
+- All 12 packages in the repository compile cleanly and pass tests 100%.
 
 ---
 
@@ -173,26 +94,24 @@ Milestone 3 (Ballchasing Replay Uploader) is 100% complete and fully verified:
 
 To independently verify the implementation:
 
-1. **Run Unit Tests for internal/ballchasing**:
+1. **Build Verification**:
    ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/ballchasing/...
+   $env:PATH = "$env:LOCALAPPDATA\Programs\go\bin;$env:PATH"
+   go build ./cmd/rl-sync
    ```
-   *Expected*: 19 tests pass, exit code 0.
-
-2. **Run Static Analysis (go vet)**:
+2. **Playertrack Unit Tests**:
    ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go vet ./internal/ballchasing/...
+   $env:PATH = "$env:LOCALAPPDATA\Programs\go\bin;$env:PATH"
+   go test -v -count=1 ./internal/playertrack/...
    ```
-   *Expected*: Zero warnings, exit code 0.
-
-3. **Run Entire Repository Test Suite**:
+3. **Static Analysis & Linting**:
    ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
+   $env:PATH = "$env:LOCALAPPDATA\Programs\go\bin;$env:PATH"
+   go vet ./...
+   ```
+4. **Full Repository Test Suite**:
+   ```powershell
+   $env:PATH = "$env:LOCALAPPDATA\Programs\go\bin;$env:PATH"
    go test -count=1 ./...
    ```
-   *Expected*: All packages (`auth`, `ballchasing`, `config`, `psynet`, `storage`, `testutil`, `test/e2e`) pass with 100% success.
+   *Expected outcome*: 12/12 packages return `ok` with 0 failures.

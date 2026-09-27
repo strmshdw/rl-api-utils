@@ -1,137 +1,113 @@
-# Milestone 2 (Auth & PsyNet Integration) Implementation Handoff Report
+# Milestone 2 Handoff Report: Polling Auth & PsyNet Rank Client Implementation
 
-- **Author**: `m2_worker_1` (Roles: implementer, qa, specialist)
-- **Date**: 2026-09-24T20:52:00Z
-- **Target Subsystems**: `internal/auth`, `internal/psynet`, `internal/testutil/mock_psynet.go`, `go.mod`
-- **Status**: COMPLETE (100% Passing Tests, 0 `go vet` Warnings)
-- **Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1`
+**Agent**: `m2_worker_1`  
+**Date**: 2026-09-26T01:00:00Z  
+**Target Milestone**: M2 (Polling Auth & PsyNet Rank Client)  
+**Parent Agent**: `parent` (`b82f99b4-2b9f-46d1-8c45-738eb9e9a7b1`)
 
 ---
 
 ## 1. Observation
 
-Direct inspection of requirements, dependencies, existing code, and execution outputs revealed the following facts:
-
-1. **Interface & Architectural Contracts**:
-   - `ORIGINAL_REQUEST.md` lines 25–30 (R4) and lines 16–18 (R1): Requires Epic Games auth (code and refresh token exchange) and Steam auth (session ticket exchange and SteamID64 validation); periodic polling of match history; download of `.replay` files to local storage.
-   - `PROJECT.md` lines 140–165: Specifies the domain interfaces:
-     ```go
-     type DiscoveredMatch struct {
-         MatchGUID            string
-         RecordStartTimestamp int64
-         MapName              string
-         Playlist             int
-         ReplayURL            string
-     }
-     type MatchHistoryProvider interface {
-         GetRecentMatches(ctx context.Context) ([]DiscoveredMatch, error)
-         Close() error
-     }
-     type ReplayDownloader interface {
-         DownloadReplay(ctx context.Context, matchGUID, replayURL, destDir string) (localPath string, err error)
-     }
-     ```
-   - `internal/storage/store.go` lines 100–103: `SaveAuthState` and `GetAuthState` interfaces for persistent credentials storage.
-
-2. **Upstream SDK Behavior (`github.com/dank/rlapi`)**:
-   - `EGS` (`github.com/dank/rlapi`): Methods `AuthenticateWithCode`, `AuthenticateWithRefreshToken`, `GetExchangeCode`, `ExchangeEOSToken`, `ExchangeEOSTokenFromSteam`, and `RefreshEOSToken`.
-   - `PsyNet` (`github.com/dank/rlapi`): `AuthPlayer(authToken, accountID, accountName)` and `AuthPlayerSteam(authToken, epicAccountID, steamAccountID, accountName)` establish authenticated WebSocket RPC connection (`*PsyNetRPC`).
-   - `rlapi.postJSON`: Expects responses to contain `{"Result": {...}}`. In `internal/testutil/mock_psynet.go:212`, `handleAuthPlayer` originally emitted unnested JSON. Wrapping the response with `"Result": resp` alongside top-level keys maintains dual compatibility with both `rlapi` and direct mock unit tests.
-
-3. **Windows File System Semantics**:
-   - `os.Rename` on Windows returns `ERROR_SHARING_VIOLATION` if the file descriptor is still open. Thus `tmpFile.Sync()` and `tmpFile.Close()` must strictly precede `os.Rename`.
-   - Transient file locks by Windows Defender or search indexers necessitate a retry loop with linear backoff (5 attempts).
-   - Staging the `.tmp` file in the same directory (`destDir`) avoids cross-volume `EXDEV` link errors.
-
-4. **Test Suite Verification Results**:
-   - `go test -v -count=1 ./internal/auth/...`: 13 unit tests passed in 0.086s.
-   - `go test -v -count=1 ./internal/psynet/...`: 20 unit tests passed in 0.793s.
-   - `go test -v -count=1 ./internal/testutil/...`: 3 unit tests passed in 0.929s.
-   - `go test -count=1 ./...`: All packages passed 100%.
-   - `go vet ./internal/auth/... ./internal/psynet/...`: Completed with 0 warnings or errors.
+1. **Baseline Invariants & Integrity**:
+   - Initial repository test run via `go test -count=1 ./...` passed across all packages (`cmd/rl-sync`, `internal/auth`, `internal/ballchasing`, `internal/config`, `internal/daemon`, `internal/psynet`, `internal/statsapi`, `internal/storage`, `internal/syncer`, `internal/testutil`, `test/e2e`).
+   - Prior to M2, `internal/playertrack` did not exist.
+2. **StateStore Persistence & Collision Hazards**:
+   - Direct inspection of `internal/auth/epic.go` and `internal/auth/steam.go` revealed that `SaveAuthState(ctx, "epic", ...)` and `SaveAuthState(ctx, "steam", ...)` use static provider keys (`"epic"` / `"steam"`).
+   - If an AuthProvider configured with `polling_auth` were given the shared `storage.StateStore`, any token refresh or session renewal on the secondary polling account would overwrite the primary player's stored tokens in SQLite and JSONStore (`ON CONFLICT(provider) DO UPDATE SET...`).
+   - PsyNet enforces strict session exclusivity per account ID. Authenticating to PsyNet using the active game account results in immediate game termination with `Error 67 ("Connection to server timed out")`, inflicting matchmaking bans and MMR penalties.
+3. **PsyNet Skills RPC Capabilities**:
+   - In `github.com/dank/rlapi v0.1.26` (`C:\Users\strms\go\pkg\mod\github.com\dank\rlapi@v0.1.26\skills.go` lines 113–124):
+     `func (p *PsyNetRPC) GetPlayersSkills(ctx context.Context, playerIDs []PlayerID) ([]PlayerWithSkills, error)`
+     sends synchronous `Skills/GetPlayersSkills v1` requests over WebSocket and returns `[]PlayerWithSkills`.
+   - In `psynetrpc.go`: `*rlapi.PsyNetRPC` provides `IsConnected() bool` and `Close() error`.
+4. **Canonical Ranks & Formatting**:
+   - PsyNet uses 23 0-indexed tiers (0 to 22) and 4 0-indexed divisions (0 to 3).
+   - Tier 0 is `Unranked` and Tier 22 is `Supersonic Legend`. Neither displays a division under official Rocket League taxonomy.
+   - Tiers 1–21 display `<TierName> Division <I|II|III|IV>`.
+   - In standard 0-indexed PsyNet tiers, Tier 16 is Champion I and Tier 17 is Champion II.
+5. **Modified and Created Source Code**:
+   - `internal/config/config.go`: Added `PollingAuthConfig` (with `ToAuthConfig()`), `PlayerTrackingConfig`, root `Config` fields, `CLIFlags` fields, defaults in `NewDefaultConfig()`, environment variable overrides (`RL_SYNC_POLLING_*`, `RL_SYNC_PLAYER_TRACKING_*`, `RL_SYNC_LOCAL_*`), aliases, and anti-collision validation in `Validate()`.
+   - `internal/config/config_test.go`: Added 9 unit test suites covering defaults, YAML/JSON loading, env overrides, aliases, validation, anti-collision Error 67 guard, and CLI flags.
+   - `internal/auth/provider.go`: Implemented `NewPollingProvider(cfg config.PollingAuthConfig, opts ...Option)` enforcing `store = nil` for strictly in-memory token lifecycle.
+   - `internal/auth/auth_test.go`: Added `TestNewPollingProvider` testing disabled and enabled epic/steam polling providers.
+   - `internal/playertrack/rank_client.go`: Implemented `SkillFetcher`, `SkillRPCClient`, `SkillRPCFactory`, `PsyNetRankClient` (with transparent reconnect and single retry), `NoOpRankClient`, `CheckCredentialCollision`, `FormatRank` (canonical 23 tiers & 4 divisions, Unranked & SSL division suppression), `FormatPlaylist`, `SerializeRanksJSON`, `ParseRanksJSON`, and `MockSkillFetcher`.
+   - `internal/playertrack/rank_client_test.go`: Implemented 20 unit test suites covering all tiers, divisions, Unranked/SSL suppression, out-of-bounds, playlist mapping, serialization roundtrip, mock fetcher, offline degradation, reconnect, concurrency, and auth supplier.
+   - `configs/config.example.yaml`: Added `polling_auth` and `player_tracking` configuration templates.
 
 ---
 
 ## 2. Logic Chain
 
-From the observations above, the implementation decisions were derived step-by-step:
-
-1. **`internal/auth` Implementation**:
-   - `provider.go`: Defines `TokenInfo` (with thread-safe helper `IsExpired()` using a 30s buffer), `AuthProvider` interface, `EGSClient` interface (matched by `*rlapi.EGS`), and constructor `NewProvider` which dispatches to Epic or Steam providers based on `cfg.Provider`.
-   - `epic.go`: Implements `EpicAuthProvider`. Authenticates via refresh token or auth code; falls back to `StateStore.GetAuthState` if no tokens are configured; exchanges for EOS token; persists newest refresh token via `StateStore.SaveAuthState`; protects in-memory `TokenInfo` with `sync.RWMutex`.
-   - `steam.go`: Implements `SteamAuthProvider`. Validates SteamID64 (strictly 17 digits starting with `7656119`); exchanges Steam session ticket for EOS token via `ExchangeEOSTokenFromSteam`; records state to `StateStore`; supports EOS token refresh or returns a descriptive error when session ticket renewal is required.
-   - `auth_test.go`: 13 comprehensive unit tests exercising successful auth with refresh token/code/store restore, error conditions (OAuth failure, exchange rate limit, context cancellation), Steam ticket validation, and token expiry calculations without network dependencies.
-
-2. **`internal/psynet` Implementation**:
-   - `client.go`: Implements `MatchHistoryProvider`. Encapsulates `RPCClient` (`*rlapi.PsyNetRPC`). Manages connection lifecycle; provides auto-reconnect and single-retry upon in-flight network drops; maps matches preserving empty `ReplayURL` so syncer can handle delayed replay URL arrivals across polling cycles; filters out empty/malformed `MatchGUID`s; ensures thread-safe and idempotent `Close()`.
-   - `client_test.go`: 8 unit tests covering normal retrieval, delayed replay URL arrival across cycles, malformed GUID skipping, transparent in-flight reconnect, context cancellation, idempotent close, Steam credentials validation, and end-to-end wire protocol against `MockPsyNetServer`.
-   - `downloader.go`: Implements `ReplayDownloader`. Enforces strict parameter validation (empty GUID/URL, path traversal prevention); creates `destDir` if missing; streams GET payload to `.tmp` file directly inside `destDir`; validates minimum size (>=1024 bytes); flushes via `Sync()`; explicitly closes handle before Windows atomic rename; applies 5-attempt retry loop with linear backoff; guarantees deferred cleanup of `.tmp` file on any failure or cancellation; provides `CleanupStaleTempFiles`.
-   - `downloader_test.go`: 12 unit tests covering successful download with TAGAME verification, auto-creation of nested directories, input validation, 1KB rejection, 1024-byte boundary, HTTP status errors (403, 404, 410, 500, 503), mid-stream connection drops, context cancellation, atomic overwrite, custom headers/buffers, concurrent downloads, and stale temp file cleanup.
-
-3. **Compatibility Update in `internal/testutil/mock_psynet.go`**:
-   - Updated `handleAuthPlayer` to encode `{"Result": resp, "SessionID": ..., ...}` ensuring `rlapi.postJSON` receives the `"Result"` wrapper while preserving existing flat fields for other tests.
-
-4. **Dependency Resolution**:
-   - Added `github.com/dank/rlapi` v0.1.26 and `github.com/gorilla/websocket` v1.5.3 to `go.mod` and ran `go mod tidy`.
+1. **StateStore Isolation**:
+   - Because `auth.NewProvider` accepts `storage.StateStore` and invokes `p.store.SaveAuthState(ctx, "epic", ...)` on token refresh (Observation 2), passing `nil` to `NewProvider` inside `NewPollingProvider` guarantees that secondary polling credentials remain strictly in-memory.
+   - This ensures that token rotation on the secondary account will never overwrite or corrupt the primary playing account's saved tokens in SQLite or JSONStore.
+2. **Error 67 Prevention**:
+   - To guard against PsyNet Error 67 session exclusivity kicks (Observation 2), `Validate()` in `internal/config/config.go` and `CheckCredentialCollision` in `internal/playertrack/rank_client.go` compare primary vs. polling credentials.
+   - If both accounts use the same provider and matching credentials (`account_id`, `refresh_token`, `auth_code`, `session_ticket`, or `steam_id_64`), `Validate()` returns a configuration error, and `NewRankClient` gracefully falls back to `NoOpRankClient`, ensuring the daemon never connects with colliding credentials.
+3. **Decoupled Graceful Offline Degradation**:
+   - If `polling_auth` is disabled (`enabled: false`), unconfigured, or fails to authenticate, `NewRankClient` returns `NoOpRankClient` without returning a fatal error.
+   - Downstream subsystems (e.g. `Tracker` in M3 and Web API in M4) invoke `GetPlayersSkills(ctx, playerIDs)`, which returns `(nil, nil)` immediately with zero latency and zero network overhead. Player matchup tracking continues operating normally based on local Stats API telemetry.
+4. **Canonical Ranking & Deserialization Parity**:
+   - `FormatRank` handles all 23 tiers (0–22) and 4 divisions (0–3) per official PsyNet taxonomy (Observation 4), suppressing division text on Unranked (0) and Supersonic Legend (22), and handling invalid divisions or out-of-bounds tiers gracefully.
+   - `SerializeRanksJSON` outputs standard JSON maps keyed by string playlist ID, and outputs `"{}"` when empty/nil.
+   - `ParseRanksJSON` safely parses `"{}"` or empty strings into an empty non-nil `PlayerRanksSnapshot` and backfills legacy or partial payloads.
 
 ---
 
 ## 3. Caveats
 
-1. **Steam Ticket Lifetime**:
-   - Steam session tickets are ephemeral and cannot be refreshed by OAuth grant without an active Steam client. When a ticket expires and has no EOS refresh grant, `SteamAuthProvider.Refresh` returns `ErrRefreshFailed` with an explicit message that a fresh ticket is required.
-2. **Replay Payload Validation**:
-   - `ReplayDownloader` validates size (>=1KB) and non-empty content. Full binary AST decoding of Unreal Engine structures is intentionally delegated to Ballchasing.com.
-3. **No Unrelated Refactoring**:
-   - All edits were strictly constrained to the assigned files within exclusive write ownership.
+- Live WebSocket connections to production PsyNet (`api.rlpp.psynet.gg`) require real Epic or Steam accounts; automated test execution exercises the complete RPC query, auto-reconnect, and error-handling code paths using `SkillRPCFactory` and test doubles without requiring live credentials.
+- No other caveats.
 
 ---
 
 ## 4. Conclusion
 
-Milestone 2 (Auth & PsyNet Integration) is completely implemented, verified, and adheres to Clean Architecture:
-- `internal/auth`: Full dual provider implementation (Epic Games and Steam) with `StateStore` persistence and EGS mockability.
-- `internal/psynet`: Full PsyNet client with auto-reconnect, delayed replay URL handling, and atomic `.tmp` disk streaming replay downloader.
-- `internal/testutil/mock_psynet.go`: Dual compatibility update.
-- `go.mod` & `go.sum`: Dependencies tidied and validated.
-- 100% of unit tests pass with zero `go vet` warnings across all affected packages.
+Milestone 2 objectives are 100% completed and fully verified:
+- `internal/config` provides `PollingAuthConfig`, `PlayerTrackingConfig`, env variable overrides, aliases, and static anti-collision protection.
+- `internal/auth` provides `NewPollingProvider` with guaranteed in-memory state isolation.
+- `internal/playertrack` provides `SkillFetcher`, `PsyNetRankClient`, `NoOpRankClient`, canonical 23-tier & 4-division rank formatting (`FormatRank`), playlist mapping (`FormatPlaylist`), and `ranks_json` serialization (`SerializeRanksJSON`, `ParseRanksJSON`).
+- All 12 packages in the repository compile cleanly and pass 100% of all unit and integration tests with zero `go vet` warnings.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify the implementation:
+To independently verify the implementation, execute the following commands in `d:\code\rl-api-utils`:
 
-1. **Run Unit Tests for Milestone 2 Packages**:
+1. **Compile Application**:
    ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/auth/...
-   go test -v -count=1 ./internal/psynet/...
-   go test -v -count=1 ./internal/testutil/...
+   go build ./cmd/rl-sync
    ```
-   *Expected Result*: All 13 tests in `internal/auth`, 20 tests in `internal/psynet`, and 3 tests in `internal/testutil` pass cleanly.
+   *Expected*: Exits with code 0 and zero errors.
 
-2. **Run Full Workspace Test Suite**:
+2. **Run Config Package Tests**:
    ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
+   go test -v -count=1 ./internal/config/...
+   ```
+   *Expected*: All tests pass (including `TestConfig_Defaults_PlayerTrackingAndPollingAuth`, `TestConfig_PollingAuth_YAMLAndJSON`, `TestConfig_PollingAuth_EnvOverrides`, `TestConfig_DuplicateCredentials_Error67Prevention`, `TestConfig_CLIOverrides_PollingAndPlayerTracking`).
+
+3. **Run Auth Package Tests**:
+   ```powershell
+   go test -v -count=1 ./internal/auth/...
+   ```
+   *Expected*: All tests pass (including `TestNewPollingProvider`).
+
+4. **Run PlayerTrack Package Tests**:
+   ```powershell
+   go test -v -count=1 ./internal/playertrack/...
+   ```
+   *Expected*: All 20 tests pass (including `TestFormatRank_All23Tiers`, `TestFormatRank_UnrankedEdgeCases`, `TestFormatRank_SSLEdgeCases`, `TestFormatPlaylist_CanonicalPlaylists`, `TestSerializeRanksJSON_ValidSkills`, `TestParseRanksJSON_RoundTrip`, `TestParseRanksJSON_LegacyOrPartialJSON`, `TestPsyNetRankClient_TransparentReconnectOnDrop`, `TestPsyNetRankClient_Concurrency`, `TestNewRankClient_Factory`).
+
+5. **Run Full Test Suite Across All Packages**:
+   ```powershell
    go test -count=1 ./...
    ```
-   *Expected Result*: Exit code 0, all packages report `ok`.
+   *Expected*: 100% pass across all 12 packages.
 
-3. **Run Static Analysis (go vet)**:
+6. **Run Go Vet**:
    ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go vet ./internal/auth/... ./internal/psynet/...
+   go vet ./...
    ```
-   *Expected Result*: Exit code 0 with zero warnings.
-
-4. **Verify Test Coverage**:
-   ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -cover ./internal/auth/... ./internal/psynet/...
-   ```
-   *Expected Result*: `internal/auth` ~77.0%, `internal/psynet` ~75.8% coverage.
+   *Expected*: Exits with code 0 and zero warnings.

@@ -8,12 +8,14 @@ auth:
   provider: "epic" # Override with RL_SYNC_AUTH_PROVIDER
 
   # Epic Games Authentication
-  # Required if provider is "epic". Provide either refresh_token OR auth_code.
+  # Leaving refresh_token and auth_code empty will trigger an interactive login flow
+  # displaying the Epic Games login URL and prompting for an authorization code.
+  # The resulting refresh_token will be automatically saved back to this config file.
   epic:
-    # Long-term OAuth refresh token (recommended for daemon mode)
-    refresh_token: "your-epic-refresh-token" # Override with RL_SYNC_EPIC_REFRESH_TOKEN
+    # Long-term OAuth refresh token (auto-saved after interactive login)
+    refresh_token: ""                       # Override with RL_SYNC_EPIC_REFRESH_TOKEN
     
-    # One-time login exchange code (used for initial bootstrap)
+    # One-time login exchange code (optional bootstrap code)
     auth_code: ""                           # Override with RL_SYNC_EPIC_AUTH_CODE
     
     # Optional account identifiers
@@ -21,15 +23,23 @@ auth:
     display_name: ""                        # Override with RL_SYNC_EPIC_DISPLAY_NAME
 
   # Steam Authentication
-  # Required if provider is "steam". Both session_ticket and steam_id_64 are required.
+  # You can either provide 'username' and 'password' for automated ticket generation,
+  # or manually supply a pre-generated 'session_ticket' and 'steam_id_64'.
+  # When username/password are used, a persistent 'login_key' will be automatically
+  # generated and saved to this file, enabling silent background reauth without 2FA.
   steam:
-    # Hex-encoded Steam session ticket obtained from Steamworks API
+    # Steam credentials for automated ticket generation & reauth
+    username: ""                            # Override with RL_SYNC_STEAM_USERNAME
+    password: ""                            # Override with RL_SYNC_STEAM_PASSWORD
+    login_key: ""                           # Auto-saved login key for silent background reauth
+    
+    # Pre-generated hex session ticket (auto-populated by automated generator)
     session_ticket: ""                      # Override with RL_SYNC_STEAM_SESSION_TICKET
     
-    # 64-bit Steam ID (e.g. 76561198000000000)
+    # 64-bit Steam ID (e.g. 76561198000000000; auto-discovered by generator)
     steam_id_64: ""                         # Override with RL_SYNC_STEAM_ID_64
     
-    # Optional Steam account username
+    # Optional Steam account display name
     account_name: ""                        # Override with RL_SYNC_STEAM_ACCOUNT_NAME
 
 # Ballchasing.com Upload Settings
@@ -71,6 +81,56 @@ sync:
   
   # Once mode: run exactly one polling pass and then terminate
   once: false                              # Override with RL_SYNC_ONCE or --once
+
+# ==============================================================================
+# Secondary Polling Account Settings (PsyNet Rank Retrieval)
+# ==============================================================================
+# To avoid Error 67 duplicate login kicks on your primary account, configure a
+# secondary non-playing account to fetch competitive ranks and MMR out-of-band.
+# Prompts for this account are clearly labeled [Secondary Polling Account].
+polling_auth:
+  # Enable secondary polling authentication for rank retrieval
+  enabled: false                           # Override with RL_SYNC_POLLING_AUTH_ENABLED
+
+  # Polling auth provider: "epic" or "steam"
+  provider: "epic"                         # Override with RL_SYNC_POLLING_AUTH_PROVIDER
+
+  # Secondary Epic Games Account (must differ from primary auth)
+  # Leaving refresh_token empty will trigger an interactive prompt for the polling account.
+  epic:
+    refresh_token: ""                      # Override with RL_SYNC_POLLING_EPIC_REFRESH_TOKEN
+    auth_code: ""                          # Override with RL_SYNC_POLLING_EPIC_AUTH_CODE or RL_SYNC_POLLING_EPIC_AUTHORIZATION_CODE
+    account_id: ""                         # Override with RL_SYNC_POLLING_EPIC_ACCOUNT_ID
+    display_name: ""                       # Override with RL_SYNC_POLLING_EPIC_DISPLAY_NAME
+
+  # Secondary Steam Account (must differ from primary auth)
+  # Supports username and password for automated ticket generation & silent reauth.
+  steam:
+    username: ""                           # Override with RL_SYNC_POLLING_STEAM_USERNAME
+    password: ""                           # Override with RL_SYNC_POLLING_STEAM_PASSWORD
+    login_key: ""                          # Auto-saved login key for silent background reauth
+    session_ticket: ""                     # Override with RL_SYNC_POLLING_STEAM_SESSION_TICKET
+    steam_id_64: ""                        # Override with RL_SYNC_POLLING_STEAM_ID_64
+    account_name: ""                       # Override with RL_SYNC_POLLING_STEAM_ACCOUNT_NAME
+
+# ==============================================================================
+# Player Tracking & Matchup Analytics Settings
+# ==============================================================================
+# Monitors teammates and opponents in matches, records win/loss records per playlist,
+# and automatically fetches live competitive ranks for lobby players.
+player_tracking:
+  # Enable player tracking subsystem
+  enabled: true                            # Override with RL_SYNC_PLAYER_TRACKING_ENABLED
+
+  # Explicit local player identifier (e.g. "Epic|<account_id>|0" or "Steam|<steam_id_64>|0").
+  # If empty, automatically resolved from primary auth account credentials.
+  local_player_id: ""                      # Override with RL_SYNC_LOCAL_PLAYER_ID or RL_SYNC_PLAYER_TRACKING_LOCAL_PLAYER_ID
+
+  # Optional local player display name override.
+  local_player_name: ""                    # Override with RL_SYNC_LOCAL_PLAYER_NAME or RL_SYNC_PLAYER_TRACKING_LOCAL_PLAYER_NAME
+
+  # Automatically trigger PsyNet rank queries for players when entering a match lobby
+  auto_fetch_ranks: true                   # Override with RL_SYNC_AUTO_FETCH_RANKS or RL_SYNC_PLAYER_TRACKING_AUTO_FETCH_RANKS
 
 # Rocket League Local Stats API (MatchStatsExporter_TA) Settings
 # The game client can broadcast match events locally without using PsyNet auth tokens,

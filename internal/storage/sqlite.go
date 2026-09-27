@@ -44,6 +44,44 @@ CREATE TABLE IF NOT EXISTS auth_state (
     display_name TEXT NOT NULL DEFAULT '',
     updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS players (
+    player_id TEXT PRIMARY KEY,
+    platform TEXT NOT NULL DEFAULT '',
+    player_name TEXT NOT NULL DEFAULT '',
+    player_name_lower TEXT NOT NULL DEFAULT '',
+    ranks_json TEXT NOT NULL DEFAULT '{}',
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_players_last_seen ON players(last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_players_name ON players(player_name);
+CREATE INDEX IF NOT EXISTS idx_players_name_lower ON players(player_name_lower);
+CREATE INDEX IF NOT EXISTS idx_players_platform ON players(platform);
+
+CREATE TABLE IF NOT EXISTS player_matchups (
+    player_id TEXT NOT NULL,
+    playlist_id INTEGER NOT NULL,
+    wins_as_teammate INTEGER NOT NULL DEFAULT 0,
+    losses_as_teammate INTEGER NOT NULL DEFAULT 0,
+    wins_as_opponent INTEGER NOT NULL DEFAULT 0,
+    losses_as_opponent INTEGER NOT NULL DEFAULT 0,
+    total_matches INTEGER NOT NULL DEFAULT 0,
+    last_played_at INTEGER NOT NULL,
+    PRIMARY KEY (player_id, playlist_id),
+    FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_player_matchups_player ON player_matchups(player_id);
+
+CREATE TABLE IF NOT EXISTS processed_match_outcomes (
+    match_guid TEXT PRIMARY KEY,
+    playlist_id INTEGER NOT NULL DEFAULT 0,
+    processed_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_processed_matches_ts ON processed_match_outcomes(processed_at DESC);
 `
 
 // SQLiteStore implements StateStore backed by pure Go modernc.org/sqlite.
@@ -105,6 +143,12 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		}
 	}
 
+	// Run table migration before schemaDDL to guarantee player_name_lower exists before index creation
+	if err := migratePlayersTable(ctx, db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to migrate schema: %w", err)
+	}
+
 	// Execute schema migrations
 	if _, err := db.ExecContext(ctx, schemaDDL); err != nil {
 		db.Close()
@@ -115,6 +159,93 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		db:     db,
 		dbPath: dbPath,
 	}, nil
+}
+
+// migratePlayersTable ensures the players table has player_name_lower column and backfills existing rows.
+func migratePlayersTable(ctx context.Context, db *sql.DB) error {
+	var tableCount int
+	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='players';").Scan(&tableCount)
+	if err != nil {
+		return fmt.Errorf("failed to check players table existence: %w", err)
+	}
+	if tableCount == 0 {
+		return nil
+	}
+
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(players);")
+	if err != nil {
+		return fmt.Errorf("failed to read table_info: %w", err)
+	}
+	defer rows.Close()
+
+	hasCol := false
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, colType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("failed to scan table_info row: %w", err)
+		}
+		if strings.EqualFold(name, "player_name_lower") {
+			hasCol = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("table_info iteration error: %w", err)
+	}
+
+	if !hasCol {
+		alterSQL := `ALTER TABLE players ADD COLUMN player_name_lower TEXT NOT NULL DEFAULT '';`
+		if _, err := db.ExecContext(ctx, alterSQL); err != nil {
+			return fmt.Errorf("failed to alter table players: %w", err)
+		}
+
+		selectSQL := `SELECT player_id, player_name FROM players WHERE player_name != '';`
+		pRows, err := db.QueryContext(ctx, selectSQL)
+		if err != nil {
+			return fmt.Errorf("failed to select players for backfill: %w", err)
+		}
+		type playerEntry struct {
+			id   string
+			name string
+		}
+		var toUpdate []playerEntry
+		for pRows.Next() {
+			var pe playerEntry
+			if err := pRows.Scan(&pe.id, &pe.name); err != nil {
+				pRows.Close()
+				return fmt.Errorf("failed to scan player for backfill: %w", err)
+			}
+			toUpdate = append(toUpdate, pe)
+		}
+		pRows.Close()
+
+		if len(toUpdate) > 0 {
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("failed to begin backfill tx: %w", err)
+			}
+			defer tx.Rollback()
+
+			stmt, err := tx.PrepareContext(ctx, "UPDATE players SET player_name_lower = ? WHERE player_id = ?;")
+			if err != nil {
+				return fmt.Errorf("failed to prepare backfill stmt: %w", err)
+			}
+			defer stmt.Close()
+
+			for _, pe := range toUpdate {
+				if _, err := stmt.ExecContext(ctx, strings.ToLower(pe.name), pe.id); err != nil {
+					return fmt.Errorf("failed to backfill player %s: %w", pe.id, err)
+				}
+			}
+
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("failed to commit backfill tx: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 // GetMatch retrieves a single match record by GUID.
@@ -523,4 +654,614 @@ func checkRowsAffected(res sql.Result) error {
 		return ErrMatchNotFound
 	}
 	return nil
+}
+
+// UpsertPlayer inserts a new player or updates an existing player's platform, name, and last_seen_at.
+// Preserves first_seen_at and existing ranks_json on update.
+func (s *SQLiteStore) UpsertPlayer(ctx context.Context, player *PlayerRecord) error {
+	if player == nil {
+		return errors.New("player cannot be nil")
+	}
+	if strings.TrimSpace(player.PlayerID) == "" {
+		return errors.New("player_id cannot be empty")
+	}
+
+	now := time.Now().UTC()
+	firstSeenEpoch := player.FirstSeenAt.Unix()
+	if firstSeenEpoch <= 0 {
+		firstSeenEpoch = now.Unix()
+	}
+	lastSeenEpoch := player.LastSeenAt.Unix()
+	if lastSeenEpoch <= 0 {
+		lastSeenEpoch = now.Unix()
+	}
+
+	ranksJSON := player.RanksJSON
+	if strings.TrimSpace(ranksJSON) == "" {
+		ranksJSON = "{}"
+	}
+
+	playerNameLower := strings.ToLower(player.PlayerName)
+
+	const query = `
+	INSERT INTO players (player_id, platform, player_name, player_name_lower, ranks_json, first_seen_at, last_seen_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(player_id) DO UPDATE SET
+		platform = CASE WHEN excluded.platform != '' THEN excluded.platform ELSE players.platform END,
+		player_name = CASE WHEN excluded.player_name != '' THEN excluded.player_name ELSE players.player_name END,
+		player_name_lower = CASE WHEN excluded.player_name != '' THEN excluded.player_name_lower ELSE players.player_name_lower END,
+		ranks_json = CASE WHEN excluded.ranks_json != '' AND excluded.ranks_json != '{}' THEN excluded.ranks_json ELSE players.ranks_json END,
+		last_seen_at = excluded.last_seen_at;
+	`
+
+	_, err := s.db.ExecContext(ctx, query,
+		player.PlayerID,
+		player.Platform,
+		player.PlayerName,
+		playerNameLower,
+		ranksJSON,
+		firstSeenEpoch,
+		lastSeenEpoch,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert player %s: %w", player.PlayerID, err)
+	}
+	return nil
+}
+
+// GetPlayer retrieves a single player profile by PlayerID. Returns ErrPlayerNotFound if not found.
+func (s *SQLiteStore) GetPlayer(ctx context.Context, playerID string) (*PlayerRecord, error) {
+	if strings.TrimSpace(playerID) == "" {
+		return nil, ErrPlayerNotFound
+	}
+
+	const query = `
+	SELECT player_id, platform, player_name, ranks_json, first_seen_at, last_seen_at
+	FROM players
+	WHERE player_id = ?;
+	`
+
+	var (
+		p         PlayerRecord
+		firstSeen int64
+		lastSeen  int64
+	)
+
+	err := s.db.QueryRowContext(ctx, query, playerID).Scan(
+		&p.PlayerID,
+		&p.Platform,
+		&p.PlayerName,
+		&p.RanksJSON,
+		&firstSeen,
+		&lastSeen,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrPlayerNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get player %s: %w", playerID, err)
+	}
+
+	p.FirstSeenAt = time.Unix(firstSeen, 0).UTC()
+	p.LastSeenAt = time.Unix(lastSeen, 0).UTC()
+	return &p, nil
+}
+
+// ListPlayers returns paginated players ordered by last_seen_at DESC, player_id ASC.
+func (s *SQLiteStore) ListPlayers(ctx context.Context, limit, offset int) ([]*PlayerRecord, error) {
+	if limit == 0 {
+		return []*PlayerRecord{}, nil
+	}
+	if limit < 0 {
+		limit = -1
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	const query = `
+	SELECT player_id, platform, player_name, ranks_json, first_seen_at, last_seen_at
+	FROM players
+	ORDER BY last_seen_at DESC, player_id ASC
+	LIMIT ? OFFSET ?;
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list players: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]*PlayerRecord, 0)
+	for rows.Next() {
+		var (
+			p         PlayerRecord
+			firstSeen int64
+			lastSeen  int64
+		)
+		if err := rows.Scan(
+			&p.PlayerID,
+			&p.Platform,
+			&p.PlayerName,
+			&p.RanksJSON,
+			&firstSeen,
+			&lastSeen,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan player row: %w", err)
+		}
+		p.FirstSeenAt = time.Unix(firstSeen, 0).UTC()
+		p.LastSeenAt = time.Unix(lastSeen, 0).UTC()
+		records = append(records, &p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error in list players: %w", err)
+	}
+
+	return records, nil
+}
+
+// ListPlayerSummaries returns paginated players with aggregate win/loss statistics across all playlists.
+func (s *SQLiteStore) ListPlayerSummaries(ctx context.Context, limit, offset int) ([]*PlayerSummary, error) {
+	if limit == 0 {
+		return []*PlayerSummary{}, nil
+	}
+	if limit < 0 {
+		limit = -1
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	const query = `
+	SELECT p.player_id, p.platform, p.player_name, p.ranks_json, p.first_seen_at, p.last_seen_at,
+	       COALESCE(SUM(m.wins_as_teammate), 0) AS total_wins_teammate,
+	       COALESCE(SUM(m.losses_as_teammate), 0) AS total_losses_teammate,
+	       COALESCE(SUM(m.wins_as_opponent), 0) AS total_wins_opponent,
+	       COALESCE(SUM(m.losses_as_opponent), 0) AS total_losses_opponent,
+	       COALESCE(SUM(m.total_matches), 0) AS total_matches
+	FROM players p
+	LEFT JOIN player_matchups m ON p.player_id = m.player_id
+	GROUP BY p.player_id
+	ORDER BY p.last_seen_at DESC, p.player_id ASC
+	LIMIT ? OFFSET ?;
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list player summaries: %w", err)
+	}
+	defer rows.Close()
+
+	summaries := make([]*PlayerSummary, 0)
+	for rows.Next() {
+		var (
+			sRec      PlayerSummary
+			firstSeen int64
+			lastSeen  int64
+		)
+		if err := rows.Scan(
+			&sRec.PlayerID,
+			&sRec.Platform,
+			&sRec.PlayerName,
+			&sRec.RanksJSON,
+			&firstSeen,
+			&lastSeen,
+			&sRec.TotalWinsAsTeammate,
+			&sRec.TotalLossesAsTeammate,
+			&sRec.TotalWinsAsOpponent,
+			&sRec.TotalLossesAsOpponent,
+			&sRec.TotalMatches,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan player summary row: %w", err)
+		}
+		sRec.FirstSeenAt = time.Unix(firstSeen, 0).UTC()
+		sRec.LastSeenAt = time.Unix(lastSeen, 0).UTC()
+		summaries = append(summaries, &sRec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error in list player summaries: %w", err)
+	}
+
+	return summaries, nil
+}
+
+// escapeLike escapes SQL LIKE wildcard characters '%', '_', and the escape character '\'
+// to ensure literal substring matching identical to strings.Contains.
+func escapeLike(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '%', '_', '\\':
+			b.WriteRune('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// SearchPlayerSummaries searches players matching a query string across player_name and player_id
+// (case-insensitive substring match), optionally filtered by platform (case-insensitive; "all" or "" means
+// all platforms), returning paginated PlayerSummary records and the total count of matching records across all pages.
+// Results are ordered by last_seen_at DESC, player_id ASC.
+func (s *SQLiteStore) SearchPlayerSummaries(ctx context.Context, query, platform string, limit, offset int) ([]*PlayerSummary, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	cleanQuery := strings.TrimSpace(query)
+	cleanPlatform := strings.TrimSpace(strings.ToLower(platform))
+
+	var whereClauses []string
+	var whereArgs []interface{}
+
+	if cleanPlatform != "" && cleanPlatform != "all" {
+		whereClauses = append(whereClauses, "LOWER(p.platform) = ?")
+		whereArgs = append(whereArgs, cleanPlatform)
+	}
+
+	if cleanQuery != "" {
+		lowerQuery := strings.ToLower(cleanQuery)
+		if strings.ContainsRune(lowerQuery, '\x00') {
+			whereClauses = append(whereClauses, "(INSTR(p.player_name_lower, ?) > 0 OR INSTR(LOWER(p.player_id), ?) > 0)")
+			whereArgs = append(whereArgs, lowerQuery, lowerQuery)
+		} else {
+			whereClauses = append(whereClauses, "(p.player_name_lower LIKE ? ESCAPE '\\' OR LOWER(p.player_id) LIKE ? ESCAPE '\\')")
+			escaped := "%" + escapeLike(lowerQuery) + "%"
+			whereArgs = append(whereArgs, escaped, escaped)
+		}
+	}
+
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM players p%s;", whereSQL)
+	var total int
+	if err := s.db.QueryRowContext(ctx, countSQL, whereArgs...).Scan(&total); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, 0, ctxErr
+		}
+		return nil, 0, fmt.Errorf("failed to count matching players: %w", err)
+	}
+
+	// Boundary shortcuts: empty dataset or count-only request
+	if total == 0 || limit == 0 {
+		return make([]*PlayerSummary, 0), total, nil
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return make([]*PlayerSummary, 0), total, nil
+	}
+
+	limitArg := limit
+	if limitArg < 0 {
+		limitArg = -1
+	}
+
+	querySQL := fmt.Sprintf(`
+	SELECT p.player_id, p.platform, p.player_name, p.ranks_json, p.first_seen_at, p.last_seen_at,
+	       COALESCE(SUM(m.wins_as_teammate), 0) AS total_wins_teammate,
+	       COALESCE(SUM(m.losses_as_teammate), 0) AS total_losses_teammate,
+	       COALESCE(SUM(m.wins_as_opponent), 0) AS total_wins_opponent,
+	       COALESCE(SUM(m.losses_as_opponent), 0) AS total_losses_opponent,
+	       COALESCE(SUM(m.total_matches), 0) AS total_matches
+	FROM players p
+	LEFT JOIN player_matchups m ON p.player_id = m.player_id%s
+	GROUP BY p.player_id
+	ORDER BY p.last_seen_at DESC, p.player_id ASC
+	LIMIT ? OFFSET ?;
+	`, whereSQL)
+
+	queryArgs := make([]interface{}, len(whereArgs)+2)
+	copy(queryArgs, whereArgs)
+	queryArgs[len(whereArgs)] = limitArg
+	queryArgs[len(whereArgs)+1] = offset
+
+	rows, err := s.db.QueryContext(ctx, querySQL, queryArgs...)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, 0, ctxErr
+		}
+		return nil, 0, fmt.Errorf("failed to search player summaries: %w", err)
+	}
+	defer rows.Close()
+
+	summaries := make([]*PlayerSummary, 0)
+	for rows.Next() {
+		var (
+			sRec      PlayerSummary
+			firstSeen int64
+			lastSeen  int64
+		)
+		if err := rows.Scan(
+			&sRec.PlayerID,
+			&sRec.Platform,
+			&sRec.PlayerName,
+			&sRec.RanksJSON,
+			&firstSeen,
+			&lastSeen,
+			&sRec.TotalWinsAsTeammate,
+			&sRec.TotalLossesAsTeammate,
+			&sRec.TotalWinsAsOpponent,
+			&sRec.TotalLossesAsOpponent,
+			&sRec.TotalMatches,
+		); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, 0, ctxErr
+			}
+			return nil, 0, fmt.Errorf("failed to scan player summary row: %w", err)
+		}
+		sRec.FirstSeenAt = time.Unix(firstSeen, 0).UTC()
+		sRec.LastSeenAt = time.Unix(lastSeen, 0).UTC()
+		summaries = append(summaries, &sRec)
+	}
+	if err := rows.Err(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, 0, ctxErr
+		}
+		return nil, 0, fmt.Errorf("rows iteration error in search player summaries: %w", err)
+	}
+
+	return summaries, total, nil
+}
+
+// UpdatePlayerRanks updates ranks_json and last_seen_at for a player.
+func (s *SQLiteStore) UpdatePlayerRanks(ctx context.Context, playerID string, ranksJSON string) error {
+	if strings.TrimSpace(playerID) == "" {
+		return ErrPlayerNotFound
+	}
+	if strings.TrimSpace(ranksJSON) == "" {
+		ranksJSON = "{}"
+	}
+
+	now := time.Now().UTC().Unix()
+	const query = `
+	UPDATE players
+	SET ranks_json = ?, last_seen_at = ?
+	WHERE player_id = ?;
+	`
+
+	res, err := s.db.ExecContext(ctx, query, ranksJSON, now, playerID)
+	if err != nil {
+		return fmt.Errorf("failed to update player ranks for %s: %w", playerID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrPlayerNotFound
+	}
+	return nil
+}
+
+// RecordMatchResults atomically records all player outcomes for a concluded match.
+// Executes inside a single transaction. If matchGUID was already processed, rolls back
+// immediately and returns ErrMatchAlreadyProcessed without modifying any counter.
+func (s *SQLiteStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []PlayerOutcome) error {
+	if strings.TrimSpace(matchGUID) == "" {
+		return ErrInvalidGUID
+	}
+
+	now := time.Now().UTC().Unix()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin match results tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Atomic insertion into processed_match_outcomes ledger.
+	// If matchGUID already exists, UNIQUE constraint fails -> return ErrMatchAlreadyProcessed.
+	const insertLedgerSQL = `
+	INSERT INTO processed_match_outcomes (match_guid, playlist_id, processed_at)
+	VALUES (?, ?, ?);
+	`
+	_, err = tx.ExecContext(ctx, insertLedgerSQL, matchGUID, playlistID, now)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "UNIQUE constraint failed") || strings.Contains(errStr, "constraint failed") {
+			return ErrMatchAlreadyProcessed
+		}
+		return fmt.Errorf("failed to record processed match outcome: %w", err)
+	}
+
+	// 2. Prepare statements for player upsert and matchup upsert
+	const upsertPlayerSQL = `
+	INSERT INTO players (player_id, platform, player_name, player_name_lower, ranks_json, first_seen_at, last_seen_at)
+	VALUES (?, ?, ?, ?, '{}', ?, ?)
+	ON CONFLICT(player_id) DO UPDATE SET
+		platform = CASE WHEN excluded.platform != '' THEN excluded.platform ELSE players.platform END,
+		player_name = CASE WHEN excluded.player_name != '' THEN excluded.player_name ELSE players.player_name END,
+		player_name_lower = CASE WHEN excluded.player_name != '' THEN excluded.player_name_lower ELSE players.player_name_lower END,
+		last_seen_at = excluded.last_seen_at;
+	`
+	stmtPlayer, err := tx.PrepareContext(ctx, upsertPlayerSQL)
+	if err != nil {
+		return fmt.Errorf("failed to prepare upsert player stmt: %w", err)
+	}
+	defer stmtPlayer.Close()
+
+	const upsertMatchupSQL = `
+	INSERT INTO player_matchups (
+		player_id, playlist_id,
+		wins_as_teammate, losses_as_teammate,
+		wins_as_opponent, losses_as_opponent,
+		total_matches, last_played_at
+	) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+	ON CONFLICT(player_id, playlist_id) DO UPDATE SET
+		wins_as_teammate = player_matchups.wins_as_teammate + excluded.wins_as_teammate,
+		losses_as_teammate = player_matchups.losses_as_teammate + excluded.losses_as_teammate,
+		wins_as_opponent = player_matchups.wins_as_opponent + excluded.wins_as_opponent,
+		losses_as_opponent = player_matchups.losses_as_opponent + excluded.losses_as_opponent,
+		total_matches = player_matchups.total_matches + 1,
+		last_played_at = excluded.last_played_at;
+	`
+	stmtMatchup, err := tx.PrepareContext(ctx, upsertMatchupSQL)
+	if err != nil {
+		return fmt.Errorf("failed to prepare upsert matchup stmt: %w", err)
+	}
+	defer stmtMatchup.Close()
+
+	// 3. Process each outcome
+	for _, outcome := range outcomes {
+		if strings.TrimSpace(outcome.PlayerID) == "" {
+			continue
+		}
+
+		// Ensure player exists in players table to satisfy foreign key constraint
+		if _, err := stmtPlayer.ExecContext(ctx,
+			outcome.PlayerID,
+			outcome.Platform,
+			outcome.PlayerName,
+			strings.ToLower(outcome.PlayerName),
+			now,
+			now,
+		); err != nil {
+			return fmt.Errorf("failed to ensure player %s exists: %w", outcome.PlayerID, err)
+		}
+
+		// 4-way win/loss matrix calculation:
+		// outcome.Won represents whether the local player's team won the match.
+		var (
+			winTeammate  int
+			lossTeammate int
+			winOpponent  int
+			lossOpponent int
+		)
+
+		if outcome.IsTeammate {
+			if outcome.Won {
+				winTeammate = 1
+			} else {
+				lossTeammate = 1
+			}
+		} else {
+			if outcome.Won {
+				winOpponent = 1
+			} else {
+				lossOpponent = 1
+			}
+		}
+
+		if _, err := stmtMatchup.ExecContext(ctx,
+			outcome.PlayerID,
+			playlistID,
+			winTeammate,
+			lossTeammate,
+			winOpponent,
+			lossOpponent,
+			now,
+		); err != nil {
+			return fmt.Errorf("failed to upsert matchup for player %s in playlist %d: %w", outcome.PlayerID, playlistID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetPlayerMatchup retrieves head-to-head record for a player in a specific playlist.
+// If no record exists, returns zeroed PlayerMatchup with TotalMatches=0 and nil error.
+func (s *SQLiteStore) GetPlayerMatchup(ctx context.Context, playerID string, playlistID int) (*PlayerMatchup, error) {
+	if strings.TrimSpace(playerID) == "" {
+		return nil, errors.New("player_id cannot be empty")
+	}
+
+	const query = `
+	SELECT player_id, playlist_id,
+	       wins_as_teammate, losses_as_teammate,
+	       wins_as_opponent, losses_as_opponent,
+	       total_matches, last_played_at
+	FROM player_matchups
+	WHERE player_id = ? AND playlist_id = ?;
+	`
+
+	var (
+		m          PlayerMatchup
+		lastPlayed int64
+	)
+
+	err := s.db.QueryRowContext(ctx, query, playerID, playlistID).Scan(
+		&m.PlayerID,
+		&m.PlaylistID,
+		&m.WinsAsTeammate,
+		&m.LossesAsTeammate,
+		&m.WinsAsOpponent,
+		&m.LossesAsOpponent,
+		&m.TotalMatches,
+		&lastPlayed,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		// When no matchup record exists, return zeroed record with TotalMatches=0 and nil error
+		return &PlayerMatchup{
+			PlayerID:   playerID,
+			PlaylistID: playlistID,
+		}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get player matchup for %s (playlist %d): %w", playerID, playlistID, err)
+	}
+
+	if lastPlayed > 0 {
+		m.LastPlayedAt = time.Unix(lastPlayed, 0).UTC()
+	}
+	return &m, nil
+}
+
+// GetPlayerMatchups retrieves all playlist matchups for a player ordered by playlist_id ASC.
+func (s *SQLiteStore) GetPlayerMatchups(ctx context.Context, playerID string) ([]*PlayerMatchup, error) {
+	if strings.TrimSpace(playerID) == "" {
+		return nil, errors.New("player_id cannot be empty")
+	}
+
+	const query = `
+	SELECT player_id, playlist_id,
+	       wins_as_teammate, losses_as_teammate,
+	       wins_as_opponent, losses_as_opponent,
+	       total_matches, last_played_at
+	FROM player_matchups
+	WHERE player_id = ?
+	ORDER BY playlist_id ASC;
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, playerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get player matchups for %s: %w", playerID, err)
+	}
+	defer rows.Close()
+
+	matchups := make([]*PlayerMatchup, 0)
+	for rows.Next() {
+		var (
+			m          PlayerMatchup
+			lastPlayed int64
+		)
+		if err := rows.Scan(
+			&m.PlayerID,
+			&m.PlaylistID,
+			&m.WinsAsTeammate,
+			&m.LossesAsTeammate,
+			&m.WinsAsOpponent,
+			&m.LossesAsOpponent,
+			&m.TotalMatches,
+			&lastPlayed,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan player matchup row: %w", err)
+		}
+		if lastPlayed > 0 {
+			m.LastPlayedAt = time.Unix(lastPlayed, 0).UTC()
+		}
+		matchups = append(matchups, &m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error in get player matchups: %w", err)
+	}
+
+	return matchups, nil
 }

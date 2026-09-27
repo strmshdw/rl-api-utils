@@ -1,23 +1,26 @@
-## 2026-09-25T05:05:08Z
+# Dispatch for M5 Reviewer 1 (E2E & Backend Architecture Reviewer)
 
-# Dispatch: m5_reviewer_1
+## 2026-09-26T06:59:31Z
 
-**Milestone**: M5 - Final Milestone & Hardening
-**Role**: Reviewer 1 (E2E Test Architecture & Tiers 1-4 Verification)
+**Role**: E2E & Backend Architecture Reviewer
+**Parent**: `orchestrator_5` (`cc7be76d-47fc-44da-92e2-fb5c2aae2063`)
+**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_1`
+**Authoritative References**:
+1. `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-09-26T03:23:29Z`)
+2. `d:\code\rl-api-utils\.agents\teamwork\orchestrator_5\PROJECT.md`
+3. Worker Handoff: `d:\code\rl-api-utils\.agents\teamwork\m5_worker_1\handoff.md`
+4. Code to review:
+   - `test/e2e/tier5_dashboard_adversarial_test.go`
+   - `internal/session/`
+   - `internal/storage/`
+   - `internal/daemon/`
 
 ## Objectives
-Review the full E2E test suite and implementation conformance:
-1. Examine `test/e2e/tier1_feature_test.go` (85 tests), `tier2_boundary_test.go` (30 tests), `tier3_pairwise_test.go` (8 tests), `tier4_workload_test.go` (5 scenarios).
-2. Verify:
-   - 100% test pass on standard Go tooling.
-   - Clean architecture separation: mock servers in `internal/testutil` do not leak into production binaries.
-   - Idempotency invariants: zero duplicate downloads, zero duplicate uploads.
-3. Verification commands:
-```powershell
-$env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-cd d:\code\rl-api-utils
-go test -v -count=1 ./test/e2e/...
-go vet ./...
-```
-
-Write your report to `d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_1\handoff.md` with verdict APPROVE or REQUEST_CHANGES and notify parent via `send_message`.
+1. Verify Tier 5 Dashboard Adversarial suite and E2E regression:
+   - Verify `TestTier5_Dashboard_LiveTelemetryPropagationToSSE`, `TestTier5_Dashboard_RapidMatchCyclingAndSessionReset`, and `TestTier5_Dashboard_PlayerSearchUnderContinuousIngestion`.
+   - Verify SQLite vs JSONStore search parity under live contention.
+   - Verify telemetry flow decoupling via `MatchStateListener`.
+2. Run test suites:
+   `powershell -Command "$p = (Get-Item env:LOCALAPPDATA).Value + '\Programs\go\bin;' + $env:PATH; $env:PATH = $p; go test -v -count=1 ./test/e2e -run TestTier5_Dashboard; go test -p 1 -count=1 ./..."`
+3. Issue an explicit verdict: APPROVE or REQUEST_CHANGES.
+Write report to `handoff.md` and send message to parent.

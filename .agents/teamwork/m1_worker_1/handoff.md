@@ -1,210 +1,156 @@
-# Milestone 1 (Storage & Configuration) Implementation Handoff Report
+# Handoff Report: M1 Worker 1 — Stats API & Storage Schema Implementation
 
-**Author**: `m1_worker_1` (Worker: implementer, qa, specialist)  
-**Milestone**: M1 - Storage & Configuration  
-**Date**: 2026-09-24T20:18:40Z  
+**Agent Identity**: `m1_worker_1`  
 **Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1`  
-**Status**: COMPLETE (100% Tests Passing)
+**Date**: 2026-09-26T00:42:00Z  
+**Target Milestone**: Milestone M1 (Stats API & Storage Schema Expansion)  
 
 ---
 
 ## 1. Observation
 
-### 1.1 Direct Source & Dispatch Requirements
-1. **Mandate & Exclusive Write Ownership** (`m1_worker_1/DISPATCH.md:24-37`):
-   - Exclusively owned files:
-     - `go.mod`
-     - `internal/storage/store.go`
-     - `internal/storage/sqlite.go`
-     - `internal/storage/sqlite_test.go`
-     - `internal/storage/jsonstore.go`
-     - `internal/storage/jsonstore_test.go`
-     - `internal/config/config.go`
-     - `internal/config/config_test.go`
-     - `configs/config.example.yaml`
-     - `configs/config.example.json`
-   - Explicit constraint: "DO NOT touch or modify any other directories (e.g. `internal/testutil` or `test/e2e` belong to the E2E Testing Track)."
-2. **Interface Contracts** (`PROJECT.md:77-138`):
-   - Exact definitions for `DownloadStatus`, `UploadStatus`, `MatchRecord`, and `StateStore` (14 domain methods + `Close()`).
-3. **Toolchain Location**:
-   - Go 1.24.1 compiler located at `C:\Users\strms\AppData\Local\go\go\bin\go.exe`.
-   - Windows environment without C compiler (MinGW/GCC), requiring pure Go drivers (`modernc.org/sqlite`, zero CGO) as defined in `PROJECT.md:33,82`.
+### 1.1 Existing Codebase & Starting State
+- `internal/statsapi/types.go` previously only decoded `MatchGuid` from `MatchCreated` and `MatchEnded` events without decoding `UpdateState` payloads, `WinnerTeamNum`, or player roster stats.
+- `internal/statsapi/listener.go` only notified `tracker.RecordMatch` for FIFO warning toasts, lacking an event handler hook for player tracking subscribers.
+- `internal/storage/store.go` previously only tracked replay synchronization (`MatchRecord`) and provider authentication (`AuthRecord`), without player tracking models or schemas.
+- `internal/storage/sqlite.go` only had `matches` and `auth_state` tables in `schemaDDL`.
+- `internal/storage/jsonstore.go` only persisted `matches` and `auth` maps in `jsonStatePayload`.
+- All baseline tests across all packages passed cleanly prior to any modifications:
+  ```
+  ok  github.com/dank/rl-api-utils/cmd/rl-sync    (cached)
+  ok  github.com/dank/rl-api-utils/internal/auth  (cached)
+  ...
+  ok  github.com/dank/rl-api-utils/test/e2e       (cached)
+  ```
 
-### 1.2 Verified Test Executions
-1. `internal/storage` test command and verbatim output:
-   ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   go test -v -count=1 ./internal/storage/...
-   ```
-   Output:
-   ```
-   === RUN   TestJSONStore_NewStore_DirectoryCreation
-   --- PASS: TestJSONStore_NewStore_DirectoryCreation (0.01s)
-   === RUN   TestJSONStore_NewStore_EmptyPath
-   --- PASS: TestJSONStore_NewStore_EmptyPath (0.00s)
-   === RUN   TestJSONStore_NewStore_CorruptedJSON
-   --- PASS: TestJSONStore_NewStore_CorruptedJSON (0.00s)
-   === RUN   TestJSONStore_CRUDAndTransitions
-   --- PASS: TestJSONStore_CRUDAndTransitions (0.02s)
-   === RUN   TestJSONStore_ListPending
-   --- PASS: TestJSONStore_ListPending (0.01s)
-   === RUN   TestJSONStore_IdempotentUpsert
-   --- PASS: TestJSONStore_IdempotentUpsert (0.01s)
-   === RUN   TestJSONStore_RecoverInFlight
-   --- PASS: TestJSONStore_RecoverInFlight (0.02s)
-   === RUN   TestJSONStore_AuthState
-   --- PASS: TestJSONStore_AuthState (0.01s)
-   === RUN   TestJSONStore_DeepCopyDefense
-   --- PASS: TestJSONStore_DeepCopyDefense (0.01s)
-   === RUN   TestJSONStore_ConcurrencyUnderRace
-   --- PASS: TestJSONStore_ConcurrencyUnderRace (0.97s)
-   === RUN   TestJSONStore_Close
-   --- PASS: TestJSONStore_Close (0.00s)
-   === RUN   TestSQLiteStore_SchemaInitialization
-   --- PASS: TestSQLiteStore_SchemaInitialization (0.01s)
-   === RUN   TestSQLiteStore_CRUDAndIdempotency
-   --- PASS: TestSQLiteStore_CRUDAndIdempotency (0.01s)
-   === RUN   TestSQLiteStore_DownloadTransitions
-   --- PASS: TestSQLiteStore_DownloadTransitions (0.01s)
-   === RUN   TestSQLiteStore_UploadTransitionsAndDuplicate
-   --- PASS: TestSQLiteStore_UploadTransitionsAndDuplicate (0.01s)
-   === RUN   TestSQLiteStore_CrashRecovery
-   --- PASS: TestSQLiteStore_CrashRecovery (0.01s)
-   === RUN   TestSQLiteStore_AuthState
-   --- PASS: TestSQLiteStore_AuthState (0.01s)
-   === RUN   TestSQLiteStore_RestartPersistence
-   --- PASS: TestSQLiteStore_RestartPersistence (0.02s)
-   === RUN   TestSQLiteStore_NewStoreFactory
-   --- PASS: TestSQLiteStore_NewStoreFactory (0.01s)
-   === RUN   TestSQLiteStore_Concurrency
-   --- PASS: TestSQLiteStore_Concurrency (0.02s)
-   PASS
-   ok  	github.com/dank/rl-api-utils/internal/storage	1.867s
-   ```
-2. `internal/config` test command and verbatim output:
-   ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   go test -v -count=1 ./internal/config/...
-   ```
-   Output:
-   ```
-   === RUN   TestConfig_Defaults
-   --- PASS: TestConfig_Defaults (0.00s)
-   === RUN   TestConfig_LoadYAML
-   --- PASS: TestConfig_LoadYAML (0.01s)
-   === RUN   TestConfig_LoadJSON
-   --- PASS: TestConfig_LoadJSON (0.01s)
-   === RUN   TestConfig_EnvOverrides
-   --- PASS: TestConfig_EnvOverrides (0.00s)
-   === RUN   TestConfig_PrecedenceHierarchy
-   --- PASS: TestConfig_PrecedenceHierarchy (0.01s)
-   === RUN   TestConfig_ValidationFailures
-   === RUN   TestConfig_ValidationFailures/invalid_provider
-   === RUN   TestConfig_ValidationFailures/epic_missing_both_credentials
-   === RUN   TestConfig_ValidationFailures/steam_missing_ticket
-   === RUN   TestConfig_ValidationFailures/steam_missing_steam_id_64
-   === RUN   TestConfig_ValidationFailures/missing_ballchasing_api_key
-   === RUN   TestConfig_ValidationFailures/invalid_visibility
-   === RUN   TestConfig_ValidationFailures/invalid_base_url
-   === RUN   TestConfig_ValidationFailures/non-positive_timeout
-   === RUN   TestConfig_ValidationFailures/negative_max_retries
-   === RUN   TestConfig_ValidationFailures/non-positive_poll_interval
-   === RUN   TestConfig_ValidationFailures/empty_replay_dir
-   === RUN   TestConfig_ValidationFailures/empty_db_path
-   === RUN   TestConfig_ValidationFailures/non-positive_download_timeout
-   === RUN   TestConfig_ValidationFailures/invalid_logging_level
-   === RUN   TestConfig_ValidationFailures/invalid_logging_format
-   --- PASS: TestConfig_ValidationFailures (0.00s)
-   === RUN   TestConfig_DurationCustomType
-   --- PASS: TestConfig_DurationCustomType (0.00s)
-   === RUN   TestConfig_MissingExplicitConfigFile
-   --- PASS: TestConfig_MissingExplicitConfigFile (0.00s)
-   PASS
-   ok  	github.com/dank/rl-api-utils/internal/config	0.484s
-   ```
-3. Static Analysis (`go vet`):
-   ```powershell
-   go vet ./internal/storage/... ./internal/config/...
-   ```
-   Exit code 0, zero warnings or errors.
+### 1.2 Implemented Changes
+1. **`internal/statsapi/types.go`**:
+   - `EventData`: Added `Playlist int`, `WinnerTeamNum *int`, `Players []StatsPlayer`, `Game *StatsGame`, and `Raw json.RawMessage`.
+   - `EventData.UnmarshalJSON(data []byte) error`: Implemented polymorphic decoding supporting both raw JSON object tokens and escaped JSON string payloads (`trimmed[0] == '"'`).
+   - `StatsGame`: Structured representation with `PlaylistId`, `TimeSeconds`, `Overtime` (`bOvertime`).
+   - `StatsPlayer`: Player lobby model with `Name`, `PrimaryId`, `TeamNum`, `Score`, `Goals`, `Assists`, `Saves`, `Shots`, `Demos`.
+   - `ParsedPlayerID` & `ParsePrimaryID`: Splitting `<Platform>|<AccountID>|<SplitscreenIndex>`, with AI bot detection (`platform == "Unknown" || accountID == "0"`).
+   - `StatsPlayer.IsBot()` and `StatsPlayer.ParseID()`.
+   - `EventData.GetPlaylist()`: Resolves playlist ID checking root `Playlist` then `Game.PlaylistId`.
+2. **`internal/statsapi/listener.go`**:
+   - `PlayerEventHandler` interface: `OnUpdateState(ctx, matchGUID, playlistID, players)` and `OnMatchEnded(ctx, matchGUID, winnerTeamNum)`.
+   - `ListenerOption` and `WithPlayerEventHandler(h PlayerEventHandler)`.
+   - `NewListener(cfg, tracker, logger, opts ...ListenerOption)`: Kept 100% backward compatible with existing 3-argument callers.
+   - `SetPlayerEventHandler` and `PlayerEventHandler()` with `sync.RWMutex` thread safety.
+   - `handleRawMessage`: Dispatches `UpdateState` to `PlayerEventHandler.OnUpdateState` and `MatchEnded` to both `tracker.RecordMatch` and `PlayerEventHandler.OnMatchEnded`.
+3. **`internal/statsapi/listener_test.go`**:
+   - Added 10 comprehensive unit tests covering polymorphic unmarshaling (object vs string), pointer semantics for `WinnerTeamNum` (0 vs 1 vs omitted vs null), edge cases, playlist resolution, primary ID parsing, bot detection, WebSocket event dispatch, TCP event dispatch, nil handler safety, and dynamic handler registration.
+4. **`internal/storage/store.go`**:
+   - Sentinel errors: `ErrPlayerNotFound` and `ErrMatchAlreadyProcessed`.
+   - Models: `PlayerRecord`, `PlayerMatchup`, `PlayerSummary`, `PlayerOutcome`.
+   - `StateStore` interface: Added 8 methods:
+     - `UpsertPlayer(ctx context.Context, player *PlayerRecord) error`
+     - `GetPlayer(ctx context.Context, playerID string) (*PlayerRecord, error)`
+     - `ListPlayers(ctx context.Context, limit, offset int) ([]*PlayerRecord, error)`
+     - `ListPlayerSummaries(ctx context.Context, limit, offset int) ([]*PlayerSummary, error)`
+     - `UpdatePlayerRanks(ctx context.Context, playerID string, ranksJSON string) error`
+     - `RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []PlayerOutcome) error`
+     - `GetPlayerMatchup(ctx context.Context, playerID string, playlistID int) (*PlayerMatchup, error)`
+     - `GetPlayerMatchups(ctx context.Context, playerID string) ([]*PlayerMatchup, error)`
+5. **`internal/storage/sqlite.go`**:
+   - Updated `schemaDDL` with `players`, `player_matchups`, and `processed_match_outcomes` tables and performance indexes (`idx_players_last_seen`, `idx_players_name`, `idx_player_matchups_player`, `idx_processed_matches_ts`).
+   - Implemented all 8 methods:
+     - `RecordMatchResults`: Atomic transaction inserting into `processed_match_outcomes` (UNIQUE constraint returns `ErrMatchAlreadyProcessed` on duplicate), auto-upserting players to satisfy foreign key constraints, and incrementing the 4-way win/loss matrix.
+     - `GetPlayerMatchup`: Returns zeroed `PlayerMatchup{TotalMatches: 0}` and `nil` error when no record exists.
+     - `ListPlayers` & `ListPlayerSummaries`: Deterministic sorting `ORDER BY last_seen_at DESC, player_id ASC LIMIT ? OFFSET ?`.
+6. **`internal/storage/sqlite_test.go`**:
+   - Added 12 comprehensive unit tests verifying CRUD, pagination, tie-breaking, rank updating, 4-way outcome matrix increments, idempotency deduplication, transaction rollback, missing record zeroing, multi-playlist ordering, aggregate summaries, foreign key cascade deletion, restart persistence, and concurrency.
+7. **`internal/storage/jsonstore.go`**:
+   - Updated `jsonStatePayload` and `JSONStore` with `players`, `player_matchups`, and `processed_matches`.
+   - Deep copying defense: `clonePlayerRecord`, `clonePlayerMatchup`, `clonePlayerSummary`.
+   - Implemented all 8 methods with full behavioral parity to SQLite.
+   - Atomic disk persistence with fsync and Windows transient lock retry loop.
+8. **`internal/storage/jsonstore_test.go`**:
+   - Added 12 comprehensive unit tests verifying CRUD, field preservation on upsert, rank updating, 4-way outcome matrix, idempotency deduplication, missing record zeroing, multi-playlist ordering, pagination and deterministic tie-breaking, summary aggregation, deep copying mutation defense, restart persistence, concurrency, and closed store errors.
+9. **`internal/auth/auth_test.go`**:
+   - Added 8 player tracking stubs to `mockStateStore` to satisfy the expanded `storage.StateStore` interface so that repository-wide `go test ./...` compiles cleanly.
+
+### 1.3 Verbatim Tool Command Results
+- `go build ./cmd/rl-sync`: Exited with code 0 (clean build).
+- `go test -v -count=1 ./internal/statsapi/...`: Exited with code 0 (all 13 tests passed in 0.464s).
+- `go test -v -count=1 ./internal/storage/...`: Exited with code 0 (all 43 tests passed in 2.731s).
+- `go test -count=1 ./...`: Exited with code 0 (all 11 packages passed in 8.090s).
+- `go vet ./...`: Exited with code 0 (clean, 0 warnings).
 
 ---
 
 ## 2. Logic Chain
 
-1. **Go Module & Dependency Management**:
-   - `go.mod` was created targeting `github.com/dank/rl-api-utils` on Go 1.24.1.
-   - Pinned `modernc.org/sqlite v1.36.0` and `gopkg.in/yaml.v3 v3.0.1`.
-   - Running `go mod tidy` cleanly fetched all indirect dependencies (`modernc.org/libc v1.61.13`, `golang.org/x/sys v0.30.0`), compiling with zero CGO dependencies across all target platforms.
-2. **Interface Implementation & Domain Models (`internal/storage/store.go`)**:
-   - `StateStore` interface matches `PROJECT.md:121-137` verbatim.
-   - Defined `MatchRecord` with JSON tags and timestamp pointers (`*time.Time`) for nullability.
-   - Defined `AuthRecord` supporting persistent Epic Games and Steam authentication states.
-   - Created `NewStore(dbPath string) (StateStore, error)` factory routing `.json` files to `JSONStore` and other paths to `SQLiteStore`.
-3. **Pure Go SQLite Persistence (`internal/storage/sqlite.go`)**:
-   - Built with DDL defining `matches` table (with indexes on `download_status`, `upload_status`, and `record_start_timestamp DESC`) and `auth_state` table.
-   - Connection pool configured with `db.SetMaxOpenConns(1)` and PRAGMAs:
-     - `PRAGMA busy_timeout = 5000;`
-     - `PRAGMA synchronous = NORMAL;`
-     - `PRAGMA foreign_keys = ON;`
-     - `PRAGMA journal_mode = WAL;`
-   - `UpsertDiscoveredMatches` utilizes SQLite `ON CONFLICT(match_guid) DO UPDATE` to ensure existing progress (download status, upload status, ballchasing ID) is preserved and never clobbered on subsequent poll cycles.
-   - `RecoverInFlight` atomically resets `DOWNLOADING -> PENDING` and `UPLOADING -> PENDING` during daemon bootstrap.
-4. **Structured JSON State Store Fallback (`internal/storage/jsonstore.go`)**:
-   - Implements full `StateStore` interface for zero-external-dependency operation.
-   - Thread-safe in-memory map structure protected by `sync.RWMutex`.
-   - Defensive deep-copying (`cloneMatchRecord`) on all read paths to prevent data race conditions when external callers read records while write goroutines update state.
-   - Atomic disk durability using same-directory temporary files (`.rl-sync-state-*.tmp`), page cache sync (`Sync()`), handle closure prior to rename, and `atomicRename` with Windows transient file lock retry loop.
-   - Identical query semantics: `ListPendingDownloads` and `ListPendingUploads` sort chronologically ASC.
-5. **Layered Configuration System (`internal/config/config.go`)**:
-   - Implements full 4-layer precedence: CLI Flags > Environment Variables (`RL_SYNC_*`) > Config File (`config.yaml` / `config.json`) > Defaults.
-   - Custom `Duration` type with `UnmarshalJSON` and `UnmarshalYAML` enabling human-friendly strings (`"5m"`, `"30s"`) and numeric nanoseconds.
-   - Fail-fast semantic validator checking provider choice, Epic vs. Steam credential requirements, Ballchasing API key and visibility enum (`public`, `unlisted`, `private`), and aggregating all validation issues into a single error via `errors.Join`.
-6. **Example Configuration Files (`configs/`)**:
-   - Authored `configs/config.example.yaml` and `configs/config.example.json` with comprehensive documentation of every parameter and environment variable mapping.
+1. **Polymorphic Ingestion & Backward Compatibility**:
+   - Telemetry from `MatchStatsExporter_TA` varies between JSON objects and escaped JSON string payloads depending on bridge configuration. By inspecting `trimmed[0] == '"'` and selectively unmarshaling through a string intermediate before applying `Alias EventData`, both envelopes parse seamlessly into Go structs.
+   - In Go, `TeamNum: 0` is Blue team. Typing `WinnerTeamNum` as `*int` allows `*WinnerTeamNum == 0` to denote Blue team winning while `nil` denotes an in-progress match or omitted winner, eliminating false-positive win attributions.
+   - Making `NewListener` variadic with `ListenerOption` ensured zero breaking changes to existing callers in `cmd/rl-sync/main.go` and `statsapi_test.go`.
+
+2. **Storage Schema & Foreign Key Integrity**:
+   - Foreign key enforcement is enabled in SQLite (`PRAGMA foreign_keys = ON`). `player_matchups` references `players(player_id) ON DELETE CASCADE`.
+   - When `RecordMatchResults` is invoked, it auto-upserts each player into `players` in the same transaction before writing `player_matchups`, preventing foreign key constraint violations if `UpsertPlayer` was not explicitly called prior to match end.
+
+3. **Atomic Deduplication & Idempotency**:
+   - Rocket League network disconnects or Stats API reconnection loops can broadcast duplicate `MatchEnded` events for the same `MatchGuid`.
+   - In SQLite, `processed_match_outcomes` has `match_guid PRIMARY KEY`. Attempting to insert an already processed match triggers a UNIQUE constraint violation inside the transaction, rolling back immediately and returning `ErrMatchAlreadyProcessed` without incrementing counters.
+   - In `JSONStore`, `processedMatches[matchGUID]` is checked under `s.mu.Lock()`, returning `ErrMatchAlreadyProcessed` without incrementing counters.
+
+4. **Deterministic Pagination & Concurrency Safety**:
+   - SQLite orders queries with `ORDER BY last_seen_at DESC, player_id ASC`.
+   - `JSONStore` implements the identical sort comparison with `sort.Slice` using `LastSeenAt.After` and `PlayerID` alphanumeric string comparison for tie-breaking.
+   - Under `-race`, concurrent callers must never share internal pointers. `JSONStore` applies deep cloning on all inputs (`UpsertPlayer`) and outputs (`GetPlayer`, `ListPlayers`, `ListPlayerSummaries`, `GetPlayerMatchup`, `GetPlayerMatchups`), verified by mutation defense tests.
 
 ---
 
 ## 3. Caveats
 
-1. **Race Detector on Windows without GCC**:
-   - Go's ThreadSanitizer runtime (`-race`) on Windows requires CGO and GCC/MinGW (`go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`).
-   - The user's system runs in standard non-elevated user mode without a GCC toolchain.
-   - High-concurrency multithreaded stress tests (`TestSQLiteStore_Concurrency` with 20 parallel goroutines and `TestJSONStore_ConcurrencyUnderRace` with 40 parallel goroutines) execute and pass in pure Go mode. In CI environments or Linux where GCC is present, `-race` executes without any code modifications.
-2. **Module Directory Boundary**:
-   - As directed by exclusive ownership rules, `internal/testutil` and `test/e2e` were left untouched.
+1. **Windows Race Detector CGO Requirement**:
+   - Running `go test -race` on Windows requires a C compiler (`gcc` or `clang`) with `CGO_ENABLED=1`. On environments where `gcc` is not installed or not in `%PATH%`, Go emits `cgo: C compiler "gcc" not found`.
+   - Concurrency stress tests were implemented with 20 parallel goroutines in both `sqlite_test.go` (`TestSQLiteStore_PlayerTracking_ConcurrencyUnderRace`) and `jsonstore_test.go` (`TestJSONStore_ConcurrentPlayerOperations_Race`), executing and passing cleanly. When run on Linux CI or a Windows host with MinGW/gcc installed, `go test -race ./internal/storage/...` will execute against the deep-cloned structures.
+2. **`internal/auth/auth_test.go` Mock Stubs**:
+   - `internal/auth/auth_test.go` contained a private mock `mockStateStore` that mocked `storage.StateStore`. Adding 8 new methods to `storage.StateStore` required adding 8 no-op stubs to `mockStateStore` in `auth_test.go` to maintain 100% compilation across `go test ./...`. No production code in `internal/auth` was modified.
 
 ---
 
 ## 4. Conclusion
 
-1. Milestone 1 (Storage & Configuration) is **100% complete, verified, and production-ready**.
-2. All required files were implemented with genuine, non-dummy logic, zero hardcoded verification strings, and complete adherence to project architecture specifications.
-3. 20 storage tests and 22 configuration tests pass with 100% success rate. `go vet` passes with 0 warnings.
-4. Downstream milestones (M2 Auth & PsyNet Integration, M3 Ballchasing Replay Uploader, M4 Syncer Daemon) can immediately consume `internal/storage` and `internal/config`.
+Milestone M1 (Stats API & Storage Schema Expansion) is fully implemented, verified, and backward compatible:
+- `internal/statsapi` cleanly ingests `UpdateState` and `MatchEnded` events, parses player stats and bots, resolves playlists, and dispatches to `PlayerEventHandler`.
+- `internal/storage` provides genuine persistence for player profiles, 4-way win/loss matchup matrices, and atomic deduplication with 100% behavioral parity between SQLite and JSONStore.
+- All repository builds and unit test suites pass 100% with zero regressions.
 
 ---
 
 ## 5. Verification Method
 
-To independently reproduce and verify this implementation:
+To independently verify the implementation:
 
-```powershell
-# Set Go binary path
-$env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-cd d:\code\rl-api-utils
+1. **Build CLI Daemon**:
+   ```powershell
+   go build ./cmd/rl-sync
+   ```
+   *Expected: Clean compilation with exit code 0.*
 
-# 1. Run Storage Unit Tests
-go test -v -count=1 ./internal/storage/...
+2. **Verify Stats API Package**:
+   ```powershell
+   go test -v -count=1 ./internal/statsapi/...
+   ```
+   *Expected: All 13 tests pass with exit code 0.*
 
-# 2. Run Config Unit Tests
-go test -v -count=1 ./internal/config/...
+3. **Verify Storage Package**:
+   ```powershell
+   go test -v -count=1 ./internal/storage/...
+   ```
+   *Expected: All 43 tests pass with exit code 0.*
 
-# 3. Run Static Analysis
-go vet ./internal/storage/... ./internal/config/...
-```
+4. **Verify Entire Repository**:
+   ```powershell
+   go test -count=1 ./...
+   ```
+   *Expected: All 11 packages pass with 100% success.*
 
-**Invalidation Conditions**:
-- Modifying `StateStore` interface signatures in `PROJECT.md`.
-- Introducing non-pure-Go dependencies into `storage` or `config`.
-- Removing `Duration` custom unmarshaler breaks JSON parsing of `"5m"`.
+5. **Linting Check**:
+   ```powershell
+   go vet ./...
+   ```
+   *Expected: Clean output with 0 warnings.*

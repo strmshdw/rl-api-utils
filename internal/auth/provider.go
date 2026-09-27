@@ -70,6 +70,7 @@ type AuthProvider interface {
 // EGSClient defines the interface required from the underlying Epic Games Store client.
 // rlapi.NewEGS() satisfies this interface.
 type EGSClient interface {
+	GetAuthURL() string
 	AuthenticateWithCode(authCode string) (*rlapi.TokenResponse, error)
 	AuthenticateWithRefreshToken(refreshToken string) (*rlapi.TokenResponse, error)
 	GetExchangeCode(accessToken string) (string, error)
@@ -82,9 +83,13 @@ type EGSClient interface {
 type Option func(*providerOptions)
 
 type providerOptions struct {
-	egsClient EGSClient
-	store     storage.StateStore
-	clock     func() time.Time
+	egsClient  EGSClient
+	store      storage.StateStore
+	clock      func() time.Time
+	role       AccountRole
+	prompter   CodePrompter
+	steamGen   SteamTicketGenerator
+	tokenSaver ConfigTokenSaver
 }
 
 // WithEGSClient sets a custom EGS client (for testing or custom transports).
@@ -108,10 +113,42 @@ func WithClock(clock func() time.Time) Option {
 	}
 }
 
+// WithAccountRole sets the account role (RolePrimary or RolePolling).
+func WithAccountRole(role AccountRole) Option {
+	return func(o *providerOptions) {
+		o.role = role
+	}
+}
+
+// WithCodePrompter sets a custom prompter for Epic authorization codes.
+func WithCodePrompter(prompter CodePrompter) Option {
+	return func(o *providerOptions) {
+		o.prompter = prompter
+	}
+}
+
+// WithSteamGenerator sets a custom Steam session ticket generator.
+func WithSteamGenerator(generator SteamTicketGenerator) Option {
+	return func(o *providerOptions) {
+		o.steamGen = generator
+	}
+}
+
+// WithConfigTokenSaver sets a callback to save updated tokens to the configuration file.
+func WithConfigTokenSaver(saver ConfigTokenSaver) Option {
+	return func(o *providerOptions) {
+		o.tokenSaver = saver
+	}
+}
+
 func defaultOptions() *providerOptions {
 	return &providerOptions{
-		egsClient: rlapi.NewEGS(),
-		clock:     time.Now,
+		egsClient:  rlapi.NewEGS(),
+		clock:      time.Now,
+		role:       RolePrimary,
+		prompter:   nil,
+		steamGen:   NewNodeSteamTicketGenerator(""),
+		tokenSaver: NewConfigTokenSaver(""),
 	}
 }
 
@@ -129,3 +166,21 @@ func NewProvider(cfg config.AuthConfig, store storage.StateStore, opts ...Option
 		return nil, fmt.Errorf("%w: %q (must be 'epic' or 'steam')", ErrUnsupportedProvider, cfg.Provider)
 	}
 }
+
+// NewPollingProvider creates an AuthProvider dedicated to secondary polling.
+// It sets RolePolling so tokens are persisted under distinct keys ("epic_polling", "steam_polling")
+// guaranteeing complete isolation from primary account tokens.
+func NewPollingProvider(cfg config.PollingAuthConfig, opts ...Option) (AuthProvider, error) {
+	if !cfg.Enabled {
+		return nil, ErrMissingCredentials
+	}
+	authCfg := config.AuthConfig{
+		Provider: cfg.Provider,
+		Epic:     cfg.Epic,
+		Steam:    cfg.Steam,
+	}
+	// Prepend WithAccountRole(RolePolling) so caller options can still customize it
+	combinedOpts := append([]Option{WithAccountRole(RolePolling)}, opts...)
+	return NewProvider(authCfg, nil, combinedOpts...)
+}
+

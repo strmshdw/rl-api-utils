@@ -335,3 +335,121 @@ func makeMaskedFrame(msg string) []byte {
 	frame = append(frame, maskedPayload...)
 	return frame
 }
+
+func TestMockPsyNetServer_SkillsRPC(t *testing.T) {
+	psy := NewMockPsyNetServer()
+	defer psy.Close()
+
+	p1 := "Epic|player-1|0"
+	p2 := "Steam|76561198000000001|0"
+	p3 := "Epic|unseeded|0"
+
+	skill1 := NewMockSkill(11, 16, 3, 1150.5, 42)
+	skill2 := NewMockSkill(13, 15, 2, 1080.0, 20)
+	psy.SetPlayerSkills(p1, []MockSkill{skill1})
+	psy.AddPlayerSkill(p2, skill2)
+
+	// Dial WebSocket
+	serverHostPort := strings.TrimPrefix(psy.URL(), "http://")
+	conn, err := net.Dial("tcp", serverHostPort)
+	if err != nil {
+		t.Fatalf("failed to dial raw TCP: %v", err)
+	}
+	defer conn.Close()
+
+	handshake := fmt.Sprintf("GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", serverHostPort)
+	if _, err := conn.Write([]byte(handshake)); err != nil {
+		t.Fatalf("failed to write handshake: %v", err)
+	}
+	buf := make([]byte, 2048)
+	n, err := conn.Read(buf)
+	if err != nil || !strings.Contains(string(buf[:n]), "101 Switching Protocols") {
+		t.Fatalf("websocket handshake failed: %v", err)
+	}
+
+	// 1. Query skills for p1, p2, and unseeded p3
+	reqID := "SkillsReq_1"
+	reqBody := fmt.Sprintf(`{"PlayerIDs":["%s","%s","%s"]}`, p1, p2, p3)
+	rpcMsg := fmt.Sprintf("PsyService: Skills/GetPlayersSkills v1\r\nPsyRequestID: %s\r\n\r\n%s", reqID, reqBody)
+	if _, err := conn.Write(makeMaskedFrame(rpcMsg)); err != nil {
+		t.Fatalf("failed to send RPC: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	n, err = conn.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read RPC response: %v", err)
+	}
+	respStr := string(buf[:n])
+	if !strings.Contains(respStr, reqID) {
+		t.Fatalf("expected response to contain %s, got: %s", reqID, respStr)
+	}
+	if !strings.Contains(respStr, p1) || !strings.Contains(respStr, p2) {
+		t.Fatalf("expected response to contain p1 and p2: %s", respStr)
+	}
+	if strings.Contains(respStr, p3) {
+		t.Fatalf("expected response to NOT contain unseeded p3: %s", respStr)
+	}
+	if psy.GetSkillsRequestCount() != 1 {
+		t.Fatalf("expected skillsRequestCount 1, got %d", psy.GetSkillsRequestCount())
+	}
+
+	// 2. Test Fault Injection: SetSkillsError
+	psy.SetSkillsError("InvalidPlayerID", "User does not exist")
+	reqID2 := "SkillsReq_2"
+	rpcMsg2 := fmt.Sprintf("PsyService: Skills/GetPlayersSkills v1\r\nPsyRequestID: %s\r\n\r\n%s", reqID2, reqBody)
+	if _, err := conn.Write(makeMaskedFrame(rpcMsg2)); err != nil {
+		t.Fatalf("failed to send RPC: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	n, err = conn.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read RPC error response: %v", err)
+	}
+	respStr2 := string(buf[:n])
+	if !strings.Contains(respStr2, "InvalidPlayerID") || !strings.Contains(respStr2, "User does not exist") {
+		t.Fatalf("expected error response, got: %s", respStr2)
+	}
+	psy.ClearSkillsError()
+
+	// 3. Test Fault Injection: SetEmptySkillsResponse
+	psy.SetEmptySkillsResponse(true)
+	reqID3 := "SkillsReq_3"
+	rpcMsg3 := fmt.Sprintf("PsyService: Skills/GetPlayersSkills v1\r\nPsyRequestID: %s\r\n\r\n%s", reqID3, reqBody)
+	if _, err := conn.Write(makeMaskedFrame(rpcMsg3)); err != nil {
+		t.Fatalf("failed to send RPC: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	n, err = conn.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read empty RPC response: %v", err)
+	}
+	respStr3 := string(buf[:n])
+	if !strings.Contains(respStr3, `"Players":[]`) && !strings.Contains(respStr3, `"Players": []`) {
+		t.Fatalf("expected empty players list, got: %s", respStr3)
+	}
+	psy.SetEmptySkillsResponse(false)
+
+	// 4. Test Fault Injection: SetDisconnectNextSkills
+	psy.SetDisconnectNextSkills(1)
+	reqID4 := "SkillsReq_4"
+	rpcMsg4 := fmt.Sprintf("PsyService: Skills/GetPlayersSkills v1\r\nPsyRequestID: %s\r\n\r\n%s", reqID4, reqBody)
+	if _, err := conn.Write(makeMaskedFrame(rpcMsg4)); err != nil {
+		t.Fatalf("failed to send RPC: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	// Server should have closed connection
+	_, err = conn.Read(buf)
+	if err == nil {
+		t.Fatalf("expected EOF / closed connection from SetDisconnectNextSkills")
+	}
+
+	// 5. Test Reset
+	psy.Reset()
+	if psy.GetSkillsRequestCount() != 0 {
+		t.Fatalf("expected request count 0 after reset, got %d", psy.GetSkillsRequestCount())
+	}
+	if _, ok := psy.GetPlayerSkills(p1); ok {
+		t.Fatalf("expected player skills to be cleared after reset")
+	}
+}

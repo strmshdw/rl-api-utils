@@ -1,55 +1,45 @@
-# Dispatch for M1 Worker: Implement Storage & Configuration
+# Task Assignment: M1 Worker 1 — Stats API & Storage Schema Implementation
 
-**Milestone**: M1 - Storage & Configuration
-**Role**: Worker (`teamwork_preview_worker`)
+**Agent Identity**: `m1_worker_1`
 **Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1`
-**Original Request**: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md`
-**Project Specification**: `d:\code\rl-api-utils\PROJECT.md`
+**Authoritative Request**: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (section ## 2026-09-26T00:19:44Z)
+**Scope Document**: `d:\code\rl-api-utils\.agents\teamwork\orchestrator_3\SCOPE.md`
+**Project Reference**: `d:\code\rl-api-utils\.agents\teamwork\orchestrator_3\PROJECT.md`
+**Explorer Inputs**:
+- `d:\code\rl-api-utils\.agents\teamwork\m1_pt_explorer_1\analysis.md`
+- `d:\code\rl-api-utils\.agents\teamwork\m1_pt_explorer_2\analysis.md`
+- `d:\code\rl-api-utils\.agents\teamwork\m1_pt_explorer_3\analysis.md`
 
-## Input Reports & Reference Code
-The three M1 explorers have authored complete, production-ready code proposals:
-1. SQLite Engine & Store Interface:
-   - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\handoff.md`
-   - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\proposed_store.go`
-   - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\proposed_sqlite.go`
-   - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\proposed_sqlite_test.go`
-2. JSON Store Fallback:
-   - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md`
-   - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_jsonstore.go`
-   - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_jsonstore_test.go`
-3. Configuration System & Module Setup:
-   - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\handoff.md`
-   - Contains proposed `internal/config/config.go`, `internal/config/config_test.go`, `configs/config.example.yaml`, `configs/config.example.json`, and `go.mod`
-
-## Exclusive Write Ownership
-You exclusively own and must create/write the following files in the project root (`d:\code\rl-api-utils`):
-- `go.mod`
+## Files Owned Exclusively
+- `internal/statsapi/types.go`
+- `internal/statsapi/listener.go`
+- `internal/statsapi/listener_test.go`
 - `internal/storage/store.go`
 - `internal/storage/sqlite.go`
 - `internal/storage/sqlite_test.go`
 - `internal/storage/jsonstore.go`
 - `internal/storage/jsonstore_test.go`
-- `internal/config/config.go`
-- `internal/config/config_test.go`
-- `configs/config.example.yaml`
-- `configs/config.example.json`
 
-DO NOT touch or modify any other directories (e.g. `internal/testutil` or `test/e2e` belong to the E2E Testing Track).
+## Mandatory Integrity Warning
+DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_preview_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
 
 ## Objectives
-1. Read `ORIGINAL_REQUEST.md` and `PROJECT.md`.
-2. Review all explorer proposals.
-3. Write `go.mod` and resolve dependencies (`go mod tidy` / fetch dependencies).
-4. Implement `internal/storage/store.go`, `sqlite.go`, and `jsonstore.go`.
-5. Implement `internal/config/config.go`.
-6. Implement `configs/config.example.yaml` and `configs/config.example.json`.
-7. Implement unit tests `internal/storage/sqlite_test.go`, `internal/storage/jsonstore_test.go`, and `internal/config/config_test.go`.
-8. Run build and tests:
-   `go test -v -race ./internal/storage/...`
-   `go test -v -race ./internal/config/...`
-   Ensure 100% test pass with zero race warnings.
-9. Write `handoff.md` in your working directory documenting the files created, build/test commands executed, test output, and layout compliance.
-10. Send a completion message to the parent orchestrator.
-
-## MANDATORY INTEGRITY WARNING
-DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_preview_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
+1. Read all three Explorer analysis reports thoroughly.
+2. In `internal/statsapi`:
+   - Implement `EventData.UnmarshalJSON` with polymorphic support for both raw string and object envelopes.
+   - Add `StatsPlayer`, `StatsGame`, `WinnerTeamNum *int`, `Playlist int`, `ParsePrimaryID`, and `StatsPlayer.IsBot()`.
+   - Add `PlayerEventHandler` interface, `WithPlayerEventHandler`, and `SetPlayerEventHandler` to `Listener` while keeping `NewListener` backward compatible.
+   - Dispatch `UpdateState` and `MatchEnded` in `handleRawMessage` while preserving `tracker.RecordMatch`.
+   - Write comprehensive tests in `internal/statsapi/listener_test.go`.
+3. In `internal/storage`:
+   - In `store.go`: add `PlayerRecord`, `PlayerMatchup`, `PlayerSummary`, `PlayerOutcome`, sentinel errors, and 8 new methods to `StateStore`.
+   - In `sqlite.go`: update `schemaDDL` with `players`, `player_matchups`, and `processed_match_outcomes` (atomic deduplication). Implement all 8 methods with transaction safety, foreign key compliance, and deterministic sorting.
+   - In `jsonstore.go`: update `jsonStatePayload` and `JSONStore`, implement deep cloning, RWMutex locking, sorting/pagination, and atomic disk persistence. Full parity with SQLite.
+   - In `sqlite_test.go` and `jsonstore_test.go`: add comprehensive test suites for all 8 methods, transaction rollbacks, idempotency, foreign key cascading, and concurrency under `-race`.
+4. Run verification commands:
+   - `go build ./cmd/rl-sync`
+   - `go test -v -count=1 ./internal/statsapi/...`
+   - `go test -v -count=1 ./internal/storage/...`
+   - `go test -v -race -count=1 ./internal/storage/...`
+   - `go test ./...` (ensure 100% pass across all repository packages)
+5. Document all changes, verification commands, and pass results in `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md`.

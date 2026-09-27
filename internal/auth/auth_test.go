@@ -17,6 +17,7 @@ import (
 type mockEGS struct {
 	mu sync.Mutex
 
+	getAuthURLFunc                   func() string
 	authenticateWithCodeFunc         func(authCode string) (*rlapi.TokenResponse, error)
 	authenticateWithRefreshTokenFunc func(refreshToken string) (*rlapi.TokenResponse, error)
 	getExchangeCodeFunc              func(accessToken string) (string, error)
@@ -30,6 +31,16 @@ type mockEGS struct {
 	eosTokenCalls     []string
 	steamCalls        []string
 	refreshEOSCalls   []string
+}
+
+func (m *mockEGS) GetAuthURL() string {
+	m.mu.Lock()
+	fn := m.getAuthURLFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn()
+	}
+	return "https://www.epicgames.com/id/api/redirect"
 }
 
 func (m *mockEGS) AuthenticateWithCode(authCode string) (*rlapi.TokenResponse, error) {
@@ -180,6 +191,33 @@ func (s *mockStateStore) MarkUploadFailed(ctx context.Context, matchGUID, errMsg
 }
 func (s *mockStateStore) RecoverInFlight(ctx context.Context) error { return nil }
 func (s *mockStateStore) Close() error                              { return nil }
+func (s *mockStateStore) UpsertPlayer(ctx context.Context, player *storage.PlayerRecord) error {
+	return nil
+}
+func (s *mockStateStore) GetPlayer(ctx context.Context, playerID string) (*storage.PlayerRecord, error) {
+	return nil, storage.ErrPlayerNotFound
+}
+func (s *mockStateStore) ListPlayers(ctx context.Context, limit, offset int) ([]*storage.PlayerRecord, error) {
+	return nil, nil
+}
+func (s *mockStateStore) ListPlayerSummaries(ctx context.Context, limit, offset int) ([]*storage.PlayerSummary, error) {
+	return nil, nil
+}
+func (s *mockStateStore) SearchPlayerSummaries(ctx context.Context, query, platform string, limit, offset int) ([]*storage.PlayerSummary, int, error) {
+	return nil, 0, nil
+}
+func (s *mockStateStore) UpdatePlayerRanks(ctx context.Context, playerID string, ranksJSON string) error {
+	return nil
+}
+func (s *mockStateStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []storage.PlayerOutcome) error {
+	return nil
+}
+func (s *mockStateStore) GetPlayerMatchup(ctx context.Context, playerID string, playlistID int) (*storage.PlayerMatchup, error) {
+	return nil, nil
+}
+func (s *mockStateStore) GetPlayerMatchups(ctx context.Context, playerID string) ([]*storage.PlayerMatchup, error) {
+	return nil, nil
+}
 
 // ============================================================================
 // Factory & Validation Tests
@@ -707,3 +745,103 @@ func TestTokenInfo_IsExpired(t *testing.T) {
 		t.Fatal("fresh token should be valid")
 	}
 }
+
+func TestNewPollingProvider(t *testing.T) {
+	t.Run("disabled returns ErrMissingCredentials", func(t *testing.T) {
+		cfg := config.PollingAuthConfig{
+			Enabled:  false,
+			Provider: "epic",
+		}
+		p, err := NewPollingProvider(cfg)
+		if !errors.Is(err, ErrMissingCredentials) {
+			t.Fatalf("expected ErrMissingCredentials, got: %v", err)
+		}
+		if p != nil {
+			t.Fatalf("expected nil provider, got: %v", p)
+		}
+	})
+
+	t.Run("enabled epic provider created with store nil", func(t *testing.T) {
+		cfg := config.PollingAuthConfig{
+			Enabled:  true,
+			Provider: "epic",
+			Epic: config.EpicConfig{
+				RefreshToken: "refresh-token-123",
+			},
+		}
+		mock := &mockEGS{
+			authenticateWithRefreshTokenFunc: func(rt string) (*rlapi.TokenResponse, error) {
+				return &rlapi.TokenResponse{
+					AccessToken:  "access-123",
+					RefreshToken: "new-refresh-123",
+					ExpiresIn:    3600,
+					AccountID:    "account-123",
+					DisplayName:  "EpicPlayer",
+				}, nil
+			},
+			getExchangeCodeFunc: func(at string) (string, error) {
+				return "code-xyz", nil
+			},
+			exchangeEOSTokenFunc: func(ec string) (*rlapi.EOSTokenResponse, error) {
+				return &rlapi.EOSTokenResponse{
+					AccessToken: "eos-token-123",
+					ExpiresIn:   3600,
+				}, nil
+			},
+		}
+
+		p, err := NewPollingProvider(cfg, WithEGSClient(mock))
+		if err != nil {
+			t.Fatalf("unexpected error creating polling provider: %v", err)
+		}
+		if p.Name() != "epic" {
+			t.Errorf("expected provider name 'epic', got %q", p.Name())
+		}
+
+		token, err := p.Authenticate(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected auth error: %v", err)
+		}
+		if token.AccessToken != "eos-token-123" {
+			t.Errorf("expected access token eos-token-123, got %q", token.AccessToken)
+		}
+	})
+
+	t.Run("enabled steam provider created with store nil", func(t *testing.T) {
+		cfg := config.PollingAuthConfig{
+			Enabled:  true,
+			Provider: "steam",
+			Steam: config.SteamConfig{
+				SessionTicket: "01020304",
+				SteamID64:     "76561198000000001",
+				AccountName:   "SteamBot",
+			},
+		}
+		mock := &mockEGS{
+			exchangeEOSTokenFromSteamFunc: func(ticket string) (*rlapi.EOSTokenResponse, error) {
+				return &rlapi.EOSTokenResponse{
+					AccessToken: "eos-steam-tok",
+					AccountID:   "eos-account-id",
+					ExpiresIn:   3600,
+				}, nil
+			},
+		}
+
+		p, err := NewPollingProvider(cfg, WithEGSClient(mock))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if p.Name() != "steam" {
+			t.Errorf("expected provider name 'steam', got %q", p.Name())
+		}
+
+		token, err := p.Authenticate(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected auth error: %v", err)
+		}
+		if token.AccessToken != "eos-steam-tok" {
+			t.Errorf("expected eos-steam-tok, got %q", token.AccessToken)
+		}
+	})
+}
+

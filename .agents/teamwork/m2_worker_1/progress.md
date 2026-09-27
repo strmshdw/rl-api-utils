@@ -1,28 +1,15 @@
-# Progress: m2_worker_1
+# Progress — M2 Polling Auth & PsyNet Rank Client
 
-- **Last visited**: 2026-09-24T20:51:30Z
-- **Current Milestone**: M2 - Auth & PsyNet Integration
-- **Status**: COMPLETE - All implementations, unit tests, and verifications succeeded
+Last visited: 2026-09-26T01:00:00Z
 
-## Task Breakdown
-- [x] Read DISPATCH.md, ORIGINAL_REQUEST.md, PROJECT.md, and explorer handoffs (m2_explorer_1, m2_explorer_2, m2_explorer_3).
-- [x] Add dependencies (`github.com/dank/rlapi`, `github.com/gorilla/websocket`) to `go.mod` and run `go mod tidy`.
-- [x] Update `internal/testutil/mock_psynet.go` to support `"Result": resp` wrapper.
-- [x] Implement `internal/auth`:
-  - [x] `internal/auth/provider.go`
-  - [x] `internal/auth/epic.go`
-  - [x] `internal/auth/steam.go`
-  - [x] `internal/auth/auth_test.go`
-- [x] Implement `internal/psynet`:
-  - [x] `internal/psynet/client.go`
-  - [x] `internal/psynet/client_test.go`
-  - [x] `internal/psynet/downloader.go`
-  - [x] `internal/psynet/downloader_test.go`
-- [x] Run full test suites:
-  - [x] `go test -v -count=1 ./internal/auth/...` (13/13 PASS)
-  - [x] `go test -v -count=1 ./internal/psynet/...` (20/20 PASS)
-  - [x] `go test -v -count=1 ./internal/testutil/...` (3/3 PASS)
-  - [x] `go test -count=1 ./...` (ALL PASS)
-  - [x] `go vet ./internal/auth/... ./internal/psynet/...` (ZERO WARNINGS)
-- [x] Self-critique and check edge cases.
-- [x] Prepare `handoff.md` and notify parent via `send_message`.
+## Status
+- Current Step: Complete! Ready for Handoff.
+- Completed:
+  - 1. `internal/config/config.go`: Added `PollingAuthConfig` (with `ToAuthConfig()`), `PlayerTrackingConfig`, `CLIFlags` fields, defaults, environment variable overrides (`RL_SYNC_POLLING_*`, `RL_SYNC_PLAYER_TRACKING_*`, `RL_SYNC_LOCAL_*`), aliases, and anti-collision validation in `Validate()`.
+  - 2. `internal/config/config_test.go`: Added 9 unit test suites covering defaults, YAML/JSON loading, env var overrides, aliases, validation, anti-collision Error 67 guard, and CLI flags.
+  - 3. `internal/auth/provider.go`: Implemented `NewPollingProvider` enforcing in-memory tokens (`store = nil`) to prevent clobbering primary auth tokens in SQLite/JSONStore.
+  - 4. `internal/auth/auth_test.go`: Added `TestNewPollingProvider`.
+  - 5. `internal/playertrack/rank_client.go`: Implemented `SkillFetcher`, `SkillRPCClient`, `SkillRPCFactory`, `PsyNetRankClient` (with transparent reconnect and single retry), `NoOpRankClient`, `CheckCredentialCollision`, `FormatRank` (canonical 23 tiers & 4 divisions, Unranked & SSL division suppression), `FormatPlaylist`, `SerializeRanksJSON`, `ParseRanksJSON`, and `MockSkillFetcher`.
+  - 6. `internal/playertrack/rank_client_test.go`: Implemented 20 unit test suites covering exhaustive tiers, divisions, Unranked/SSL suppression, out-of-bounds, playlist mapping, serialization roundtrip, mock fetcher, offline degradation, reconnect, concurrency, and auth supplier.
+  - 7. `configs/config.example.yaml`: Updated with `polling_auth` and `player_tracking` sections.
+  - 8. Full verification: `go build ./cmd/rl-sync`, `go test -count=1 ./...` (100% pass across all packages), `go vet ./...` (0 warnings).

@@ -15,20 +15,26 @@ import (
 
 // jsonStatePayload defines the serialized on-disk format for the structured JSON state store.
 type jsonStatePayload struct {
-	Version   int                     `json:"version"`
-	UpdatedAt time.Time               `json:"updated_at"`
-	Matches   map[string]*MatchRecord `json:"matches"`
-	Auth      map[string]*AuthRecord  `json:"auth"`
+	Version          int                               `json:"version"`
+	UpdatedAt        time.Time                         `json:"updated_at"`
+	Matches          map[string]*MatchRecord           `json:"matches"`
+	Auth             map[string]*AuthRecord            `json:"auth"`
+	Players          map[string]*PlayerRecord          `json:"players,omitempty"`
+	PlayerMatchups   map[string]map[int]*PlayerMatchup `json:"player_matchups,omitempty"`
+	ProcessedMatches map[string]int64                  `json:"processed_matches,omitempty"`
 }
 
 // JSONStore provides an in-memory StateStore with atomic disk persistence via temporary files
 // and atomic os.Rename. It is fully thread-safe via sync.RWMutex.
 type JSONStore struct {
-	mu       sync.RWMutex
-	filePath string
-	matches  map[string]*MatchRecord
-	auth     map[string]*AuthRecord
-	closed   bool
+	mu               sync.RWMutex
+	filePath         string
+	matches          map[string]*MatchRecord
+	auth             map[string]*AuthRecord
+	players          map[string]*PlayerRecord
+	playerMatchups   map[string]map[int]*PlayerMatchup
+	processedMatches map[string]int64
+	closed           bool
 }
 
 // Compile-time check ensuring JSONStore implements StateStore.
@@ -50,9 +56,12 @@ func NewJSONStore(filePath string) (*JSONStore, error) {
 	}
 
 	store := &JSONStore{
-		filePath: filePath,
-		matches:  make(map[string]*MatchRecord),
-		auth:     make(map[string]*AuthRecord),
+		filePath:         filePath,
+		matches:          make(map[string]*MatchRecord),
+		auth:             make(map[string]*AuthRecord),
+		players:          make(map[string]*PlayerRecord),
+		playerMatchups:   make(map[string]map[int]*PlayerMatchup),
+		processedMatches: make(map[string]int64),
 	}
 
 	info, err := os.Stat(filePath)
@@ -97,6 +106,15 @@ func NewJSONStore(filePath string) (*JSONStore, error) {
 	if payload.Auth != nil {
 		store.auth = payload.Auth
 	}
+	if payload.Players != nil {
+		store.players = payload.Players
+	}
+	if payload.PlayerMatchups != nil {
+		store.playerMatchups = payload.PlayerMatchups
+	}
+	if payload.ProcessedMatches != nil {
+		store.processedMatches = payload.ProcessedMatches
+	}
 
 	// Clean up any stale temp files from prior abnormal crashes
 	cleanupStaleTempFiles(dir)
@@ -113,10 +131,13 @@ func (s *JSONStore) saveLocked() error {
 	}
 
 	payload := jsonStatePayload{
-		Version:   1,
-		UpdatedAt: time.Now().UTC(),
-		Matches:   s.matches,
-		Auth:      s.auth,
+		Version:          1,
+		UpdatedAt:        time.Now().UTC(),
+		Matches:          s.matches,
+		Auth:             s.auth,
+		Players:          s.players,
+		PlayerMatchups:   s.playerMatchups,
+		ProcessedMatches: s.processedMatches,
 	}
 
 	data, err := json.MarshalIndent(payload, "", "  ")
@@ -715,3 +736,511 @@ func (s *JSONStore) Close() error {
 	s.closed = true
 	return nil
 }
+
+// clonePlayerRecord creates a deep copy of PlayerRecord to prevent data races.
+func clonePlayerRecord(src *PlayerRecord) *PlayerRecord {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	return &dst
+}
+
+// clonePlayerMatchup creates a deep copy of PlayerMatchup to prevent data races.
+func clonePlayerMatchup(src *PlayerMatchup) *PlayerMatchup {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	return &dst
+}
+
+// clonePlayerSummary creates a deep copy of PlayerSummary to prevent data races.
+func clonePlayerSummary(src *PlayerSummary) *PlayerSummary {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	return &dst
+}
+
+// UpsertPlayer inserts or updates a player record, updating player_name, platform, and last_seen_at.
+// Preserves ranks_json and first_seen_at if existing.
+func (s *JSONStore) UpsertPlayer(ctx context.Context, player *PlayerRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if player == nil || strings.TrimSpace(player.PlayerID) == "" {
+		return errors.New("player or player_id cannot be empty")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	now := time.Now().UTC()
+	existing, exists := s.players[player.PlayerID]
+	if exists {
+		if player.Platform != "" {
+			existing.Platform = player.Platform
+		}
+		if player.PlayerName != "" {
+			existing.PlayerName = player.PlayerName
+		}
+		if player.RanksJSON != "" && player.RanksJSON != "{}" {
+			existing.RanksJSON = player.RanksJSON
+		}
+		if !player.LastSeenAt.IsZero() {
+			existing.LastSeenAt = player.LastSeenAt
+		} else {
+			existing.LastSeenAt = now
+		}
+	} else {
+		rec := clonePlayerRecord(player)
+		if rec.FirstSeenAt.IsZero() {
+			rec.FirstSeenAt = now
+		}
+		if rec.LastSeenAt.IsZero() {
+			rec.LastSeenAt = now
+		}
+		if rec.RanksJSON == "" {
+			rec.RanksJSON = "{}"
+		}
+		s.players[player.PlayerID] = rec
+	}
+
+	return s.saveLocked()
+}
+
+// GetPlayer retrieves a single player profile by PlayerID. Returns ErrPlayerNotFound if missing.
+func (s *JSONStore) GetPlayer(ctx context.Context, playerID string) (*PlayerRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(playerID) == "" {
+		return nil, ErrPlayerNotFound
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	rec, ok := s.players[playerID]
+	if !ok {
+		return nil, ErrPlayerNotFound
+	}
+
+	return clonePlayerRecord(rec), nil
+}
+
+// ListPlayers returns a paginated slice of players ordered by last_seen_at DESC, player_id ASC.
+func (s *JSONStore) ListPlayers(ctx context.Context, limit, offset int) ([]*PlayerRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	all := make([]*PlayerRecord, 0, len(s.players))
+	for _, p := range s.players {
+		all = append(all, p)
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].LastSeenAt.Equal(all[j].LastSeenAt) {
+			return all[i].LastSeenAt.After(all[j].LastSeenAt)
+		}
+		return all[i].PlayerID < all[j].PlayerID
+	})
+
+	total := len(all)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total || limit == 0 {
+		return []*PlayerRecord{}, nil
+	}
+
+	end := total
+	if limit > 0 {
+		end = offset + limit
+		if end > total {
+			end = total
+		}
+	}
+
+	results := make([]*PlayerRecord, 0, end-offset)
+	for _, p := range all[offset:end] {
+		results = append(results, clonePlayerRecord(p))
+	}
+
+	return results, nil
+}
+
+// ListPlayerSummaries returns paginated players along with aggregate win/loss statistics.
+func (s *JSONStore) ListPlayerSummaries(ctx context.Context, limit, offset int) ([]*PlayerSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	all := make([]*PlayerRecord, 0, len(s.players))
+	for _, p := range s.players {
+		all = append(all, p)
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].LastSeenAt.Equal(all[j].LastSeenAt) {
+			return all[i].LastSeenAt.After(all[j].LastSeenAt)
+		}
+		return all[i].PlayerID < all[j].PlayerID
+	})
+
+	total := len(all)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total || limit == 0 {
+		return []*PlayerSummary{}, nil
+	}
+
+	end := total
+	if limit > 0 {
+		end = offset + limit
+		if end > total {
+			end = total
+		}
+	}
+
+	results := make([]*PlayerSummary, 0, end-offset)
+	for _, p := range all[offset:end] {
+		sum := &PlayerSummary{
+			PlayerRecord: *clonePlayerRecord(p),
+		}
+		if matchups, ok := s.playerMatchups[p.PlayerID]; ok {
+			for _, m := range matchups {
+				sum.TotalWinsAsTeammate += m.WinsAsTeammate
+				sum.TotalLossesAsTeammate += m.LossesAsTeammate
+				sum.TotalWinsAsOpponent += m.WinsAsOpponent
+				sum.TotalLossesAsOpponent += m.LossesAsOpponent
+				sum.TotalMatches += m.TotalMatches
+			}
+		}
+		results = append(results, sum)
+	}
+
+	return results, nil
+}
+
+// SearchPlayerSummaries searches players matching query across player_name and player_id
+// (case-insensitive substring match), optionally filtered by platform (case-insensitive; "all" or "" means
+// all platforms), returning paginated PlayerSummary records and the total count of matching records across all pages.
+// Results are ordered by last_seen_at DESC, player_id ASC.
+func (s *JSONStore) SearchPlayerSummaries(ctx context.Context, query, platform string, limit, offset int) ([]*PlayerSummary, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	if s.closed {
+		return nil, 0, ErrStoreClosed
+	}
+
+	cleanQuery := strings.TrimSpace(strings.ToLower(query))
+	cleanPlatform := strings.TrimSpace(strings.ToLower(platform))
+	hasQuery := cleanQuery != ""
+	hasPlatform := cleanPlatform != "" && cleanPlatform != "all"
+
+	// 1. In-memory filter
+	matching := make([]*PlayerRecord, 0)
+	for _, p := range s.players {
+		if hasPlatform && strings.ToLower(p.Platform) != cleanPlatform {
+			continue
+		}
+		if hasQuery {
+			nameMatch := strings.Contains(strings.ToLower(p.PlayerName), cleanQuery)
+			idMatch := strings.Contains(strings.ToLower(p.PlayerID), cleanQuery)
+			if !nameMatch && !idMatch {
+				continue
+			}
+		}
+		matching = append(matching, p)
+	}
+
+	total := len(matching)
+
+	// Boundary shortcuts: total 0 or limit 0 return empty slice with accurate total
+	if total == 0 || limit == 0 {
+		return make([]*PlayerSummary, 0), total, nil
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return make([]*PlayerSummary, 0), total, nil
+	}
+
+	// 2. Deterministic sort: last_seen_at DESC, player_id ASC
+	sort.Slice(matching, func(i, j int) bool {
+		if !matching[i].LastSeenAt.Equal(matching[j].LastSeenAt) {
+			return matching[i].LastSeenAt.After(matching[j].LastSeenAt)
+		}
+		return matching[i].PlayerID < matching[j].PlayerID
+	})
+
+	end := total
+	if limit > 0 {
+		end = offset + limit
+		if end > total {
+			end = total
+		}
+	}
+
+	// 3. Slice and aggregate matchups
+	results := make([]*PlayerSummary, 0, end-offset)
+	for _, p := range matching[offset:end] {
+		sum := &PlayerSummary{
+			PlayerRecord: *clonePlayerRecord(p),
+		}
+		if matchups, ok := s.playerMatchups[p.PlayerID]; ok {
+			for _, m := range matchups {
+				if m == nil {
+					continue
+				}
+				sum.TotalWinsAsTeammate += m.WinsAsTeammate
+				sum.TotalLossesAsTeammate += m.LossesAsTeammate
+				sum.TotalWinsAsOpponent += m.WinsAsOpponent
+				sum.TotalLossesAsOpponent += m.LossesAsOpponent
+				sum.TotalMatches += m.TotalMatches
+			}
+		}
+		results = append(results, sum)
+	}
+
+	return results, total, nil
+}
+
+// UpdatePlayerRanks updates the ranks_json payload and last_seen_at timestamp for a player.
+func (s *JSONStore) UpdatePlayerRanks(ctx context.Context, playerID string, ranksJSON string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(playerID) == "" {
+		return ErrPlayerNotFound
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	rec, ok := s.players[playerID]
+	if !ok {
+		return ErrPlayerNotFound
+	}
+
+	if strings.TrimSpace(ranksJSON) == "" {
+		ranksJSON = "{}"
+	}
+	rec.RanksJSON = ranksJSON
+	rec.LastSeenAt = time.Now().UTC()
+
+	return s.saveLocked()
+}
+
+// RecordMatchResults atomically records all player outcomes for a match and registers the match GUID
+// in processedMatches. If matchGUID was already processed, returns ErrMatchAlreadyProcessed.
+func (s *JSONStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []PlayerOutcome) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(matchGUID) == "" {
+		return ErrInvalidGUID
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	// Idempotency check: if match was already processed, return sentinel error
+	if _, exists := s.processedMatches[matchGUID]; exists {
+		return ErrMatchAlreadyProcessed
+	}
+
+	now := time.Now().UTC()
+
+	for _, outcome := range outcomes {
+		if strings.TrimSpace(outcome.PlayerID) == "" {
+			continue
+		}
+
+		// Ensure player record exists (referential integrity)
+		player, exists := s.players[outcome.PlayerID]
+		if !exists {
+			player = &PlayerRecord{
+				PlayerID:    outcome.PlayerID,
+				Platform:    outcome.Platform,
+				PlayerName:  outcome.PlayerName,
+				RanksJSON:   "{}",
+				FirstSeenAt: now,
+				LastSeenAt:  now,
+			}
+			s.players[outcome.PlayerID] = player
+		} else {
+			player.LastSeenAt = now
+			if outcome.Platform != "" {
+				player.Platform = outcome.Platform
+			}
+			if outcome.PlayerName != "" {
+				player.PlayerName = outcome.PlayerName
+			}
+		}
+
+		// Ensure matchup map exists for player
+		pMap, ok := s.playerMatchups[outcome.PlayerID]
+		if !ok {
+			pMap = make(map[int]*PlayerMatchup)
+			s.playerMatchups[outcome.PlayerID] = pMap
+		}
+
+		// Get or create matchup for playlist
+		m, ok := pMap[playlistID]
+		if !ok {
+			m = &PlayerMatchup{
+				PlayerID:     outcome.PlayerID,
+				PlaylistID:   playlistID,
+				LastPlayedAt: now,
+			}
+			pMap[playlistID] = m
+		}
+
+		// Update 4-way win/loss matrix
+		if outcome.IsTeammate {
+			if outcome.Won {
+				m.WinsAsTeammate++
+			} else {
+				m.LossesAsTeammate++
+			}
+		} else {
+			if outcome.Won {
+				m.WinsAsOpponent++
+			} else {
+				m.LossesAsOpponent++
+			}
+		}
+		m.TotalMatches++
+		m.LastPlayedAt = now
+	}
+
+	// Record match in processed ledger
+	s.processedMatches[matchGUID] = now.Unix()
+
+	return s.saveLocked()
+}
+
+// GetPlayerMatchup retrieves the head-to-head record for a player in a specific playlist.
+// If no record exists, returns zeroed PlayerMatchup with TotalMatches=0 and nil error.
+func (s *JSONStore) GetPlayerMatchup(ctx context.Context, playerID string, playlistID int) (*PlayerMatchup, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(playerID) == "" {
+		return &PlayerMatchup{PlayerID: playerID, PlaylistID: playlistID}, nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	pMap, ok := s.playerMatchups[playerID]
+	if !ok {
+		return &PlayerMatchup{
+			PlayerID:   playerID,
+			PlaylistID: playlistID,
+		}, nil
+	}
+
+	m, ok := pMap[playlistID]
+	if !ok {
+		return &PlayerMatchup{
+			PlayerID:   playerID,
+			PlaylistID: playlistID,
+		}, nil
+	}
+
+	return clonePlayerMatchup(m), nil
+}
+
+// GetPlayerMatchups retrieves all playlist matchups for a player ordered by playlist_id ASC.
+func (s *JSONStore) GetPlayerMatchups(ctx context.Context, playerID string) ([]*PlayerMatchup, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(playerID) == "" {
+		return []*PlayerMatchup{}, nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	pMap, ok := s.playerMatchups[playerID]
+	if !ok || len(pMap) == 0 {
+		return []*PlayerMatchup{}, nil
+	}
+
+	results := make([]*PlayerMatchup, 0, len(pMap))
+	for _, m := range pMap {
+		results = append(results, clonePlayerMatchup(m))
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].PlaylistID < results[j].PlaylistID
+	})
+
+	return results, nil
+}
+

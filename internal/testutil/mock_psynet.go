@@ -15,7 +15,30 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dank/rlapi"
 )
+
+// MockPsyNetError models an RPC error returned by PsyNet.
+type MockPsyNetError struct {
+	Type    string `json:"Type"`
+	Message string `json:"Message"`
+}
+
+// MockSkill is an alias for rlapi.Skill.
+type MockSkill = rlapi.Skill
+
+// NewMockSkill creates a populated rlapi.Skill struct for test fixtures.
+func NewMockSkill(playlist, tier, division int, mmr float64, matchesPlayed int) rlapi.Skill {
+	return rlapi.Skill{
+		Playlist:               playlist,
+		Tier:                   tier,
+		Division:               division,
+		MMR:                    mmr,
+		MatchesPlayed:          matchesPlayed,
+		PlacementMatchesPlayed: 10,
+	}
+}
 
 // MockMatchEntry models the GetMatchHistory item structure returned by PsyNet.
 type MockMatchEntry struct {
@@ -79,6 +102,19 @@ type MockPsyNetServer struct {
 	historyRequestCount int
 	pingCount           int
 	activeConns         []net.Conn
+
+	// Player skills state
+	playerSkills       map[string][]rlapi.Skill
+	skillsRequestCount int
+	skillQueryCh       chan []string
+
+	// Fault injection configurations
+	skillsError            *MockPsyNetError
+	disconnectOnSkills     bool
+	disconnectNextSkills   int
+	emptySkillsResponse    bool
+	malformedSkillsPayload bool
+	skillsDelay            time.Duration
 }
 
 // NewMockPsyNetServer creates and starts a new MockPsyNetServer.
@@ -87,6 +123,8 @@ func NewMockPsyNetServer() *MockPsyNetServer {
 		matches:      make([]MockMatchEntry, 0),
 		authRequests: make([]MockAuthPlayerRequest, 0),
 		activeConns:  make([]net.Conn, 0),
+		playerSkills: make(map[string][]rlapi.Skill),
+		skillQueryCh: make(chan []string, 100),
 	}
 
 	mock.server = httptest.NewServer(http.HandlerFunc(mock.handleHTTP))
@@ -177,6 +215,141 @@ func (m *MockPsyNetServer) Reset() {
 	m.authRequests = make([]MockAuthPlayerRequest, 0)
 	m.historyRequestCount = 0
 	m.pingCount = 0
+
+	m.playerSkills = make(map[string][]rlapi.Skill)
+	m.skillsRequestCount = 0
+	m.skillsError = nil
+	m.disconnectOnSkills = false
+	m.disconnectNextSkills = 0
+	m.emptySkillsResponse = false
+	m.malformedSkillsPayload = false
+	m.skillsDelay = 0
+
+	for {
+		select {
+		case <-m.skillQueryCh:
+		default:
+			goto drained
+		}
+	}
+drained:
+}
+
+// SetPlayerSkills stores or replaces the skills slice for a given player ID.
+func (m *MockPsyNetServer) SetPlayerSkills(playerID string, skills []rlapi.Skill) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.playerSkills[playerID] = skills
+}
+
+// AddPlayerSkill appends a single skill record to a player's skills list.
+func (m *MockPsyNetServer) AddPlayerSkill(playerID string, skill rlapi.Skill) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.playerSkills[playerID] = append(m.playerSkills[playerID], skill)
+}
+
+// SetAllPlayerSkills bulk sets or replaces all player skills in the mock server.
+func (m *MockPsyNetServer) SetAllPlayerSkills(skillsMap map[string][]rlapi.Skill) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.playerSkills = make(map[string][]rlapi.Skill, len(skillsMap))
+	for k, v := range skillsMap {
+		m.playerSkills[k] = v
+	}
+}
+
+// SetSkillsMap is an alias for SetAllPlayerSkills for convenience.
+func (m *MockPsyNetServer) SetSkillsMap(skillsMap map[string][]rlapi.Skill) {
+	m.SetAllPlayerSkills(skillsMap)
+}
+
+// ClearPlayerSkills empties all stored player skills.
+func (m *MockPsyNetServer) ClearPlayerSkills() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.playerSkills = make(map[string][]rlapi.Skill)
+}
+
+// GetPlayerSkills retrieves a copy of configured skills for a player ID.
+func (m *MockPsyNetServer) GetPlayerSkills(playerID string) ([]rlapi.Skill, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	skills, ok := m.playerSkills[playerID]
+	if !ok {
+		return nil, false
+	}
+	res := make([]rlapi.Skill, len(skills))
+	copy(res, skills)
+	return res, true
+}
+
+// GetSkillsRequestCount returns the number of times Skills/GetPlayersSkills RPC was invoked.
+func (m *MockPsyNetServer) GetSkillsRequestCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.skillsRequestCount
+}
+
+// WaitForSkillQuery waits up to timeout for a Skills/GetPlayersSkills RPC request and returns the requested IDs.
+func (m *MockPsyNetServer) WaitForSkillQuery(timeout time.Duration) ([]string, bool) {
+	select {
+	case pids := <-m.skillQueryCh:
+		return pids, true
+	case <-time.After(timeout):
+		return nil, false
+	}
+}
+
+// SetSkillsError configures an RPC error to be returned on Skills/GetPlayersSkills requests.
+func (m *MockPsyNetServer) SetSkillsError(errType, message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.skillsError = &MockPsyNetError{Type: errType, Message: message}
+}
+
+// ClearSkillsError clears any active RPC error injection.
+func (m *MockPsyNetServer) ClearSkillsError() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.skillsError = nil
+}
+
+// SetDisconnectOnSkills forces the WebSocket connection to abruptly close whenever
+// a Skills/GetPlayersSkills RPC request is received.
+func (m *MockPsyNetServer) SetDisconnectOnSkills(disconnect bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.disconnectOnSkills = disconnect
+}
+
+// SetDisconnectNextSkills drops the connection for the next N Skills/GetPlayersSkills requests,
+// then resumes normal behavior. This is specifically designed to test client transparent reconnect.
+func (m *MockPsyNetServer) SetDisconnectNextSkills(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.disconnectNextSkills = count
+}
+
+// SetEmptySkillsResponse forces the mock server to return an empty player skills list.
+func (m *MockPsyNetServer) SetEmptySkillsResponse(empty bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.emptySkillsResponse = empty
+}
+
+// SetMalformedSkillsPayload causes the server to return an invalid JSON payload.
+func (m *MockPsyNetServer) SetMalformedSkillsPayload(malformed bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.malformedSkillsPayload = malformed
+}
+
+// SetSkillsDelay injects artificial latency before responding to skills queries.
+func (m *MockPsyNetServer) SetSkillsDelay(delay time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.skillsDelay = delay
 }
 
 func (m *MockPsyNetServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
@@ -326,6 +499,117 @@ func (m *MockPsyNetServer) serveWebSocketConn(conn net.Conn, reader *bufio.Reade
 						"Matches": currentMatches,
 					},
 				})
+
+				responseMsg := fmt.Sprintf("PsyTime: %d\r\nPsySig: mock_sig\r\nPsyResponseID: %s\r\n\r\n%s",
+					time.Now().Unix(), reqID, string(resultJSON))
+
+				if err := writeRFC6455TextMessage(conn, responseMsg); err != nil {
+					return
+				}
+			} else if strings.Contains(msg, "Skills/GetPlayersSkills") {
+				m.mu.Lock()
+				m.skillsRequestCount++
+
+				delay := m.skillsDelay
+				if delay > 0 {
+					m.mu.Unlock()
+					time.Sleep(delay)
+					m.mu.Lock()
+				}
+
+				if m.disconnectOnSkills || m.disconnectNextSkills > 0 {
+					if m.disconnectNextSkills > 0 {
+						m.disconnectNextSkills--
+					}
+					m.mu.Unlock()
+					_ = conn.Close()
+					return
+				}
+
+				if m.skillsError != nil {
+					errType := m.skillsError.Type
+					errMsg := m.skillsError.Message
+					m.mu.Unlock()
+
+					errJSON, _ := json.Marshal(map[string]any{
+						"PsyResponseID": reqID,
+						"Error": map[string]any{
+							"Type":    errType,
+							"Message": errMsg,
+						},
+					})
+					respMsg := fmt.Sprintf("PsyTime: %d\r\nPsySig: mock_sig\r\nPsyResponseID: %s\r\n\r\n%s",
+						time.Now().Unix(), reqID, string(errJSON))
+					_ = writeRFC6455TextMessage(conn, respMsg)
+					continue
+				}
+
+				if m.malformedSkillsPayload {
+					m.mu.Unlock()
+					respMsg := fmt.Sprintf("PsyTime: %d\r\nPsySig: mock_sig\r\nPsyResponseID: %s\r\n\r\n{\"Result\": {INVALID_JSON",
+						time.Now().Unix(), reqID)
+					_ = writeRFC6455TextMessage(conn, respMsg)
+					continue
+				}
+
+				var requestedPlayerIDs []string
+				delimiter := "\r\n\r\n"
+				if idx := strings.Index(msg, delimiter); idx != -1 {
+					bodyBytes := []byte(strings.TrimSpace(msg[idx+len(delimiter):]))
+					if len(bodyBytes) > 0 {
+						var rawReq struct {
+							PlayerIDs []json.RawMessage `json:"PlayerIDs"`
+						}
+						if err := json.Unmarshal(bodyBytes, &rawReq); err == nil {
+							for _, rawPID := range rawReq.PlayerIDs {
+								var pidStr string
+								if err := json.Unmarshal(rawPID, &pidStr); err == nil {
+									requestedPlayerIDs = append(requestedPlayerIDs, pidStr)
+								} else {
+									var structPID struct {
+										Platform string `json:"Platform"`
+										PlayerID string `json:"PlayerID"`
+									}
+									if err := json.Unmarshal(rawPID, &structPID); err == nil {
+										requestedPlayerIDs = append(requestedPlayerIDs, fmt.Sprintf("%s|%s|0", structPID.Platform, structPID.PlayerID))
+									}
+								}
+							}
+						}
+					}
+				}
+
+				select {
+				case m.skillQueryCh <- requestedPlayerIDs:
+				default:
+				}
+
+				var resultPlayers []map[string]any
+				if !m.emptySkillsResponse {
+					for _, pid := range requestedPlayerIDs {
+						if skills, found := m.playerSkills[pid]; found {
+							resultPlayers = append(resultPlayers, map[string]any{
+								"PlayerID": pid,
+								"Skills":   skills,
+							})
+						}
+					}
+				}
+				if resultPlayers == nil {
+					resultPlayers = make([]map[string]any, 0)
+				}
+				m.mu.Unlock()
+
+				payloadMap := map[string]any{
+					"PsyResponseID": reqID,
+					"Result": map[string]any{
+						"Players":      resultPlayers,
+						"PlayerSkills": resultPlayers,
+					},
+					"Players":      resultPlayers,
+					"PlayerSkills": resultPlayers,
+				}
+				resultJSON, _ := json.Marshal(payloadMap)
 
 				responseMsg := fmt.Sprintf("PsyTime: %d\r\nPsySig: mock_sig\r\nPsyResponseID: %s\r\n\r\n%s",
 					time.Now().Unix(), reqID, string(resultJSON))

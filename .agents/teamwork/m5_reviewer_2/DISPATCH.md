@@ -1,38 +1,57 @@
-# Dispatch: m5_reviewer_2
+# Dispatch for M5 Reviewer 2 (Frontend & Integration Reviewer)
 
-**Milestone**: M5 - Final Milestone & Hardening
-**Role**: Reviewer 2 (Tier 5 Hardening & Repository-Wide Integrity)
+**Role**: Frontend & Integration Reviewer
+**Parent**: `orchestrator_5` (`cc7be76d-47fc-44da-92e2-fb5c2aae2063`)
+**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_2`
+**Authoritative References**:
+1. `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-09-26T03:23:29Z`)
+2. `d:\code\rl-api-utils\.agents\teamwork\orchestrator_5\PROJECT.md`
+3. Worker Handoff: `d:\code\rl-api-utils\.agents\teamwork\m5_worker_1\handoff.md`
+4. Code to review:
+   - `web/` (React 19, TypeScript, Vite, Tailwind CSS)
+   - `internal/web/embed.go`
+   - `internal/daemon/daemon.go`
+   - `cmd/rl-sync/main.go`
 
 ## Objectives
-Review Tier 5 adversarial coverage and whole-repository hardening:
-1. Examine `test/e2e/tier5_adversarial_test.go` and `test/e2e/tier5_stress_test.go`.
-2. Examine `internal/ballchasing/client.go` error wrapping hardening.
-3. Verify:
-   - 100% test pass across all 10 packages in the repository.
-   - Zero `go vet` warnings across the entire repository.
-   - Concurrency safety and lack of resource leaks.
-4. Verification commands:
-```powershell
-$env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-cd d:\code\rl-api-utils
-go test -count=1 ./...
-go vet ./...
-```
+1. Verify frontend SPA, static embedding, and standalone single binary:
+   - 112 Vitest tests pass cleanly (`cd web; npm test`).
+   - Production Vite build cleanly compiles to `internal/web/dist` (`cd web; npm run build`).
+   - Embedded static assets serve at `/`, non-API paths fall back to `index.html` (HTTP 200), `/api` returns 404, path traversal returns 400/404.
+   - `rl-sync.exe` builds cleanly and runs `--help` and `--version` with zero Node.js runtime requirement.
+2. Run test suites:
+   `powershell -Command "cd web; npm test; npm run build"`
+   `powershell -Command "$p = (Get-Item env:LOCALAPPDATA).Value + '\Programs\go\bin;' + $env:PATH; $env:PATH = $p; go test -v -count=1 ./internal/web; go build -o rl-sync.exe ./cmd/rl-sync; .\rl-sync.exe --help; .\rl-sync.exe --version"`
+3. Issue an explicit verdict: APPROVE or REQUEST_CHANGES.
+Write report to `handoff.md` and send message to parent.
 
-Write your report to `d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_2\handoff.md` with verdict APPROVE or REQUEST_CHANGES and notify parent via `send_message`.
+## 2026-09-26T06:59:31Z
 
-## 2026-09-25T05:05:08Z
-You are m5_reviewer_2.
+You are Frontend & Integration Reviewer 2 for Milestone M5 (Final Verification & Hardening).
 Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_2
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_2\DISPATCH.md.
+Your parent is orchestrator_5 (conversation ID: cc7be76d-47fc-44da-92e2-fb5c2aae2063).
 
-Review Tier 5 adversarial coverage and whole-repository hardening:
-1. Examine test/e2e/tier5_adversarial_test.go, test/e2e/tier5_stress_test.go, and internal/ballchasing/client.go.
-2. Verify 100% test pass across all 10 packages in the repository and clean go vet.
-3. Verification commands:
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -count=1 ./...
-   go vet ./...
-4. Provide your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_2\handoff.md and notify parent via send_message.
+Authoritative References to read:
+1. d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-09-26T03:23:29Z)
+2. d:\code\rl-api-utils\.agents\teamwork\orchestrator_5\PROJECT.md
+3. Worker Handoff: d:\code\rl-api-utils\.agents\teamwork\m5_worker_1\handoff.md
+4. Dispatch Instructions: d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_2\DISPATCH.md
+5. Code to review:
+   - web/ (React 19, TypeScript, Vite, Tailwind CSS)
+   - internal/web/embed.go
+   - internal/daemon/daemon.go
+   - cmd/rl-sync/main.go
 
+Objectives:
+1. Verify frontend SPA, static embedding, and standalone single binary:
+   - 112 Vitest tests pass cleanly (cd web; npm test).
+   - Production Vite build cleanly compiles to internal/web/dist (cd web; npm run build).
+   - Embedded static assets serve at /, non-API paths fall back to index.html (HTTP 200), /api returns 404, path traversal returns 400/404.
+   - rl-sync.exe builds cleanly and runs --help and --version with zero Node.js runtime requirement.
+2. Run test suites:
+   powershell -Command "cd web; npm test; npm run build"
+   powershell -Command "$p = (Get-Item env:LOCALAPPDATA).Value + '\Programs\go\bin;' + $env:PATH; $env:PATH = $p; go test -v -count=1 ./internal/web; go build -o rl-sync.exe ./cmd/rl-sync; .\rl-sync.exe --help; .\rl-sync.exe --version"
+3. Issue an explicit verdict: APPROVE or REQUEST_CHANGES.
+
+Deliverable:
+Write your review report to d:\code\rl-api-utils\.agents\teamwork\m5_reviewer_2\handoff.md and send a message back to orchestrator_5.
