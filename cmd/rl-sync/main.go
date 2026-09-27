@@ -426,18 +426,35 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 					slog.Any("error", authErr),
 				)
 			} else {
-				rc, rcErr := r.NewRankClient(playertrack.RankClientConfig{
-					PrimaryAuth:  cfg.Auth,
-					PollingAuth:  cfg.PollingAuth,
-					AuthProvider: pollingAuth,
-					Logger:       logger,
-				})
-				if rcErr != nil {
-					logger.Warn("failed to initialize rank client; falling back to NoOpRankClient",
-						slog.Any("error", rcErr),
+				logger.Info("authenticating polling account credentials",
+					slog.String("provider", pollingAuth.Name()),
+					slog.String("account_type", auth.RolePolling.Label()),
+				)
+				pollToken, pollErr := pollingAuth.Authenticate(ctx)
+				if pollErr != nil {
+					logger.Warn("polling account authentication failed; falling back to NoOpRankClient",
+						slog.String("provider", pollingAuth.Name()),
+						slog.Any("error", pollErr),
 					)
 				} else {
-					rankClient = rc
+					logger.Info("polling account authenticated successfully",
+						slog.String("provider", pollingAuth.Name()),
+						slog.String("account_id", pollToken.AccountID),
+						slog.String("display_name", pollToken.DisplayName),
+					)
+					rc, rcErr := r.NewRankClient(playertrack.RankClientConfig{
+						PrimaryAuth:  cfg.Auth,
+						PollingAuth:  cfg.PollingAuth,
+						AuthProvider: pollingAuth,
+						Logger:       logger,
+					})
+					if rcErr != nil {
+						logger.Warn("failed to initialize rank client; falling back to NoOpRankClient",
+							slog.Any("error", rcErr),
+						)
+					} else {
+						rankClient = rc
+					}
 				}
 			}
 		}

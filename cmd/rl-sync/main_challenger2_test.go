@@ -256,6 +256,43 @@ func TestChallenger2_CLI_FallbackToNoOpRankClient_Stress(t *testing.T) {
 		}
 	})
 
+	// Scenario 3b: Polling auth provider Authenticate fails
+	// Must log warning, fall back to NoOpRankClient, and NOT return exit code 1
+	t.Run("PollingAuth_AuthenticateError_FallsBackToNoOpRankClient", func(t *testing.T) {
+		stdout := &bytes.Buffer{}
+		stderr := &bytes.Buffer{}
+		runner := createTestRunner(stdout, stderr)
+
+		var passedSkillFetcher playertrack.SkillFetcher
+		runner.LoadConfig = func(cli config.CLIFlags) (*config.Config, error) {
+			cfg := config.NewDefaultConfig()
+			cfg.Ballchasing.APIKey = "k"
+			cfg.Auth.Epic.RefreshToken = "r"
+			cfg.Sync.Once = true
+			cfg.PlayerTracking.Enabled = true
+			cfg.PollingAuth.Enabled = true
+			return cfg, nil
+		}
+		runner.NewPollingAuth = func(cfg config.PollingAuthConfig, opts ...auth.Option) (auth.AuthProvider, error) {
+			return &mockAuthProvider{name: "epic", authErr: errors.New("user cancelled login prompt")}, nil
+		}
+		runner.NewPlayerTracker = func(store storage.StateStore, rankClient playertrack.SkillFetcher, cfg config.PlayerTrackingConfig, authCfg config.AuthConfig, opts ...playertrack.TrackerOption) (*playertrack.Tracker, error) {
+			passedSkillFetcher = rankClient
+			return playertrack.NewTracker(store, rankClient, cfg, authCfg, opts...)
+		}
+
+		code := runner.Run(context.Background(), []string{"--once"})
+		if code != 0 {
+			t.Fatalf("expected exit code 0 on graceful degradation, got %d. stderr: %s", code, stderr.String())
+		}
+		if _, ok := passedSkillFetcher.(*playertrack.NoOpRankClient); !ok {
+			t.Fatalf("expected *playertrack.NoOpRankClient, got %T", passedSkillFetcher)
+		}
+		if !strings.Contains(stderr.String(), "polling account authentication failed; falling back to NoOpRankClient") {
+			t.Errorf("expected warning in log, got: %s", stderr.String())
+		}
+	})
+
 	// Scenario 4: Error during rank client close does not panic runner defer chain
 	t.Run("RankClient_CloseError_DoesNotCrash", func(t *testing.T) {
 		stdout := &bytes.Buffer{}
