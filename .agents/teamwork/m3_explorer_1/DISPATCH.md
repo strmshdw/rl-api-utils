@@ -1,31 +1,43 @@
-# Dispatch: m3_explorer_1
+# DISPATCH: m3_explorer_1
 
-**Milestone**: M3 - Ballchasing Replay Uploader
-**Role**: Ballchasing API & Streaming Explorer (internal/ballchasing)
+## Objective
+Investigate the exact implementation specifications for player stat prioritization, column reordering, and stat typography enlargement in `web/src/components/live/PlayerRow.tsx` and `RosterTable.tsx` for Milestone M3 (Requirement R1).
 
-## Scope
-Investigate and design the Ballchasing client upload architecture:
-- Interface: `ReplayUploader` (`UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error)`)
-- Multipart form construction:
-  - Streaming file payload to avoid loading entire 5MB replays into RAM if possible, or buffered multipart writer.
-  - Form field `"file"` with filename `"<matchGUID>.replay"`.
-  - Configured `visibility` parameter (`"public"`, `"unlisted"`, `"private"`).
-- Authentication:
-  - Header: `Authorization: <token>` (raw token strictly without `Bearer ` prefix).
-- Base URL configuration (default `https://ballchasing.com/api`, mockable for testing).
-- File reading safety: ensure file handle is always closed promptly.
-- Write your findings, proposed types, and design to `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1\handoff.md`.
+## Scope Boundaries
+- Read-only technical investigation. Do NOT edit code or test files.
+- Deliver `handoff.md` to `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1\handoff.md`.
 
-## 2026-09-25T03:58:19Z
-You are m3_explorer_1.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1\DISPATCH.md.
-Also review the survey findings in d:\code\rl-api-utils\.agents\teamwork\survey_miner_ballchasing_1\handoff.md.
+## Context & Inputs
+- Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
+- Project Architecture & Milestones: `d:\code\rl-api-utils\PROJECT.md`
+- Survey report on UI revamp: `d:\code\rl-api-utils\.agents\teamwork\survey_explorer_ui_1\handoff.md`
+- Codebase: `web/src/components/live/PlayerRow.tsx`, `web/src/components/live/RosterTable.tsx`, `web/src/types/columns.ts`, `web/src/hooks/useColumnConfig.ts`
 
-Explore the Ballchasing client upload architecture (internal/ballchasing):
-- Interface: ReplayUploader (UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error))
-- Multipart form construction with "file" part and "visibility" parameter
-- Raw Authorization header: Authorization: <token> (WITHOUT Bearer)
-- Configurable base URL for testing
-- File streaming and safe handle closing
-Write your report and proposed code to d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1\handoff.md and notify parent via send_message.
+## Specific Tasks
+1. Analyze column ordering in `RosterTable.tsx` (`<thead>`) and `PlayerRow.tsx` (`<tbody>`):
+   - Sequence: Player -> Score -> Goals -> Assists -> Saves -> Shots -> Demos -> Rank -> MMR -> H2H.
+   - Compatibility with `useColumnConfig` column visibility toggling.
+2. Detail typography, font sizing, and visual accents for stat metrics:
+   - Score: 18px (`text-lg font-black font-mono text-white`)
+   - Goals: 18px (`text-lg font-black font-mono text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]`)
+   - Assists: 16px (`text-base font-extrabold font-mono text-cyan-300`)
+   - Saves: 16px (`text-base font-extrabold font-mono text-emerald-400`)
+   - Shots: 14px (`text-sm font-bold font-mono text-slate-200`)
+   - Demos: 14px (`text-sm font-bold font-mono text-rose-400 font-extrabold`)
+   - Include semantic `data-testid` attributes (`stat-score`, `stat-goals`, etc.).
+3. Verify backward compatibility with existing tests in `RosterTable.test.tsx` and `adversarial.challenge.test.tsx` (`<span>9W-1L</span>`, `YOU`, etc.).
+4. Provide concrete code diffs and recommendations.
+
+
+## 2026-10-06T09:32:17Z
+You are m3_explorer_1, an exploration agent for Milestone M3 (Requirement R1: Live Game UI Revamp).
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1
+
+You MUST read:
+1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
+2. Project specification: d:\code\rl-api-utils\PROJECT.md
+3. Survey report: d:\code\rl-api-utils\.agents\teamwork\survey_explorer_ui_1\handoff.md
+4. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1\DISPATCH.md
+
+Investigate player stat prioritization, column reordering, and stat typography enlargement in web/src/components/live/PlayerRow.tsx and RosterTable.tsx.
+Deliver your comprehensive handoff report at: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_1\handoff.md and notify orchestrator_6.

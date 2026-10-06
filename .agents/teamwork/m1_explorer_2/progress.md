@@ -1,21 +1,21 @@
 # Progress — M1 Explorer 2
 
-Last visited: 2026-09-25T03:10:00Z
-Current status: Completed. Structured JSON state store fallback fully explored, designed, and documented.
+Last visited: 2026-10-06T08:55:00Z
+Current status: Investigating internal/session and downstream consumers for Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect).
 
 ## Completed
-- [x] Initialized DISPATCH.md and verified user prompt
-- [x] Initialized BRIEFING.md
-- [x] Read ORIGINAL_REQUEST.md, PROJECT.md, survey reports, and peer agent handoffs
-- [x] Analyzed StateStore interface compliance and error conventions
-- [x] Designed thread-safe in-memory data structures with sync.RWMutex and defensive copying
-- [x] Designed atomic persistence mechanics with fsync and Windows-safe atomicRename retries
-- [x] Implemented startup loading, directory auto-creation, stale temp cleanup, and RecoverInFlight
-- [x] Authored proposed_jsonstore.go in working directory
-- [x] Designed unit test suite in proposed_jsonstore_test.go covering 13 test scenarios
-- [x] Authored proposed_jsonstore_test.go in working directory
-- [x] Authored comprehensive handoff.md report
-- [x] Updated BRIEFING.md and progress.md
+- [x] Received dispatch for Milestone M1 (R2: Persistent Player State on Disconnect)
+- [x] Appended dispatch message to DISPATCH.md
+- [x] Examined ORIGINAL_REQUEST.md, PROJECT.md, and survey_explorer_state_1/handoff.md
+- [x] Investigated SessionTracker.OnActiveMatchUpdated and RecordActiveMatch
+- [x] Investigated DeepClone propagation of IsDisconnected across models and collections
+- [x] Analyzed internal/session/models.go and SessionMatchPlayer
+- [x] Analyzed ConcludeMatch and goal aggregation / winner mapping
+- [x] Investigated SSE streaming (internal/daemon/sse.go) and REST endpoints (GET /api/session, GET /current-match)
+- [x] Verified existing test suites (go test ./internal/session/... and ./internal/daemon/...)
+- [x] Drafted exact code diffs and test cases for internal/session
 
 ## Next Steps
-- Notify parent via send_message
+- [ ] Update BRIEFING.md
+- [ ] Author comprehensive handoff.md report
+- [ ] Send completion message to orchestrator_6

@@ -1,42 +1,54 @@
-# Dispatch: m3_reviewer_1
+# Reviewer Dispatch: m3_reviewer_1
 
-**Milestone**: M3 - Ballchasing Replay Uploader
-**Role**: Reviewer 1 (internal/ballchasing)
+## Task Assignment
+**Role**: Lead Frontend Reviewer (`m3_reviewer_1`)  
+**Milestone**: Milestone M3 (Requirement R1: Live Game UI Revamp & Zero-Scroll Viewport Optimization)  
+**Parent Agent**: `orchestrator_6`  
+**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1`
 
-## Scope
-Review the Milestone 3 implementation delivered by `m3_worker_1`:
-- Source files:
-  - `internal/ballchasing/types.go`
-  - `internal/ballchasing/client.go`
-  - `internal/ballchasing/client_test.go`
-- Review criteria:
-  - Correctness, completeness, and interface conformance (`ReplayUploader`).
-  - Strict raw `Authorization: <apiKey>` header (no `Bearer ` prefix).
-  - Status code handling: 201 Created (success), 409 Conflict (duplicate detected, err=nil, 0 retries), 429 Too Many Requests (Retry-After parser, exponential backoff with retry budget), 401 Unauthorized (fatal halt, 0 retries).
-  - Windows file descriptor safety: file descriptor closed before backoff sleep.
-  - Run build, unit tests, and vet:
-    ```powershell
-    $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-    cd d:\code\rl-api-utils
-    go test -v -count=1 ./internal/ballchasing/...
-    go vet ./internal/ballchasing/...
-    ```
-- Provide verdict (APPROVE or REQUEST_CHANGES) in `d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1\handoff.md` and notify parent via `send_message`.
+## Mandatory Documents to Read First
+1. Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
+2. Project Specification: `d:\code\rl-api-utils\PROJECT.md`
+3. Worker Handoff: `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md`
 
-## 2026-09-25T04:10:09Z
+## Focus Area
+Review player stat prioritization, visual hierarchy, and test coverage in:
+- `web/src/components/live/PlayerRow.tsx`
+- `web/src/components/live/RosterTable.tsx`
+- `web/src/components/live/LiveGameView.layout.test.tsx`
 
-You are m3_reviewer_1.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md.
+Verify:
+1. Column sequence order: `Player` -> `Score` -> `Goals` -> `Assists` -> `Saves` -> `Shots` -> `Demos` -> `Rank` -> `MMR` -> `H2H` -> `Platform`.
+2. Typography hierarchy:
+   - Score: 18px font-black mono text-white (`data-testid="stat-score"`)
+   - Goals: 18px font-black mono with amber glow when >0 (`data-testid="stat-goals"`)
+   - Assists: 16px font-extrabold mono cyan when >0 (`data-testid="stat-assists"`)
+   - Saves: 16px font-extrabold mono emerald when >0 (`data-testid="stat-saves"`)
+   - Shots: 14px font-bold mono slate (`data-testid="stat-shots"`)
+   - Demos: 14px font-bold mono rose (`data-testid="stat-demos"`)
+3. Regression safety: All existing badges (`YOU`, `BOT`, `9W-1L`, `>--<`) remain intact and all 131 tests pass.
+4. Run tests:
+   ```bash
+   cd d:\code\rl-api-utils\web && npm test
+   ```
 
-Review Milestone 3 (Ballchasing Replay Uploader):
-1. Review internal/ballchasing/types.go, client.go, and client_test.go.
-2. Check interface conformance (ReplayUploader), raw Authorization header, 201/409/429/401 handling, Windows file descriptor safety.
-3. Run tests and vet:
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/ballchasing/...
-   go vet ./internal/ballchasing/...
-4. Provide your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1\handoff.md and notify parent via send_message.
+Deliver your verdict (`APPROVE` or `REQUEST_CHANGES`) in `d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1\handoff.md` and send a message back.
 
+
+## 2026-10-06T10:02:40Z
+You are m3_reviewer_1, a high-reliability review agent for Milestone M3 (Requirement R1: Live Game UI Revamp & Viewport Optimization).
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1
+
+You MUST read:
+1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
+2. Project specification: d:\code\rl-api-utils\PROJECT.md
+3. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1\DISPATCH.md
+4. Worker handoff report: d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md
+
+Review player stat prioritization, visual hierarchy, column sequence, typography classes, and test coverage in:
+- web/src/components/live/PlayerRow.tsx
+- web/src/components/live/RosterTable.tsx
+- web/src/components/live/LiveGameView.layout.test.tsx
+
+Run tests: cd d:\code\rl-api-utils\web && npm test
+Deliver your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_1\handoff.md and notify orchestrator_6.

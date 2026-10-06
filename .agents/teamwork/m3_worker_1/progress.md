@@ -1,32 +1,22 @@
-# Progress: m3_worker_1
+# Progress Heartbeat — m3_worker_1
 
-- Last visited: 2026-09-26T01:16:30Z
-- Status: Completed
-- Completed:
-  - Reviewed DISPATCH.md, ORIGINAL_REQUEST.md (## 2026-09-26T00:19:44Z), player_tracking_plan.md, PROJECT.md, and all 3 Explorer analyses.
-  - Implemented `internal/playertrack/tracker.go`:
-    - `playertrack.Tracker` implementing `statsapi.PlayerEventHandler` (`OnUpdateState`, `OnMatchEnded`).
-    - 4-Tier Local Player Resolution hierarchy with strict bot immunity.
-    - Teammate vs. Opponent classification (`myTeamNum = localPlayer.TeamNum`).
-    - Profile upsert on `OnUpdateState` with in-memory frame cache.
-    - In-memory match snapshot (`CurrentMatchResponse`) with thread-safe `DeepClone()` on reads (`GetCurrentMatch`).
-    - Asynchronous rank retrieval with 4-tier debounce against 120Hz flooding (15m rank cache TTL, in-flight tracking, failure backoff, matchup cache).
-    - Match outcome compilation on `OnMatchEnded`: `myTeamWon = (*winnerTeamNum == myTeamNum)`, `[]storage.PlayerOutcome` vector, `store.RecordMatchResults` call, idempotency handling on `storage.ErrMatchAlreadyProcessed`, and graceful fallback on nil `winnerTeamNum` and unresolved local player.
-    - Lifecycle cleanup with `Close()`.
-  - Implemented `internal/playertrack/tracker_test.go`:
-    - Full dual-backend storage parameterization (`SQLiteStore` and `JSONStore`).
-    - Test double setup (`testSkillFetcher`, `mockAuthProvider`, `mockFaultStore`).
-    - Full matrix of local player resolution tiers (1, 2, 3, 4, precedence overrides, bot immunity, spectator fallback).
-    - Roster classification and bot exclusion (profile upsert, rank fetch, match outcome).
-    - Match lifecycle transitions (victory, defeat, post-match snapshot preservation, new match reset, playlist isolation).
-    - 120Hz debounce validation (1,000 updates -> 1 RPC call, failure backoff, fallback upsert).
-    - Idempotency on duplicate `OnMatchEnded` (zero counter drift).
-    - Nil `winnerTeamNum` handling.
-    - High-concurrency stress test with multiple writers and readers.
-  - Verification:
-    - `go build ./cmd/rl-sync` passed (code 0).
-    - `go test -v -count=1 ./internal/playertrack/...` passed (code 0).
-    - `go vet ./...` passed (code 0, zero warnings).
-    - `go test -count=1 ./...` passed (100% across all 12 packages).
-- Next:
-  - Write handoff report `handoff.md` and send message to parent.
+Last visited: 2026-10-06T09:59:10Z
+Current Status: Complete — All implementations, builds, and test suites verified. Writing handoff.md.
+
+## Milestones & Steps
+- [x] Read DISPATCH.md, ORIGINAL_REQUEST.md, and all 3 Explorer Handoff Reports
+- [x] Initialize BRIEFING.md, progress.md, and local skill copy
+- [x] View current source code of all target files before modifications
+- [x] Implement updates to `web/src/components/live/PlayerRow.tsx`
+- [x] Implement updates to `web/src/components/live/RosterTable.tsx`
+- [x] Implement updates to `web/src/components/live/ScoreboardBanner.tsx`
+- [x] Implement updates to `web/src/components/layout/Header.tsx`
+- [x] Implement updates to `web/src/App.tsx`
+- [x] Implement updates to `web/src/components/live/LiveGameView.tsx`
+- [x] Implement comprehensive test suite in `web/src/components/live/LiveGameView.layout.test.tsx` (19 tests)
+- [x] Execute `npm test` in `web/` (all 131 tests pass)
+- [x] Execute `npm run build` in `web/` (clean build generating embedded bundle)
+- [x] Execute `go test ./...` in project root (all 14 Go packages pass)
+- [x] Execute `go build ./cmd/rl-sync` (binary compiles cleanly)
+- [x] Update BRIEFING.md
+- [ ] Finalize `handoff.md` and send completion message to parent

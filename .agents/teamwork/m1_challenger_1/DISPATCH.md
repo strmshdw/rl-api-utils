@@ -1,28 +1,31 @@
-# Dispatch for M1 Challenger 1: Storage Stress Testing & Boundary Verification
+# DISPATCH: m1_challenger_1
 
-**Milestone**: M1 - Storage & Configuration
-**Role**: Challenger 1 (`teamwork_preview_challenger`)
-**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1`
-**Original Request**: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md`
-**Project Specification**: `d:\code\rl-api-utils\PROJECT.md`
-**Worker Handoff**: `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md`
+## Objective
+Empirically verify the correctness of Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) using stress testing and edge-case execution.
 
-## Objectives
-1. Read `ORIGINAL_REQUEST.md` and `PROJECT.md`.
-2. Write and execute stress tests and boundary verification against `internal/storage`:
-   - Concurrency stress: multi-goroutine readers & writers simulating heavy sync load.
-   - Crash simulation: corrupt databases, non-writable directories, interrupted writes, verifying `RecoverInFlight`.
-   - Invariant testing: verify that duplicate re-upserts NEVER clobber `DOWNLOADED`, `UPLOADED`, or `DUPLICATE` statuses.
-   - Large dataset test: 1000+ matches inserted and queried.
-3. Write your adversarial findings and verdict (APPROVE or CHALLENGE_FAILED) in `d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\handoff.md`.
-4. Send completion message to parent orchestrator.
+## Verification Focus
+1. **Adversarial Scenarios**:
+   - Reconnections: rapid connect-disconnect-reconnect cycles.
+   - Splitscreen players: ensure `Steam|id|0` and `Steam|id|1` are tracked independently if one leaves early.
+   - Simultaneous drops: multiple players dropping at once across both teams.
+   - Casual bot backfills: verify that departed AI bots are never retained as disconnected ghosts.
+   - Local player disconnect: confirm local team context is preserved for the entire match.
+2. **Execute Tests**:
+   - Run tests directly: `go test -v ./internal/playertrack/...`, `go test -v ./internal/session/...`.
+   - Write or execute an adversarial test or benchmark if needed.
 
-## 2026-09-25T03:19:47Z
-You are m1_challenger_1.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md.
+Deliver verdict (`APPROVE` or `REJECT`) with empirical test logs in `d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\handoff.md` and send message back to orchestrator_6.
 
-Adversarially challenge internal/storage:
-1. Write and run stress tests against SQLiteStore and JSONStore: concurrency contention, crash recovery, idempotency against repeated upserts, corrupt databases, and dirty state cleanup.
-2. Provide your verdict (APPROVE or CHALLENGE_FAILED) in d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\handoff.md and notify parent via send_message.
+
+## 2026-10-06T09:11:18Z
+You are m1_challenger_1, an adversarial verifier for Milestone M1 (Requirement R2: Persistent Player State on Disconnect).
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1
+
+You MUST read:
+1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
+2. Project specification: d:\code\rl-api-utils\PROJECT.md
+3. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\DISPATCH.md
+4. Worker handoff report: d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md
+
+Empirically verify edge cases: reconnections without duplicates, casual bot backfill exclusion, local player disconnect fallback, simultaneous drops. Run target and full tests.
+Deliver your verdict (APPROVE or REJECT) in d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\handoff.md and notify orchestrator_6.

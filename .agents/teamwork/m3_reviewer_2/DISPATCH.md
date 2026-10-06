@@ -1,35 +1,59 @@
-# Dispatch: m3_reviewer_2
+# Reviewer Dispatch: m3_reviewer_2
 
-**Milestone**: M3 - Ballchasing Replay Uploader
-**Role**: Reviewer 2 (Architecture & Non-Regression Review)
+## Task Assignment
+**Role**: Layout & Build Integration Reviewer (`m3_reviewer_2`)  
+**Milestone**: Milestone M3 (Requirement R1: Live Game UI Revamp & Zero-Scroll Viewport Optimization)  
+**Parent Agent**: `orchestrator_6`  
+**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2`
 
-## Scope
-Independently review the Milestone 3 implementation delivered by `m3_worker_1`:
-- Examine `internal/ballchasing` for architectural cleanliness, error handling, thread safety, and edge case resilience.
-- Verify repository-wide compatibility and non-regression:
-  ```powershell
-  $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-  cd d:\code\rl-api-utils
-  go test -v -count=1 ./internal/ballchasing/...
-  go test -count=1 ./...
-  go vet ./internal/ballchasing/...
-  ```
-- Check Clean Architecture boundaries: no circular dependencies, proper interface usage.
-- Provide verdict (APPROVE or REQUEST_CHANGES) in `d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2\handoff.md` and notify parent via `send_message`.
+## Mandatory Documents to Read First
+1. Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
+2. Project Specification: `d:\code\rl-api-utils\PROJECT.md`
+3. Worker Handoff: `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md`
 
-## 2026-09-25T04:10:09Z
-You are m3_reviewer_2.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md.
+## Focus Area
+Review elimination of superfluous elements, zero-scroll layout architecture, and build asset embedding in:
+- `web/src/components/live/ScoreboardBanner.tsx`
+- `web/src/components/layout/Header.tsx`
+- `web/src/App.tsx`
+- `web/src/components/live/LiveGameView.tsx`
+- `internal/web/dist` and static asset serving
 
-Independently review Milestone 3:
-1. Examine internal/ballchasing for code structure, error handling, rate-limiting backoff, context cancellation, and Clean Architecture conformance.
-2. Run tests across the repository:
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/ballchasing/...
-   go test -count=1 ./...
-   go vet ./internal/ballchasing/...
-3. Provide your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2\handoff.md and notify parent via send_message.
+Verify:
+1. Superfluous element elimination:
+   - Header debug text (`Port 49125` and `Uptime`) removed.
+   - Header playlist carousel hidden when `inMatch` is true.
+   - Scoreboard banner redundant player counts (`X Players`) removed.
+   - App footer hidden during live match view.
+2. Vertical space budget:
+   - Margin and padding compressed (ScoreboardBanner `p-6 mb-8` -> `py-2.5 px-5 mb-3`).
+   - Standard 3v3 live match vertical stack height <= 450px, guaranteeing zero vertical scrolling on 1080p (inner height ~920px).
+3. Production build & Go embedding:
+   - `npm run build` succeeds cleanly in `web/`.
+   - `go test ./...` in project root passes without regressions.
+   - `go build ./cmd/rl-sync` succeeds.
 
+Deliver your verdict (`APPROVE` or `REQUEST_CHANGES`) in `d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2\handoff.md` and send a message back.
+
+
+## 2026-10-06T10:02:40Z
+You are m3_reviewer_2, an independent review agent for Milestone M3 (Requirement R1: Live Game UI Revamp & Viewport Optimization).
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2
+
+You MUST read:
+1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
+2. Project specification: d:\code\rl-api-utils\PROJECT.md
+3. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2\DISPATCH.md
+4. Worker handoff report: d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md
+
+Review elimination of superfluous UI elements, zero-scroll layout architecture, margin/padding compression, and production build embedding:
+- web/src/components/live/ScoreboardBanner.tsx
+- web/src/components/layout/Header.tsx
+- web/src/App.tsx
+- web/src/components/live/LiveGameView.tsx
+- internal/web/dist and static asset serving
+
+Run builds and tests:
+- cd d:\code\rl-api-utils\web && npm run build
+- cd d:\code\rl-api-utils && go test ./...
+Deliver your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m3_reviewer_2\handoff.md and notify orchestrator_6.

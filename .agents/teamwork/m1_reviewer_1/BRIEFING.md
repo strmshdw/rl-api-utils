@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-25T03:22:00Z
+# BRIEFING — 2026-10-06T09:16:30Z
 
 ## Mission
-Review and adversarially stress-test Milestone 1 (Storage & Configuration) implementation by m1_worker_1.
+Review and adversarially stress-test Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) implementation by m1_worker_1.
 
 ## 🔒 My Identity
 - Archetype: teamwork_preview_reviewer
@@ -10,6 +10,8 @@ Review and adversarially stress-test Milestone 1 (Storage & Configuration) imple
 - Original parent: 6e6c9567-59d2-415e-8d6e-41314a903548
 - Milestone: M1 - Storage & Configuration
 - Instance: 1 of 1
+- Current Run: Milestone M1 (Requirement R2: Persistent Player State on Disconnect)
+- Parent: f26416a7-29be-4b99-8406-d28bf983644d (orchestrator_6)
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
@@ -18,45 +20,50 @@ Review and adversarially stress-test Milestone 1 (Storage & Configuration) imple
 - Provide verdict APPROVE or REQUEST_CHANGES in handoff.md and notify parent
 
 ## Current Parent
-- Conversation ID: 6e6c9567-59d2-415e-8d6e-41314a903548
-- Updated: not yet
+- Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
+- Updated: 2026-10-06T09:16:30Z
 
 ## Review Scope
 - **Files to review**:
-  - `internal/storage/store.go`
-  - `internal/storage/sqlite.go`
-  - `internal/storage/sqlite_test.go`
-  - `internal/storage/jsonstore.go`
-  - `internal/storage/jsonstore_test.go`
-  - `internal/config/config.go`
-  - `internal/config/config_test.go`
-  - `configs/config.example.yaml`
-  - `configs/config.example.json`
-  - `go.mod`, `go.sum`
-- **Interface contracts**: PROJECT.md, ORIGINAL_REQUEST.md
-- **Review criteria**: correctness, interface conformance, robustness, security, integrity, code layout compliance
+  - `internal/playertrack/tracker.go`
+  - `internal/playertrack/tracker_test.go`
+  - `internal/session/models.go`
+  - `internal/session/session.go`
+  - `internal/session/session_test.go`
+  - `web/src/types/api.ts`
+- **Interface contracts**: `PROJECT.md`, `ORIGINAL_REQUEST.md` (## 2026-10-06T08:30:09Z)
+- **Review criteria**: Correctness of participant retention, reconnection deduplication, bot filtering, local player disconnect fallback, session propagation, ConcludeMatch aggregation, TypeScript contract compatibility, integrity violation checks.
 
 ## Review Checklist
-- **Items reviewed**: store.go, sqlite.go, sqlite_test.go, jsonstore.go, jsonstore_test.go, config.go, config_test.go, configs/, go.mod, go.sum, testutil/, test/e2e
+- **Items reviewed**:
+  - `internal/playertrack/tracker.go`: `LobbyPlayer.IsDisconnected`, `OnUpdateState` differential retention, bot exclusion, local team fallback.
+  - `internal/playertrack/tracker_test.go`: All 5 new unit tests across SQLite and JSONStore.
+  - `internal/session/models.go`: `SessionMatchPlayer.IsDisconnected`, `Won`, and pointer-safe `DeepClone`.
+  - `internal/session/session.go`: `ConcludeMatch` mapping, goal aggregation, `Won` resolution, and SSE broadcast.
+  - `internal/session/session_test.go`: All 4 new integration and snapshot tests.
+  - `web/src/types/api.ts`: Matching interfaces for `SessionMatchPlayer` and `LobbyPlayer`.
 - **Verdict**: APPROVE
-- **Unverified claims**: none (all claims independently tested and verified)
+- **Unverified claims**: None; all verified independently via live test execution and code inspection.
 
 ## Attack Surface
 - **Hypotheses tested**:
-  - SQLite concurrent read/write locking: PASSED (MaxOpenConns=1 + busy_timeout=5000)
-  - Windows file locking & rename in JSONStore: PASSED (Fsync + Close before atomicRename + retry loop)
-  - JSONStore deep copy mutation defense: PASSED (pointer deep copies protect internal map)
-  - Configuration precedence (CLI > Env > File > Defaults): PASSED
-  - Integrity violation checks: PASSED (zero hardcoded values or facades)
-- **Vulnerabilities found**: None critical/major; 3 minor edge-case findings documented.
+  - Reconnection deduplication: Verified — returning player updates stats and resets `IsDisconnected=false` with 0 duplicate rows.
+  - Bot replacement / churn: Verified — departed bots ignored, incoming bots not flagged disconnected.
+  - Early leaver local player: Verified — local player and `LocalTeam` preserved; `OnMatchEnded` compiles outcomes.
+  - Multi-match transition leakage: Verified — new match GUID cleanly resets retention state without leaking previous players.
+  - Concurrency & deep cloning: Verified — pointer-safe cloning of `Won *bool` and full match snapshots under mutex.
+  - Integrity violation checks: Verified — zero hardcoding, zero facade implementations, authentic test execution.
+- **Vulnerabilities found**: None.
 - **Untested angles**: None within M1 scope.
 
 ## Key Decisions Made
 - Confirmed zero integrity violations.
-- Confirmed complete interface conformance with PROJECT.md.
-- Issued APPROVE verdict.
+- Confirmed complete interface conformance with `PROJECT.md`.
+- Confirmed 100% pass across all 14 Go packages (clean `go test -count=1 ./...`), clean `go vet ./...`, clean `go build ./cmd/rl-sync`, and clean frontend build and tests (`npm run build`, `npm test`).
+- Issued final APPROVE verdict.
 
 ## Artifact Index
-- handoff.md — final review verdict and findings
-- progress.md — liveness heartbeat
-- BRIEFING.md — working memory
+- `handoff.md` — comprehensive review report and formal verdict
+- `progress.md` — liveness heartbeat
+- `BRIEFING.md` — working memory
+- `DISPATCH.md` — task dispatch

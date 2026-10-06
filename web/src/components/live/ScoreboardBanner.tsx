@@ -78,34 +78,32 @@ export const ScoreboardBanner: React.FC<ScoreboardBannerProps> = ({
   };
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90 shadow-2xl backdrop-blur-md mb-8">
+    <div
+      data-testid="scoreboard-banner"
+      className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90 shadow-2xl backdrop-blur-md mb-3"
+    >
       {/* Top Ambient Glow Bar */}
       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#00a2ff] via-slate-700 to-[#ff7b00]" />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 items-center p-6 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 items-center py-2.5 px-5 gap-4">
         {/* Blue Team Score (Left) */}
-        <div className="flex items-center justify-between md:justify-start gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-[#00a2ff]/10 border border-[#00a2ff]/30 text-[#00a2ff] shadow-[0_0_15px_rgba(0,162,255,0.25)]">
-              <Shield className="w-6 h-6" />
+        <div className="flex items-center justify-between md:justify-start gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#00a2ff]/10 border border-[#00a2ff]/30 text-[#00a2ff] shadow-[0_0_12px_rgba(0,162,255,0.2)]">
+              <Shield className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold tracking-wider uppercase text-[#00a2ff]">
-                  BLUE TEAM
-                </span>
-                {isLocalOnBlue && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-[#00a2ff]/20 text-[#00a2ff] border border-[#00a2ff]/40">
-                    YOU
-                  </span>
-                )}
-              </div>
-              <span className="text-xs text-slate-400">
-                {allPlayers.filter(p => p.team_num === 0).length} Players
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-bold tracking-wider uppercase text-[#00a2ff]">
+                BLUE TEAM
               </span>
+              {isLocalOnBlue && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-[#00a2ff]/20 text-[#00a2ff] border border-[#00a2ff]/40">
+                  YOU
+                </span>
+              )}
             </div>
           </div>
-          <div className="text-5xl font-black text-[#00a2ff] drop-shadow-[0_0_15px_rgba(0,162,255,0.5)]">
+          <div className="text-4xl md:text-5xl font-black text-[#00a2ff] leading-none drop-shadow-[0_0_15px_rgba(0,162,255,0.5)]">
             {blueScore}
           </div>
         </div>
@@ -114,13 +112,13 @@ export const ScoreboardBanner: React.FC<ScoreboardBannerProps> = ({
         <div className="flex flex-col items-center justify-center text-center">
           {renderStatusBadge()}
 
-          <div className="mt-2 text-base font-semibold text-slate-200">
+          <div className="mt-1 text-sm font-semibold text-slate-200 truncate max-w-[220px]">
             {match.playlist_name || 'Rocket League Match'}
           </div>
 
           {/* MMR Delta Pill */}
           {playlistMmrDelta !== undefined && (
-            <div className="mt-1 flex items-center gap-1.5 text-xs font-medium">
+            <div className="mt-0.5 flex items-center gap-1.5 text-xs font-medium">
               <span className="text-slate-400">Session Δ:</span>
               <span
                 className={`font-bold ${
@@ -139,36 +137,31 @@ export const ScoreboardBanner: React.FC<ScoreboardBannerProps> = ({
           {/* Action Button: Open Column Customizer */}
           <button
             onClick={onOpenColumnConfig}
-            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-750 border border-slate-700 hover:border-slate-600 transition-colors"
+            className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[11px] font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-750 border border-slate-700 hover:border-slate-600 transition-colors"
           >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+            <SlidersHorizontal className="w-3 h-3 text-cyan-400" />
             Customize Columns
           </button>
         </div>
 
         {/* Orange Team Score (Right) */}
-        <div className="flex items-center justify-between md:justify-end gap-4">
-          <div className="text-5xl font-black text-[#ff7b00] drop-shadow-[0_0_15px_rgba(255,123,0,0.5)] order-2 md:order-1">
+        <div className="flex items-center justify-between md:justify-end gap-3">
+          <div className="text-4xl md:text-5xl font-black text-[#ff7b00] leading-none drop-shadow-[0_0_15px_rgba(255,123,0,0.5)] order-2 md:order-1">
             {orangeScore}
           </div>
-          <div className="flex items-center gap-3 order-1 md:order-2">
-            <div className="text-right">
-              <div className="flex items-center justify-end gap-2">
-                {isLocalOnOrange && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-[#ff7b00]/20 text-[#ff7b00] border border-[#ff7b00]/40">
-                    YOU
-                  </span>
-                )}
-                <span className="text-sm font-bold tracking-wider uppercase text-[#ff7b00]">
-                  ORANGE TEAM
+          <div className="flex items-center gap-2.5 order-1 md:order-2">
+            <div className="flex items-center justify-end gap-1.5">
+              {isLocalOnOrange && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-[#ff7b00]/20 text-[#ff7b00] border border-[#ff7b00]/40">
+                  YOU
                 </span>
-              </div>
-              <span className="text-xs text-slate-400">
-                {allPlayers.filter(p => p.team_num === 1).length} Players
+              )}
+              <span className="text-sm font-bold tracking-wider uppercase text-[#ff7b00]">
+                ORANGE TEAM
               </span>
             </div>
-            <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-[#ff7b00]/10 border border-[#ff7b00]/30 text-[#ff7b00] shadow-[0_0_15px_rgba(255,123,0,0.25)]">
-              <Flame className="w-6 h-6" />
+            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#ff7b00]/10 border border-[#ff7b00]/30 text-[#ff7b00] shadow-[0_0_12px_rgba(255,123,0,0.2)]">
+              <Flame className="w-5 h-5" />
             </div>
           </div>
         </div>

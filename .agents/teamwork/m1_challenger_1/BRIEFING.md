@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-25T03:23:30Z
+# BRIEFING — 2026-10-06T09:22:00Z
 
 ## Mission
-Adversarially challenge internal/storage via stress tests: concurrency contention, crash recovery, idempotency, corrupt databases, and dirty state cleanup.
+Adversarially challenge and empirically verify Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) across internal/playertrack and internal/session.
 
 ## 🔒 My Identity
 - Archetype: empirical challenger
@@ -10,47 +10,51 @@ Adversarially challenge internal/storage via stress tests: concurrency contentio
 - Original parent: 6e6c9567-59d2-415e-8d6e-41314a903548
 - Milestone: M1 - Storage & Configuration
 - Instance: 1 of 1
+- Current parent: f26416a7-29be-4b99-8406-d28bf983644d (orchestrator_6)
+- Milestone M1: Persistent Player State on Disconnect (R2)
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
 - Run verification code directly — do NOT trust worker claims without empirical reproduction
 - `.agents/teamwork/` holds only metadata — source and tests must go in designated project directories
+- Empirical verification of edge cases: reconnections without duplicates, casual bot backfill exclusion, local player disconnect fallback, simultaneous drops
 
 ## Current Parent
-- Conversation ID: 6e6c9567-59d2-415e-8d6e-41314a903548
-- Updated: 2026-09-25T03:19:47Z
+- Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
+- Updated: 2026-10-06T09:11:18Z
 
 ## Review Scope
-- **Files to review**: `internal/storage/store.go`, `internal/storage/sqlite.go`, `internal/storage/jsonstore.go`
-- **Interface contracts**: `PROJECT.md`, `ORIGINAL_REQUEST.md`
-- **Review criteria**: Concurrency contention, crash recovery, idempotency against repeated upserts, corrupt DBs, dirty state cleanup, boundary limits, context cancellation
+- **Files to review**: `internal/playertrack/tracker.go`, `internal/playertrack/models.go`, `internal/session/session.go`, `internal/session/models.go`, `web/src/types/api.ts`
+- **Interface contracts**: `PROJECT.md`, `ORIGINAL_REQUEST.md` (## 2026-10-06T08:30:09Z)
+- **Review criteria**: Disconnect retention, reconnection deduplication, bot backfill exclusion, local player drop fallback, simultaneous multi-player drops, splitscreen players, concurrency safety, outcome computation
 
 ## Attack Surface
 - **Hypotheses tested**:
-  1. High concurrency causes SQLite connection exhaustion or data races in JSONStore (Tested: PASS, both stores handle 20+ concurrent workers cleanly).
-  2. Dirty temp files left by JSONStore crashes prevent restart (Tested: PASS, cleanup works).
-  3. Re-upserting matches clobbers terminal states DOWNLOADED, UPLOADED, DUPLICATE (Tested: PASS, terminal states are strictly preserved).
-  4. 1500+ match scale breaks chronological ordering or creates duplicate rows (Tested: PASS, exact counts and ordering maintained).
-  5. Matches discovered without replay URL never transition to PENDING when replay URL arrives (Tested: CRITICAL BUG CONFIRMED in both SQLiteStore and JSONStore).
-  6. Context cancellation ignored by JSONStore (Tested: HIGH BUG CONFIRMED in JSONStore).
-  7. Auth state empty provider allowed in SQLite (Tested: MINOR INCONSISTENCY CONFIRMED).
-- **Vulnerabilities found**:
-  1. `SKIPPED -> PENDING` transition deadlock: Both stores update `ReplayURL` but fail to update `DownloadStatus` from `SKIPPED` to `PENDING`. As a result, `ListPendingDownloads` ignores matches with delayed replay URLs forever.
-  2. `JSONStore` context cancellation ignoring `ctx.Err()`: All 14 methods in `JSONStore` ignore `ctx.Err()`.
-  3. `SQLiteStore.SaveAuthState` and `GetAuthState` allow empty provider string `""` without validation.
-- **Untested angles**: Network partition simulation (storage layer is local filesystem only, not network-backed).
+  1. Reconnection duplicate risk: Rapid 10-cycle connect/disconnect/reconnect tested. PASS: zero duplicates, monotonic stat accumulation, clean `IsDisconnected` toggling.
+  2. Splitscreen independent tracking: Primary `Steam|id|0` vs Guest `Steam|id|1` tested. PASS: independent retention and local player fallback verified.
+  3. Casual bot backfill exclusion: Departed bots replaced by other bots and humans tested. PASS: departed bots never retained as ghosts, bot profiles never written to `player_matchups`.
+  4. Local player sustained disconnect: Local player leaves in frame 2 and remains omitted for 10 frames. PASS: local team and player retained across all frames, match ends with valid outcome persistence.
+  5. Opponent ragequit / forfeit: All 3 opponents drop simultaneously. PASS: all 3 retained as disconnected, victory recorded against all 3.
+  6. Chaos fuzz generator: 30 random presence/stat frames in 4v4 lobby. PASS: strict invariant of 6 accounted players maintained without duplicates.
+  7. Goal summation in session: Disconnected players' goals counted in `BlueScore` and `OrangeScore`. PASS.
+  8. SSE event emission: Event payloads include `"is_disconnected": true`. PASS.
+- **Vulnerabilities found**: None. All edge cases handled robustly and pass empirical validation.
+- **Untested angles**: None within M1 scope.
 
 ## Loaded Skills
-- None applicable (pure Go storage layer)
+- None applicable
 
 ## Key Decisions Made
-- Authored comprehensive adversarial stress harness in `internal/storage/adversarial_test.go`.
-- Empirically reproduced and confirmed 2 concrete bugs (1 critical logic deadlock in both stores, 1 context cancellation failure in JSONStore).
-- Issued verdict: `CHALLENGE_FAILED` pending worker remediation of the delayed replay URL transition and context cancellation.
+- Created co-located adversarial suites:
+  - `internal/playertrack/adversarial_disconnect_test.go`
+  - `internal/session/adversarial_disconnect_test.go`
+- Validated all 14 Go packages (100% pass, 0 failures), clean `go vet`, clean `go build ./cmd/rl-sync`, clean frontend test (112 tests) and build.
+- Verdict: **APPROVE**.
 
 ## Artifact Index
-- `internal/storage/adversarial_test.go` — Co-located stress and boundary test harness
 - `BRIEFING.md` — Persistent working memory
 - `DISPATCH.md` — Incoming dispatch log
 - `progress.md` — Liveness heartbeat
-- `handoff.md` — Challenger verdict and adversarial report
+- `handoff.md` — Final verdict report
+- `internal/playertrack/adversarial_disconnect_test.go` — Playertrack adversarial test suite
+- `internal/session/adversarial_disconnect_test.go` — Session adversarial test suite

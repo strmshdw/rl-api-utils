@@ -1,21 +1,26 @@
 # Progress — m1_explorer_3
 
-**Current Task**: Completed M1 Configuration System & Module Definitions Exploration  
-**Last visited**: 2026-09-25T03:09:00Z  
+**Current Task**: Completed programmatic mid-game player disconnect test design for Milestone M1 (Requirement R2)  
+**Last visited**: 2026-10-06T08:55:30Z  
 **Status**: COMPLETED  
 
 ## Completed Steps
-- [x] Initialized BRIEFING.md and updated DISPATCH.md
-- [x] Reviewed ORIGINAL_REQUEST.md, PROJECT.md, and survey handoffs (arch, rlapi, ballchasing)
-- [x] Analyzed requirements for go.mod, dependencies, and Clean Architecture boundaries
-- [x] Designed typed `Config` struct supporting Epic, Steam, Ballchasing, Sync, and Logging
-- [x] Formulated strict precedence hierarchy (CLI > Env > File > Defaults)
-- [x] Solved duration unmarshaling for YAML and JSON via custom `Duration` type
-- [x] Defined complete validation rule set and multi-error aggregation via `errors.Join`
-- [x] Prepared configuration templates (`config.example.yaml` and `config.example.json`)
-- [x] Designed comprehensive unit test suite in `config_test.go`
-- [x] Wrote 5-component handoff report (`handoff.md`) in `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\handoff.md`
-- [x] Updated BRIEFING.md with final state and artifact references
+- [x] Received dispatch for Milestone M1 (Requirement R2: Persistent Player State on Disconnect)
+- [x] Appended incoming dispatch to `DISPATCH.md` with UTC timestamp
+- [x] Updated `BRIEFING.md` preserving append-only 🔒 sections
+- [x] Reviewed authoritative requirements in `ORIGINAL_REQUEST.md` (2026-10-06T08:30:09Z)
+- [x] Reviewed architecture in `PROJECT.md` and survey findings in `survey_explorer_state_1/handoff.md`
+- [x] Verified existing test suite across all 14 packages (100% pass rate)
+- [x] Analyzed existing test structures and patterns in `internal/playertrack/tracker_test.go` and `internal/session/session_test.go`
+- [x] Designed 8 comprehensive automated programmatic tests covering:
+  - Frame 1: Full lobby with active players accumulating stats
+  - Frame 2: Teammate leaves early -> player retained, stats preserved, `IsDisconnected = true`
+  - Frame 3: Disconnected player reconnects -> stats update, `IsDisconnected = false`, no duplicates
+  - Frame 4: Local player leaves early -> local player and team preserved
+  - Edge cases: Opponent disconnect/reconnect, simultaneous multi-player disconnect, match transition isolation, casual bot replacement
+  - Downstream integration: Observer propagation to SessionTracker, SSE broadcasting, concluded match history snapshots with goal aggregation
+- [x] Compiled comprehensive 5-component handoff report (`handoff.md`) with complete, ready-to-run Go test code
+- [x] Updated `BRIEFING.md` with final state and artifact references
 
 ## Next Steps
-- Notify parent orchestrator via `send_message`.
+- Send completion message to caller (`orchestrator_6`).

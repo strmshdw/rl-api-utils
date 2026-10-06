@@ -279,19 +279,27 @@ func (s *SessionTracker) ConcludeMatch(match *playertrack.CurrentMatchResponse) 
 			mmr = lp.CurrentRank.MMR
 		}
 
+		var won *bool
+		if match.WinnerTeam != nil && (lp.TeamNum == 0 || lp.TeamNum == 1) {
+			w := (lp.TeamNum == *match.WinnerTeam)
+			won = &w
+		}
+
 		matchPlayers = append(matchPlayers, SessionMatchPlayer{
-			PlayerID:      lp.PlayerID,
-			Platform:      lp.Platform,
-			Name:          lp.Name,
-			TeamNum:       lp.TeamNum,
-			IsLocal:       lp.IsLocal,
-			IsBot:         lp.IsBot,
-			Stats:         lp.Stats,
-			RankName:      rankName,
-			Tier:          tier,
-			Division:      div,
-			MMR:           mmr,
-			MatchupRecord: lp.MatchupRecord,
+			PlayerID:       lp.PlayerID,
+			Platform:       lp.Platform,
+			Name:           lp.Name,
+			TeamNum:        lp.TeamNum,
+			IsLocal:        lp.IsLocal,
+			IsBot:          lp.IsBot,
+			IsDisconnected: lp.IsDisconnected,
+			Won:            won,
+			Stats:          lp.Stats,
+			RankName:       rankName,
+			Tier:           tier,
+			Division:       div,
+			MMR:            mmr,
+			MatchupRecord:  lp.MatchupRecord,
 		})
 	}
 

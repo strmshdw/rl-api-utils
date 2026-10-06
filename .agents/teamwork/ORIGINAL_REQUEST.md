@@ -226,3 +226,31 @@ Serve the web application directly from the Go daemon on port 49125:
 ### Verification & Regression
 - [ ] All existing 385+ tests and newly added tests pass cleanly (go test ./...).
 - [ ] Single executable rl-sync.exe builds cleanly with embedded frontend.
+
+
+## 2026-10-06T08:30:09Z
+
+Revamp the live game UI to prioritize and enlarge player stats while removing superfluous elements, and fix state tracking so that when a player leaves a game, their data and match results (wins/losses) are persistently logged and not deleted.
+
+Working directory: d:\code\rl-api-utils
+Integrity mode: development
+
+## Requirements
+
+### R1. UI Revamp
+Redesign the live game view to prioritize player stats, ensuring they are prominently displayed without vertical scrolling. Remove or minimize superfluous UI elements.
+
+### R2. Persistent Player State
+Fix the state management logic to ensure player information and stats are retained in the active game state when a player leaves a game early.
+
+### R3. Match Logging
+Update the logging mechanism to correctly record win/loss outcomes for all participants, including those who disconnected before the game ended.
+
+## Acceptance Criteria
+
+### UI Changes
+- [ ] Automated tests (e.g., DOM layout/structure checks) confirm that stat elements are rendered prominently and do not require vertical scrolling on standard viewports.
+
+### State Tracking & Logging
+- [ ] An automated programmatic test simulating a mid-game player disconnect passes, asserting that the player's stats remain in the active match state.
+- [ ] An automated test confirms that the final match history records a win or loss for the disconnected player.

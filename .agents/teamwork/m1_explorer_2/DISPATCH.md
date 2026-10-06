@@ -1,29 +1,36 @@
-# Dispatch for M1 Explorer 2: JSON State Store & Atomic Persistence Invariants
+# DISPATCH: m1_explorer_2
 
-**Milestone**: M1 - Storage & Configuration
-**Role**: Explorer 2 (`teamwork_preview_explorer`)
-**Original Request**: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md`
-**Project Specification**: `d:\code\rl-api-utils\PROJECT.md`
-**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2`
+## Objective
+Investigate Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) focusing on `internal/session` and downstream consumers.
 
-## Objectives
-1. Read `ORIGINAL_REQUEST.md` and `PROJECT.md` (specifically the Interface Contracts for `internal/storage`).
-2. Deep dive into the implementation strategy for `internal/storage/jsonstore.go`:
-   - Structured JSON state store implementing the exact same `StateStore` interface as SQLite.
-   - Concurrency control: `sync.RWMutex` protecting in-memory map/slice of `MatchRecord` and auth state.
-   - Atomic persistence: Marshaling state to `.tmp` file and using atomic `os.Rename` to target file to prevent corruptions during crashes or power losses.
-   - Startup loading, directory creation (`os.MkdirAll`), recovery of in-flight states (`RecoverInFlight`).
-   - Unit test suite (`jsonstore_test.go`): testing full CRUD, atomic save, restart loading, concurrency safety under `-race`.
-3. Output comprehensive findings and recommended implementation code structures in `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md`.
+## Scope Boundaries
+- Read-only technical investigation. Do NOT edit source files.
+- Deliver `handoff.md` to `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md`.
 
-## 2026-09-25T03:04:06Z
-You are m1_explorer_2.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\DISPATCH.md.
+## Context & Inputs
+- Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
+- Project Architecture & Milestones: `d:\code\rl-api-utils\PROJECT.md`
+- Survey report on player state: `d:\code\rl-api-utils\.agents\teamwork\survey_explorer_state_1\handoff.md`
+- Codebase: `internal/session/session.go`, `internal/session/models.go`, `internal/daemon/handlers_players.go`, `internal/daemon/handlers_session.go`
 
-Explore the structured JSON state store fallback for Milestone 1 (internal/storage/jsonstore.go):
-- Implementation of StateStore interface using in-memory data structures protected by sync.RWMutex
-- Atomic persistence to disk via temporary file writing and atomic os.Rename
-- State loading on startup, directory initialization, in-flight state recovery (RecoverInFlight)
-- Unit test strategy in jsonstore_test.go verifying interface compliance, atomic saving, crash resistance, and race detector cleanliness.
-Write your report to d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md and notify parent via send_message.
+## Specific Tasks
+1. Analyze how `SessionTracker` receives active match updates via `OnActiveMatchUpdated(match *playertrack.CurrentMatchResponse)`.
+2. Verify that `match.DeepClone()` in `session.go` preserves `IsDisconnected` on `LobbyPlayer`.
+3. Check `internal/session/models.go` and `SessionMatchPlayer` to ensure `IsDisconnected` is supported.
+4. Verify SSE event serialization (`EventMatchUpdate`) and REST response formatting (`GET /api/session`, `GET /current-match`) to ensure frontend and API consumers receive accurate retention data.
+5. Provide exact code diffs and recommendations for `internal/session/`.
+
+
+## 2026-10-06T08:48:03Z
+[Message] timestamp=2026-10-06T08:48:03Z sender=f26416a7-29be-4b99-8406-d28bf983644d priority=MESSAGE_PRIORITY_HIGH content=You are m1_explorer_2, an exploration agent for Milestone M1 (Requirement R2: Persistent Player State on Disconnect).
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2
+You MUST read:
+1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
+2. Project specification: d:\code\rl-api-utils\PROJECT.md
+3. Survey report: d:\code\rl-api-utils\.agents\teamwork\survey_explorer_state_1\handoff.md
+4. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\DISPATCH.md
+
+Investigate internal/session and downstream consumers:
+- SessionTracker.OnActiveMatchUpdated, DeepClone propagation of IsDisconnected, models.go, and SSE/REST exposure.
+Produce a comprehensive handoff report at: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md.
+When finished, send a completion message back to your caller (orchestrator_6).

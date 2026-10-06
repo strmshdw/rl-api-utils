@@ -41,6 +41,8 @@ export interface SessionMatchPlayer {
   team_num: number; // 0 = Blue, 1 = Orange, 255 = Spectator
   is_local: boolean;
   is_bot: boolean;
+  is_disconnected?: boolean;
+  won?: boolean;
   stats: PlayerStatsSummary;
   rank_name: string;
   tier: number;
@@ -86,6 +88,7 @@ export interface LobbyPlayer {
   team_num: number;
   is_local: boolean;
   is_bot: boolean;
+  is_disconnected?: boolean;
   stats: PlayerStatsSummary;
   current_rank?: PlayerPlaylistRank;
   ranks?: PlayerRanksSnapshot;

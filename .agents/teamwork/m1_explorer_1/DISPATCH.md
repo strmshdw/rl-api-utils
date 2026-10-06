@@ -1,37 +1,33 @@
-# Dispatch for M1 Explorer 1: SQLite Storage Engine & Idempotency State Machine
+# DISPATCH: m1_explorer_1
 
-**Milestone**: M1 - Storage & Configuration
-**Role**: Explorer 1 (`teamwork_preview_explorer`)
-**Original Request**: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md`
-**Project Specification**: `d:\code\rl-api-utils\PROJECT.md`
-**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1`
+## Objective
+Investigate the precise implementation details for Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) focusing on `internal/playertrack/tracker.go`.
 
-## Objectives
-1. Read `ORIGINAL_REQUEST.md` and `PROJECT.md` (specifically the Interface Contracts for `internal/storage` and the schema).
-2. Deep dive into the implementation strategy for `internal/storage`:
-   - Using pure Go SQLite (`modernc.org/sqlite`) with zero CGO dependencies.
-   - Exact SQL table schema for `matches` and `auth_state` tables.
-   - Database connection management (WAL mode, busy timeout, single writer or connection pooling).
-   - Method implementations for `StateStore` interface:
-     - `GetMatch(ctx, guid)`
-     - `ListPendingDownloads(ctx)`
-     - `ListPendingUploads(ctx)`
-     - `UpsertDiscoveredMatches(ctx, matches)`
-     - Status transition methods (`MarkDownloading`, `MarkDownloaded`, `MarkDownloadFailed`, `MarkUploading`, `MarkUploaded`, `MarkDuplicate`, `MarkUploadFailed`)
-     - `RecoverInFlight(ctx)`: resets in-flight states on startup
-     - `SaveAuthState(ctx, provider, token, accountID, displayName)` / `GetAuthState(ctx, provider)`
-   - Design unit tests for SQLite store (`sqlite_test.go`): verifying concurrency, transactions, state transitions, duplicate marking, crash recovery.
-3. Output comprehensive findings and recommended implementation code structures in `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\handoff.md`.
+## Scope Boundaries
+- Read-only technical investigation. Do NOT edit source files.
+- Deliver `handoff.md` to `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\handoff.md`.
 
-## 2026-09-25T03:04:06Z
-You are m1_explorer_1.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\DISPATCH.md.
+## Context & Inputs
+- Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
+- Project Architecture & Milestones: `d:\code\rl-api-utils\PROJECT.md`
+- Survey report on player state: `d:\code\rl-api-utils\.agents\teamwork\survey_explorer_state_1\handoff.md`
+- Codebase: `internal/playertrack/tracker.go`, `internal/playertrack/models.go`
 
-Explore the pure Go SQLite storage engine for Milestone 1 (internal/storage):
-- Driver: modernc.org/sqlite (zero CGO)
-- SQL Schema: matches and auth_state tables with indexing
-- Connection management: WAL mode, busy timeout, transactions
-- Implementation details for StateStore interface methods (GetMatch, ListPendingDownloads, ListPendingUploads, UpsertDiscoveredMatches, MarkDownloading, MarkDownloaded, MarkDownloadFailed, MarkUploading, MarkUploaded, MarkDuplicate, MarkUploadFailed, RecoverInFlight, SaveAuthState, GetAuthState)
-- Unit test strategy in sqlite_test.go covering CRUD, duplicate marking, crash recovery, and concurrency safety.
-Write your report to d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\handoff.md and notify parent via send_message.
+## Specific Tasks
+1. Analyze the exact retention algorithm for `Tracker.OnUpdateState`:
+   - How to track participant history within the active `matchGUID`.
+   - How to retain players who leave early with their accumulated stats (`Score`, `Goals`, `Assists`, `Saves`, `Shots`, `Demos`).
+   - Adding `IsDisconnected bool json:"is_disconnected,omitempty"` to `LobbyPlayer`.
+   - Preserving `LocalPlayer` and `LocalTeam` if local player disconnects or is omitted.
+   - Handling reconnections (player reappears: update stats, set `IsDisconnected = false`, prevent duplicates).
+   - Resetting retention cleanly when transitioning to a new match GUID.
+2. Provide concrete, exact code changes/diffs for `internal/playertrack/tracker.go`.
+3. Highlight edge cases (splitscreen players, bot replacements, thread-safety under `t.mu`).
+
+
+## 2026-10-06T08:48:03Z
+[Message] sender=f26416a7-29be-4b99-8406-d28bf983644d priority=MESSAGE_PRIORITY_HIGH
+Investigate the exact differential retention algorithm for internal/playertrack/tracker.go:
+- OnUpdateState participant retention, IsDisconnected flag, stats preservation, reconnection without duplicate rows, local player fallback, and match GUID scoping.
+Produce a comprehensive handoff report at: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\handoff.md.
+When finished, send a completion message back to your caller (orchestrator_6).

@@ -1,47 +1,60 @@
-# BRIEFING — 2026-09-25T04:06:00Z
+# BRIEFING — 2026-10-06T09:36:00Z
 
 ## Mission
-Investigate test architecture and design comprehensive unit/integration test suite for `internal/ballchasing`, utilizing `testutil.NewMockBallchasingServer` across all success, error, and rate-limiting edge cases.
+Investigate and design the automated programmatic DOM layout and structure test suite in `web/src/components/live/LiveGameView.layout.test.tsx` using Vitest and Happy DOM for Milestone M3 (Requirement R1: Live Game UI Revamp).
 
 ## 🔒 My Identity
 - Archetype: explorer
-- Roles: read-only investigation, synthesize findings, produce structured reports
+- Roles: investigation, synthesis
 - Working directory: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_3
-- Original parent: 6e6c9567-59d2-415e-8d6e-41314a903548
-- Milestone: M3 - Ballchasing Replay Uploader
+- Original parent: f26416a7-29be-4b99-8406-d28bf983644d
+- Milestone: M3 (Requirement R1: Live Game UI Revamp)
 
 ## 🔒 Key Constraints
-- Read-only investigation — do NOT implement directly in production package `internal/ballchasing`
-- Provide precise proposed code for `client_test.go`, test matrix, edge case analysis, and verification steps in `handoff.md`
-- Working folder: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_3
-- Never put source code, tests, or data directly into `.agents/teamwork/`
-- Respect communication guidelines: send_message to parent upon completion
+- Read-only investigation — do NOT implement code changes to production or test files directly.
+- Design comprehensive layout and DOM structure test suite in `web/src/components/live/LiveGameView.layout.test.tsx`.
+- Must address stat prominence assertions, superfluous elements elimination assertions, standard viewport budget assertions, and regression guard.
+- Output handoff report to `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_3\handoff.md`.
 
 ## Current Parent
-- Conversation ID: 6e6c9567-59d2-415e-8d6e-41314a903548
-- Updated: 2026-09-25T04:06:00Z
+- Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
+- Updated: 2026-10-06T09:32:17Z
 
 ## Investigation State
 - **Explored paths**:
-  - `internal/testutil/mock_ballchasing.go`: full mock capabilities and internal request handling logic.
-  - `survey_miner_ballchasing_1/handoff.md`: official specifications, raw token header, 201/409 duplicate semantics, 429 backoff requirements, 401 unauth.
-  - `test/e2e/e2e_test.go` & `test/e2e/tier1_feature_test.go`: existing E2E test helper `HTTPBallchasingUploader` and Tier 1 F8-F13 test patterns.
-  - `internal/config/config.go`: `BallchasingConfig` with `APIKey`, `Visibility`, `BaseURL`, `Timeout`, `MaxRetries`.
-  - `.agents/teamwork/m3_explorer_1/proposed_types.go` and `proposed_client.go`: streaming multipart, client structure, option funcs.
-  - `.agents/teamwork/m3_explorer_2/handoff.md`: response handling, duplicate detection, backoff engine, ping verification.
+  - `ORIGINAL_REQUEST.md` (## 2026-10-06T08:30:09Z, Requirement R1)
+  - `PROJECT.md` (Feature 25, Milestone M3)
+  - `survey_explorer_ui_1/handoff.md` (detailed UI revamp recommendations)
+  - `web/package.json` (Vitest v3.2.7, Happy DOM v20.14.5, React 19.0.0)
+  - `web/vite.config.ts` (test environment node, per-file `// @vitest-environment happy-dom`)
+  - `web/src/components/live/LiveGameView.tsx` (component structure, `space-y-6`)
+  - `web/src/components/live/ScoreboardBanner.tsx` (`mb-8`, `p-6`, duplicate player counts)
+  - `web/src/components/live/RosterTable.tsx` (column sequence putting Platform/Rank/MMR before stats)
+  - `web/src/components/live/PlayerRow.tsx` (12px text-xs stats, lack of defensive/offensive accents)
+  - `web/src/components/layout/Header.tsx` (Port 49125, Uptime: 0m, multi-playlist carousel)
+  - `web/src/App.tsx` (static footer, py-4 padding)
+  - `web/src/hooks/useLiveMatch.ts` and `web/src/hooks/useSession.ts` (fetch & SSE hooks)
+  - Existing test suite (`npm test`: 9 test files, 112 tests passed in 1.61s)
 - **Key findings**:
-  - `MockBallchasingServer` defaults to `expectedToken: "test-ballchasing-token"`. Tests must use this token or call `srv.SetExpectedToken()`.
-  - `MockBallchasingServer.handlePing()` does NOT inspect `forcedStatusCode`, so forced status error testing for Ping must point to an error endpoint or `httptest.Server`.
-  - 10 required test scenarios from DISPATCH + 7 edge cases completely designed, implemented, and empirically verified (17 tests, 29 subtests, 100% PASS in 2.92s).
-- **Unexplored areas**: None. Test architecture is fully explored and verified.
+  - Existing tests in `web/` use `// @vitest-environment happy-dom` and `IS_REACT_ACT_ENVIRONMENT = true`.
+  - Happy DOM supports full DOM manipulation via `createRoot` and `renderToString`.
+  - Reordering table columns and enlarging stat fonts will NOT break any of the 112 existing tests.
+  - Total vertical live stack can be compacted to ~376px (3v3) / ~414px (4v4), leaving >540px vertical headroom under 920px 1080p inner viewport height.
+  - Complete 5-suite programmatic test file designed for `LiveGameView.layout.test.tsx`.
+- **Unexplored areas**: None within the scope of M3 layout test design.
 
 ## Key Decisions Made
-- Use `ClientConfig` as primary constructor argument with functional options (`WithBaseBackoff`, etc.) to allow ultra-fast sub-millisecond backoff in tests while supporting production 1s backoff defaults.
-- All 17 test suites designed with standard library `testing`, using `testutil.NewMockBallchasingServer` and `testutil.GenerateValidReplay`.
+- Standardize DOM mounting and traversal via `createRoot` and `renderToString` with Happy DOM.
+- Structure test suite into 5 dedicated sections:
+  1. Stat Prominence & Typography Hierarchy
+  2. Superfluous Elements Elimination
+  3. Standard Viewport Layout & Budget Compliance (Zero Vertical Scrolling on 1080p)
+  4. Column Customization & Preset Layout Stability
+  5. Regression Guard & Existing Contract Compatibility
+- Model vertical budget mathematically and enforce `<= 500px` rendered budget in automated tests.
 
 ## Artifact Index
-- DISPATCH.md — Task instructions from orchestrator
-- BRIEFING.md — Persistent working memory
-- progress.md — Liveness heartbeat and step tracking
-- proposed_client_test.go — Complete proposed unit test suite
-- handoff.md — Final 5-component handoff report and proposed `client_test.go`
+- `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_3\DISPATCH.md` — Agent dispatch tasks and instructions
+- `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_3\BRIEFING.md` — Situational awareness and state tracking
+- `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_3\progress.md` — Liveness heartbeat
+- `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_3\handoff.md` — Comprehensive handoff report with complete test code

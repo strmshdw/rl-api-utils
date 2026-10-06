@@ -1,173 +1,236 @@
-# Handoff Report — m4_worker_1
+# Handoff Report — m4_worker_1: Milestone M4 Final Integration & Compilation
 
 ## 1. Observation
 
-### Implementation Files Modified
-- `internal/daemon/daemon.go`:
-  - Added `PlayerDetailResponse` struct (composite profile and matchup history against local player):
-    ```go
-    type PlayerDetailResponse struct {
-        Player   *storage.PlayerRecord   `json:"player"`
-        Matchups []*storage.MatchupRecord `json:"matchups"`
-    }
+### Milestone Updates in Specification
+- File: `d:\code\rl-api-utils\PROJECT.md`
+- Lines 35–41:
+  - Milestone M3 (`Live Game UI Revamp & Viewport Optimization (R1)`) updated from `IN_PROGRESS` to `DONE`.
+  - Milestone M4 (`Final Integration, E2E Verification & Adversarial Hardening (R4)`) updated from `PLANNED` to `DONE`.
+  - Table excerpt:
+    ```markdown
+    | # | Name | Scope | Dependencies | Status |
+    |---|------|-------|-------------|--------|
+    | M1 | Persistent Player State on Disconnect (R2) | `internal/playertrack`, `internal/session`: Implement participant retention in `OnUpdateState`, `IsDisconnected` flag, local player retention fallback, and programmatic mid-game disconnect unit tests asserting active stats remain. | none | DONE |
+    | M2 | Match Outcome Logging for Disconnected Players (R3) | `internal/playertrack`, `internal/session`: Include disconnected participants in `OnMatchEnded` outcomes vector, update `storage.RecordMatchResults` with accurate win/loss records, map `Won` into `SessionMatchPlayer`, sum all goals, and provide automated match history tests. | M1 | DONE |
+    | M3 | Live Game UI Revamp & Viewport Optimization (R1) | `web/`: Prioritize/enlarge stats in `PlayerRow.tsx` and `RosterTable.tsx`, remove superfluous elements in `Header.tsx`, `App.tsx`, and `ScoreboardBanner.tsx`, reduce vertical spacing, ensure zero vertical scrolling on 1080p, add automated DOM layout/structure tests in `LiveGameView.layout.test.tsx`, build embedded dist. | M1 | DONE |
+    | M4 | Final Integration, E2E Verification & Adversarial Hardening (R4) | Full system integration: run all 14 Go packages, Vitest test suite, end-to-end multi-cycle disconnect tests, adversarial edge cases (reconnection, bot backfills, casual substitutions), and compile standalone `rl-sync.exe`. | M1, M2, M3 | DONE |
     ```
-  - Added option constructors: `WithPlayerTracker(tracker *playertrack.Tracker)`, `WithStateStore(store storage.StateStore)`, and `WithStore(store storage.StateStore)` (alias for backward compatibility with `Option` signature).
-  - Added `Handler(ctx context.Context) http.Handler` method to `*Daemon` exposing configured router for in-process testing.
-  - Implemented unified HTTP routing in `setupRoutes(ctx)` on `127.0.0.1:49125`:
-    - Existing trigger endpoints: `POST /sync`, `GET /status`, `GET /healthz`.
-    - New player tracking endpoints: `GET /current-match`, `GET /players`, `GET /players/{id...}`.
-  - Implemented HTTP handlers:
-    - `handleCurrentMatch`: returns 200 with tracker's `CurrentMatch()` or `{}` / 404 (or 503 if tracker not configured).
-    - `handleListPlayers`: parses query parameters `limit` (default 50, clamped to `[1, 100]`) and `offset` (default 0, clamped to `>= 0`), queries `store.ListPlayers(limit, offset)`, returns JSON list or `[]` on nil/empty.
-    - `handleGetPlayer`: extracts `{id...}` via `r.PathValue("id")`, decodes with `url.PathUnescape(rawID)` (returns 400 Bad Request on invalid percent escape), fetches `store.GetPlayer(playerID)` (returns 404 if not found), fetches `store.GetMatchupHistory(playerID)`, and returns `PlayerDetailResponse`.
-  - Unified server lifecycle in `Start()`: starts `http.Server` in a managed goroutine (`d.wg.Add(1)`/`defer d.wg.Done()`), handles port conflicts gracefully by logging an error and continuing sync loop, bypasses HTTP listener when `d.cfg.Sync.Once` is true, and drains HTTP server with a 2-second timeout (`shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)`) upon context cancellation `<-ctx.Done()`.
 
-- `cmd/rl-sync/main.go`:
-  - Added CLI flags to `flagSet`:
-    - `--player-tracking` (bool): "Enable real-time player tracking and stats"
-    - `--local-player-id` (string): "Explicit local player account ID"
-    - `--local-player-name` (string): "Explicit local player in-game name"
-    - `--auto-fetch-ranks` (bool): "Automatically fetch Psynet ranks for tracked players"
-    - `--polling-auth` (bool): "Enable polling auth provider for live token refresh"
-    - `--polling-provider` (string): "Polling auth provider type (epic|steam)"
-  - Added flag-visit binding tracking in `visitedFlags` and updated `cfg.PlayerTracking` and `cfg.Auth` overrides.
-  - Added constructor injection hooks to `Runner`:
-    ```go
-    NewPollingAuth  func(cfg *config.Config, store storage.StateStore, logger *slog.Logger) (auth.PollingAuthProvider, error)
-    NewRankClient   func(client *psynet.Client) playertrack.RankClient
-    NewPlayerTracker func(cfg config.PlayerTrackingConfig, store storage.StateStore, rankClient playertrack.RankClient, logger *slog.Logger, authSupplier playertrack.AuthSupplierFunc) *playertrack.Tracker
-    ```
-    and initialized them with default constructors in `NewDefaultRunner()`.
-  - In `Runner.Run()`:
-    - Wired optional polling auth initialization with `r.NewPollingAuth`. If enabled and successful, wrapped in a thread-safe caching supplier function (`getCachedAuthToken`) so both Psynet rank querying and stats syncing share tokens without starting redundant polling loops. If disabled, unavailable, or errors, gracefully falls back to `playertrack.NoOpRankClient`.
-    - Initialized tracker with `r.NewPlayerTracker` if `cfg.PlayerTracking.Enabled` is true, attached it to `statsListener.SetPlayerEventHandler(tracker)`, and injected both tracker and state store into daemon via `daemon.WithPlayerTracker(tracker)` and `daemon.WithStateStore(store)`.
-    - If `cfg.PlayerTracking.Enabled` is false, preserves existing behavior with zero overhead.
+### Command Executions & Verbatim Results
 
-### Test Suites Added & Passing
-- `internal/daemon/daemon_test.go`:
-  - `TestDaemon_HTTP_CurrentMatch_ActiveAndEmpty`: verifies 200 OK with active match JSON, and empty JSON `{}` when no match active.
-  - `TestDaemon_HTTP_CurrentMatch_NotConfigured`: verifies 503 Service Unavailable when tracker is nil.
-  - `TestDaemon_HTTP_ListPlayers_DualBackend`: verifies pagination (`limit`, `offset`), clamping (`limit=200` clamped to 100, `offset=-5` clamped to 0), order by `last_seen_at DESC`, and empty response `[]` across both SQLite and JSONStore backends.
-  - `TestDaemon_HTTP_GetPlayer_DualBackend`: verifies composite `PlayerDetailResponse`, exact player ID matching across both SQLite and JSONStore backends.
-  - `TestDaemon_HTTP_GetPlayer_NotFound`: verifies 404 Not Found for non-existent player ID.
-  - `TestDaemon_HTTP_GetPlayer_URLDecoding`: verifies URL encoded IDs (`Epic%3A12345` -> `Epic:12345`) and returns 400 Bad Request on invalid percent escape (`Steam%7`).
-  - `TestDaemon_HTTP_StoreNotConfigured`: verifies 503 Service Unavailable when store is nil for player endpoints.
-  - `TestDaemon_Lifecycle_StartAndGracefulDrain`: verifies HTTP server binds to a real random port on loopback, responds to requests, and shuts down within 2 seconds upon context cancellation.
-  - `TestDaemon_Lifecycle_PortConflictResilience`: verifies that if port 49125 is already bound by another process, daemon logs warning/error and continues sync operations without crashing.
-  - `TestDaemon_Lifecycle_OnceMode_NoHTTPServer`: verifies that `--once` mode does not start the HTTP server.
-  - `TestDaemon_HTTP_ConcurrencyStress`: validates 50 concurrent goroutines performing simultaneous GET requests to all endpoints without data races.
-- `cmd/rl-sync/main_test.go`:
-  - `TestCLI_PlayerTracking_Flags_Precedence`: validates layered hierarchy where CLI flags override config file values.
-  - `TestCLI_Runner_PlayerTracking_And_PollingAuth_FullyEnabled`: validates complete component wiring when player tracking and polling auth are enabled, verifying `SetPlayerEventHandler` was called on statsListener.
-  - `TestCLI_Runner_PollingAuth_Disabled_FallbackToNoOp`: validates fallback to `NoOpRankClient` when polling auth is false.
-  - `TestCLI_Runner_PollingAuth_Error_GracefulDegradation`: validates graceful degradation to `NoOpRankClient` when polling auth constructor fails.
-  - `TestCLI_Runner_PlayerTracking_Disabled_BackwardCompatibility`: validates zero regression and clean backward compatibility when player tracking is disabled.
+#### Command 1: Frontend Test Suite
+- Command: `npm test` (executed in `d:\code\rl-api-utils\web`)
+- Exit code: `0`
+- Verbatim output:
+  ```
+  > rl-sync-web@1.0.0 test
+  > vitest run
 
-### Verbatim Tool Command Results
-1. `go build ./cmd/rl-sync`
-   - Exit Code: 0
-   - Output: clean compilation.
-2. `go test -v -count=1 ./internal/daemon/...`
-   - Exit Code: 0
-   - Output: `PASS`, `ok github.com/dank/rl-api-utils/internal/daemon 0.528s`
-3. `go test -v -count=1 ./cmd/rl-sync/...`
-   - Exit Code: 0
-   - Output: `PASS`, `ok github.com/dank/rl-api-utils/cmd/rl-sync 0.121s`
-4. `go test -v -count=1 ./internal/playertrack/...`
-   - Exit Code: 0
-   - Output: `PASS`, `ok github.com/dank/rl-api-utils/internal/playertrack 3.602s`
-5. `go test -count=1 ./...`
-   - Exit Code: 0
-   - Output:
-     ```
-     ok  	github.com/dank/rl-api-utils/cmd/rl-sync	0.149s
-     ok  	github.com/dank/rl-api-utils/internal/auth	0.149s
-     ok  	github.com/dank/rl-api-utils/internal/ballchasing	7.822s
-     ok  	github.com/dank/rl-api-utils/internal/config	0.478s
-     ok  	github.com/dank/rl-api-utils/internal/daemon	2.955s
-     ok  	github.com/dank/rl-api-utils/internal/playertrack	4.550s
-     ok  	github.com/dank/rl-api-utils/internal/psynet	4.140s
-     ok  	github.com/dank/rl-api-utils/internal/statsapi	0.866s
-     ok  	github.com/dank/rl-api-utils/internal/storage	7.448s
-     ok  	github.com/dank/rl-api-utils/internal/syncer	1.040s
-     ok  	github.com/dank/rl-api-utils/internal/testutil	0.764s
-     ok  	github.com/dank/rl-api-utils/test/e2e	8.961s
-     ```
-6. `go vet ./...`
-   - Exit Code: 0
-   - Output: clean (zero warnings or errors).
+   RUN  v3.2.7 D:/code/rl-api-utils/web
+
+   ✓ src/utils/formatters.test.ts (6 tests) 6ms
+   ✓ src/utils/platforms.test.ts (6 tests) 6ms
+   ✓ src/types/columns.test.ts (5 tests) 8ms
+   ✓ src/components/common/H2HBadge.test.tsx (5 tests) 12ms
+   ✓ src/components/common/RankBadge.test.tsx (6 tests) 14ms
+   ✓ src/utils/formatters.stress.test.tsx (26 tests) 15ms
+   ✓ src/hooks/useColumnConfig.stress.test.tsx (22 tests) 56ms
+   ✓ src/components/live/RosterTable.test.tsx (3 tests) 24ms
+   ✓ src/adversarial.challenge.test.tsx (33 tests) 106ms
+   ✓ src/components/live/LiveGameView.adversarial.test.tsx (14 tests) 163ms
+   ✓ src/components/live/LiveGameView.layout.test.tsx (19 tests) 191ms
+
+   Test Files  11 passed (11)
+        Tests  145 passed (145)
+     Start at  03:16:14
+     Duration  2.01s (transform 677ms, setup 0ms, collect 2.22s, tests 601ms, environment 4.53s, prepare 2.00s)
+  ```
+
+#### Command 2: Frontend Production Build
+- Command: `npm run build` (executed in `d:\code\rl-api-utils\web`)
+- Exit code: `0`
+- Verbatim output:
+  ```
+  > rl-sync-web@1.0.0 build
+  > tsc -b && vite build
+
+  vite v6.4.3 building for production...
+  transforming...
+  ✓ 1923 modules transformed.
+  rendering chunks...
+  computing gzip size...
+  ../internal/web/dist/index.html                   0.54 kB │ gzip:  0.35 kB
+  ../internal/web/dist/assets/index-tXepU5qp.css   37.93 kB │ gzip:  6.83 kB
+  ../internal/web/dist/assets/index-ev8_Pgz-.js   309.70 kB │ gzip: 89.63 kB
+  ✓ built in 3.24s
+  ```
+
+#### Command 3: Full Repository Go Test Suite
+- Command: `go test -count=1 ./...` (executed in `d:\code\rl-api-utils`)
+- Exit code: `0`
+- Verbatim output:
+  ```
+  ok  	github.com/dank/rl-api-utils/cmd/rl-sync	0.227s
+  ok  	github.com/dank/rl-api-utils/internal/auth	1.959s
+  ok  	github.com/dank/rl-api-utils/internal/ballchasing	8.558s
+  ok  	github.com/dank/rl-api-utils/internal/config	0.578s
+  ok  	github.com/dank/rl-api-utils/internal/daemon	13.580s
+  ok  	github.com/dank/rl-api-utils/internal/playertrack	7.231s
+  ok  	github.com/dank/rl-api-utils/internal/psynet	4.347s
+  ok  	github.com/dank/rl-api-utils/internal/session	5.757s
+  ok  	github.com/dank/rl-api-utils/internal/statsapi	0.891s
+  ok  	github.com/dank/rl-api-utils/internal/storage	19.470s
+  ok  	github.com/dank/rl-api-utils/internal/syncer	1.223s
+  ok  	github.com/dank/rl-api-utils/internal/testutil	1.195s
+  ok  	github.com/dank/rl-api-utils/internal/web	0.670s
+  ok  	github.com/dank/rl-api-utils/test/e2e	21.134s
+  ```
+
+#### Command 4: Standalone Binary Compilation
+- Command: `go build ./cmd/rl-sync` (executed in `d:\code\rl-api-utils`)
+- Exit code: `0`
+- Artifact produced: `d:\code\rl-api-utils\rl-sync.exe`
+- Size: `19,657,728` bytes
+
+#### Command 5: Standalone Binary Execution Verification
+- Command: `.\rl-sync.exe -help` (executed in `d:\code\rl-api-utils`)
+- Exit code: `0`
+- Verbatim output:
+  ```
+  Usage: rl-sync [flags]
+
+  Flags:
+    -auto-fetch-ranks
+      	Automatically fetch competitive ranks via secondary account (default true)
+    -c string
+      	Path to configuration file (shorthand)
+    -config string
+      	Path to configuration file (YAML or JSON)
+    -db-path string
+      	Path to SQLite database or JSON state store
+    -dry-run
+      	Simulate sync cycle without downloading or uploading replays
+    -force-sync
+      	Force immediate PsyNet sync when trigger threshold is reached
+    -h	Display usage help (shorthand)
+    -help
+      	Display usage help and exit
+    -local-player-id string
+      	Override local player ID (e.g. 'Epic|<id>|0' or 'Steam|<id>|0')
+    -local-player-name string
+      	Override local player display name
+    -log-format string
+      	Logging format (text, json)
+    -log-level string
+      	Logging level (debug, info, warn, error)
+    -once
+      	Execute a single synchronization cycle and exit
+    -player-tracking
+      	Enable player tracking and live lobby analysis (default true)
+    -poll-interval duration
+      	Polling interval (e.g. 5m, 1m, 30s)
+    -polling-auth
+      	Enable secondary account authentication for rank retrieval
+    -polling-provider string
+      	Authentication provider for secondary account ('epic' or 'steam')
+    -provider string
+      	Authentication provider override ('epic' or 'steam')
+    -replay-dir string
+      	Directory to store downloaded replays
+    -stats-api
+      	Enable Rocket League Stats API event tracking (default true)
+    -trigger-threshold int
+      	Threshold of un-downloaded matches to fire notification/trigger (default 15)
+    -v	Display application version (shorthand)
+    -version
+      	Display application version and exit
+    -web-enabled
+      	Enable embedded web dashboard and API server (default true)
+    -web-host string
+      	HTTP host binding for web dashboard (default '0.0.0.0')
+    -web-port int
+      	HTTP port binding for web dashboard (default 49125)
+  ```
+- Command: `.\rl-sync.exe -version` (executed in `d:\code\rl-api-utils`)
+- Exit code: `0`
+- Verbatim output: `rl-sync dev`
 
 ---
 
 ## 2. Logic Chain
 
-1. **API Port & Route Requirements**:
-   - The user specification dictates a single unified HTTP server running on `127.0.0.1:49125` when daemon runs in long-running mode.
-   - It must serve both existing endpoints (`/sync`, `/status`, `/healthz`) and new endpoints (`GET /current-match`, `GET /players`, `GET /players/{id...}`).
-   - By creating `setupRoutes(ctx)` and registering routes to `d.mux`, all endpoints share the same server instance and address without socket conflicts.
-
-2. **Testability Without Port Binding**:
-   - Exposing `Handler(ctx context.Context) http.Handler` on `*Daemon` allows unit tests to test all endpoints in memory via `httptest.NewRecorder` and `httptest.NewRequest`, eliminating port collision risks and socket race conditions in parallel test runs.
-
-3. **Query Parameter Clamping & URL Unescaping**:
-   - Querying `/players` could cause severe memory pressure or negative indexing if `limit` or `offset` are unvalidated. Clamping `limit` to `[1, 100]` with default `50` and `offset` to `>= 0` with default `0` prevents denial of service.
-   - URL path matching on `/players/{id...}` captures path values that may contain encoded characters (e.g. `Epic%3A12345`). Invoking `url.PathUnescape` safely converts these to native IDs. If the percent escape is malformed, emitting `400 Bad Request` ensures defensive API behavior.
-
-4. **Lifecycle & Port Conflict Resilience**:
-   - In production, port 49125 might be occupied or temporarily unavailable. Instead of crashing the entire background sync daemon, the HTTP server logs the error, increments waitgroup on start, and calls `Done()` on exit, allowing the rest of the daemon loops to continue.
-   - On shutdown (`<-ctx.Done()`), `httpSrv.Shutdown` is called with a 2-second timeout, ensuring connections drain gracefully without blocking process exit.
-   - In `--once` single-run mode, starting an HTTP daemon listener is unnecessary and undesirable; checking `isHTTPEnabled()` skips starting the HTTP server entirely.
-
-5. **CLI and Component Wiring in `Runner.Run()`**:
-   - The CLI flags (`--player-tracking`, `--local-player-id`, etc.) override file configuration via `flagSet.Visit`.
-   - Polling auth requires careful lifecycle handling: creating an auth provider spawns a refresh goroutine. Wrapping it in a cached supplier avoids duplicate background tasks while cleanly providing auth tokens to Psynet.
-   - If polling auth fails or is disabled, falling back to `playertrack.NoOpRankClient` allows the player tracker to continue tracking matches and local players even without external rank lookups.
-   - Attaching `tracker` to `statsListener.SetPlayerEventHandler(tracker)` completes the event pipeline from BakkesMod/StatsAPI HTTP broadcasts to player storage.
+1. **Gate Verification & Status**:
+   - `GATE_STATUS.md` records unanimous `PASS` for Milestones M1, M2, and M3 across all workers, reviewers, challengers, and auditor agents.
+   - Consequently, the system was ready for M3 and M4 closure in `PROJECT.md`.
+2. **Frontend Test & Build Integrity**:
+   - Running `npm test` verified that all 145 unit, layout, and adversarial challenge tests in the `web` frontend package pass.
+   - Running `npm run build` executed TypeScript type checks (`tsc -b`) and Vite production packaging without errors, updating the distribution bundle in `internal/web/dist`.
+3. **Go Full-Suite Verification**:
+   - Running `go test -count=1 ./...` ensured that every unit, integration, stress, adversarial, and end-to-end test across all 14 Go packages in the repository passed without relying on cached test results.
+   - All tests in `cmd/rl-sync`, `internal/auth`, `internal/ballchasing`, `internal/config`, `internal/daemon`, `internal/playertrack`, `internal/psynet`, `internal/session`, `internal/statsapi`, `internal/storage`, `internal/syncer`, `internal/testutil`, `internal/web`, and `test/e2e` completed with `ok`.
+4. **Standalone Binary Compilation**:
+   - Compiling `go build ./cmd/rl-sync` embedded the newly built web static assets via Go `embed.FS` in `internal/web`, producing a single standalone executable `rl-sync.exe` without CGO dependencies.
+5. **Runtime Smoke Test**:
+   - Invoking `.\rl-sync.exe -help` and `.\rl-sync.exe -version` verified that the compiled binary executes properly, exposes all CLI flags (including player tracking, auto rank fetching, polling auth, and web dashboard flags), and exits cleanly with exit code 0.
+6. **Milestone Documentation**:
+   - Updating `PROJECT.md` marked Milestone M3 as `DONE` and Milestone M4 as `DONE`, fulfilling the task dispatch requirement.
 
 ---
 
 ## 3. Caveats
 
-- **No Caveats**: All dispatch requirements, edge cases, dual storage backends, CLI flag precedences, lifecycle drain behaviors, and test criteria have been fully addressed and verified.
+- No caveats. The build is fully self-contained, tests ran with `-count=1` to guarantee real execution rather than cache hits, and all 14 Go packages and 145 frontend tests passed.
 
 ---
 
 ## 4. Conclusion
 
-Milestone M4 Player Tracking Web API and Daemon Engine integration is 100% complete and fully verified:
-- Web API endpoints (`/current-match`, `/players`, `/players/{id...}`) conform to specification with strict validation, clamping, and URL escaping.
-- Unified HTTP server operates reliably on `127.0.0.1:49125` with 2-second graceful drain, `--once` mode bypass, and port collision resilience.
-- CLI flags and component wiring in `cmd/rl-sync/main.go` seamlessly integrate player tracking with full backward compatibility and graceful degradation to `NoOpRankClient`.
-- All tests pass (100%) across all 12 repository packages, and `go vet ./...` reports zero warnings.
+Milestone M4 integration, E2E verification, and standalone compilation are complete and verified. The repository is in a pristine state:
+- All 145 frontend Vitest tests pass cleanly.
+- Frontend production bundle is compiled and embedded into `internal/web/dist`.
+- All 14 Go packages pass automated tests (`go test -count=1 ./...`).
+- Standalone executable `rl-sync.exe` is compiled and verified.
+- `PROJECT.md` reflects Milestone M3 and Milestone M4 as `DONE`.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify this implementation, run the following commands in `d:\code\rl-api-utils`:
+To independently verify these results:
 
-```bash
-# 1. Build binary
-go build ./cmd/rl-sync
+1. **Verify PROJECT.md Status**:
+   ```powershell
+   Select-String -Path "d:\code\rl-api-utils\PROJECT.md" -Pattern "Milestone M[34]"
+   ```
+   Expect lines 39 and 40 showing `DONE`.
 
-# 2. Run internal/daemon tests (including all HTTP API and lifecycle tests)
-go test -v -count=1 ./internal/daemon/...
+2. **Run Frontend Tests**:
+   ```powershell
+   cd d:\code\rl-api-utils\web
+   npm test
+   ```
+   Expect 11 test files passed, 145 passed.
 
-# 3. Run cmd/rl-sync tests (including CLI flag precedence and component wiring tests)
-go test -v -count=1 ./cmd/rl-sync/...
+3. **Run Frontend Build**:
+   ```powershell
+   cd d:\code\rl-api-utils\web
+   npm run build
+   ```
+   Expect clean build output writing to `../internal/web/dist`.
 
-# 4. Run internal/playertrack tests
-go test -v -count=1 ./internal/playertrack/...
+4. **Run Full Go Test Suite**:
+   ```powershell
+   cd d:\code\rl-api-utils
+   go test -count=1 ./...
+   ```
+   Expect all 14 packages to print `ok` with 0 failures.
 
-# 5. Run full test suite across all 12 packages
-go test -count=1 ./...
-
-# 6. Run go vet across all packages
-go vet ./...
-```
-
-Files to inspect:
-- `internal/daemon/daemon.go`
-- `internal/daemon/daemon_test.go`
-- `cmd/rl-sync/main.go`
-- `cmd/rl-sync/main_test.go`
+5. **Build and Test Standalone Binary**:
+   ```powershell
+   cd d:\code\rl-api-utils
+   go build ./cmd/rl-sync
+   .\rl-sync.exe -help
+   .\rl-sync.exe -version
+   ```
+   Expect clean compilation to `rl-sync.exe` and valid CLI help/version output.

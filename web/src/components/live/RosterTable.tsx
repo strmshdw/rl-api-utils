@@ -45,7 +45,7 @@ export const RosterTable: React.FC<RosterTableProps> = ({
       }}
     >
       {/* Team Header Banner */}
-      <div className="flex items-center justify-between px-5 py-3.5 bg-slate-800/40 border-b border-slate-800">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800/40 border-b border-slate-800">
         <div className="flex items-center gap-2.5">
           <TeamIcon className={`w-5 h-5 ${themeText}`} />
           <h3 className={`font-bold text-sm uppercase tracking-wider ${themeText}`}>
@@ -64,17 +64,17 @@ export const RosterTable: React.FC<RosterTableProps> = ({
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[11px] bg-slate-950/30">
-              <th className="py-3 px-4">Player</th>
-              {columnConfig.platform && <th className="py-3 px-3">Platform</th>}
-              {columnConfig.rank && <th className="py-3 px-3">Rank</th>}
-              {columnConfig.mmr && <th className="py-3 px-3 text-right">MMR</th>}
-              {columnConfig.score && <th className="py-3 px-3 text-right">Score</th>}
-              {columnConfig.goals && <th className="py-3 px-3 text-right">Goals</th>}
-              {columnConfig.assists && <th className="py-3 px-3 text-right">Assists</th>}
-              {columnConfig.saves && <th className="py-3 px-3 text-right">Saves</th>}
-              {columnConfig.shots && <th className="py-3 px-3 text-right">Shots</th>}
-              {columnConfig.demos && <th className="py-3 px-3 text-right">Demos</th>}
-              {columnConfig.h2h && <th className="py-3 px-4 text-right">H2H Record</th>}
+              <th data-testid="th-player" className="py-2.5 px-4">Player</th>
+              {columnConfig.score && <th data-testid="th-score" className="py-2.5 px-3 text-right">Score</th>}
+              {columnConfig.goals && <th data-testid="th-goals" className="py-2.5 px-3 text-right">Goals</th>}
+              {columnConfig.assists && <th data-testid="th-assists" className="py-2.5 px-3 text-right">Assists</th>}
+              {columnConfig.saves && <th data-testid="th-saves" className="py-2.5 px-3 text-right">Saves</th>}
+              {columnConfig.shots && <th data-testid="th-shots" className="py-2.5 px-3 text-right">Shots</th>}
+              {columnConfig.demos && <th data-testid="th-demos" className="py-2.5 px-3 text-right">Demos</th>}
+              {columnConfig.rank && <th data-testid="th-rank" className="py-2.5 px-3">Rank</th>}
+              {columnConfig.mmr && <th data-testid="th-mmr" className="py-2.5 px-3 text-right">MMR</th>}
+              {columnConfig.h2h && <th data-testid="th-h2h" className="py-2.5 px-4 text-right">H2H Record</th>}
+              {columnConfig.platform && <th data-testid="th-platform" className="py-2.5 px-3">Platform</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60">

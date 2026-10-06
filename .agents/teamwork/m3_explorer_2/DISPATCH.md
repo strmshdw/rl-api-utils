@@ -1,30 +1,42 @@
-# Dispatch: m3_explorer_2
+# DISPATCH: m3_explorer_2
 
-**Milestone**: M3 - Ballchasing Replay Uploader
-**Role**: Response Handling & Rate Limiting Explorer (internal/ballchasing)
+## Objective
+Investigate elimination of superfluous UI elements, vertical spacing compression, and the 1080p zero-scroll layout architecture across `ScoreboardBanner.tsx`, `Header.tsx`, `App.tsx`, and `LiveGameView.tsx` for Milestone M3 (Requirement R1).
 
-## Scope
-Investigate and design the response parsing, duplicate detection, and backoff engine:
-- Status Code Handling:
-  - HTTP 201 Created: Parse JSON `{ "id": "...", "location": "..." }`, return `UploadResult{ID, Location, IsDuplicate: false}`.
-  - HTTP 409 Conflict: Parse JSON `{ "error": "...", "id": "...", "location": "..." }`, return `UploadResult{ID, Location, IsDuplicate: true}`, error is `nil` (idempotent duplicate, not a failure!).
-  - HTTP 429 Too Many Requests: Parse `Retry-After` header (seconds as int or RFC1123 date), implement exponential backoff with jitter and retry budget (default 3 retries).
-  - HTTP 401 Unauthorized: Immediate fatal error `ErrInvalidAPIKey`.
-  - HTTP 400 Bad Request / 404 / 500: Clear error propagation.
-- Context cancellation: ensure backoff sleeps respect `ctx.Done()`.
-- Ping / API Key verification: `Ping(ctx)` method querying `GET /` to validate API key before starting synchronization.
-- Write your findings, proposed algorithms, and design to `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2\handoff.md`.
+## Scope Boundaries
+- Read-only technical investigation. Do NOT edit code or test files.
+- Deliver `handoff.md` to `d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2\handoff.md`.
 
-## 2026-09-25T03:58:19Z
-You are m3_explorer_2.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2\DISPATCH.md.
-Also review survey findings in d:\code\rl-api-utils\.agents\teamwork\survey_miner_ballchasing_1\handoff.md.
+## Context & Inputs
+- Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
+- Project Architecture & Milestones: `d:\code\rl-api-utils\PROJECT.md`
+- Survey report on UI revamp: `d:\code\rl-api-utils\.agents\teamwork\survey_explorer_ui_1\handoff.md`
+- Codebase: `web/src/components/live/ScoreboardBanner.tsx`, `web/src/components/layout/Header.tsx`, `web/src/App.tsx`, `web/src/components/live/LiveGameView.tsx`
 
-Explore response handling, duplicate detection, and backoff for internal/ballchasing:
-- HTTP 201 Created -> UploadResult{ID, Location, IsDuplicate: false}
-- HTTP 409 Conflict -> UploadResult{ID, Location, IsDuplicate: true}, err == nil (idempotent duplicate!)
-- HTTP 429 Too Many Requests -> parse Retry-After, exponential backoff with retry budget, context-aware sleep
-- HTTP 401 Unauthorized -> immediate fatal ErrInvalidAPIKey
-- Ping(ctx) API key verification method
-Write your report and proposed code to d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2\handoff.md and notify parent via send_message.
+## Specific Tasks
+1. Detail exact superfluous elements to remove or conditionally hide during live game view:
+   - `App.tsx`: Conditionally hide static copyright footer when `activeTab === 'live' && inMatch` (or `activeTab === 'live'`).
+   - `Header.tsx`: Remove daemon technical debug text ("Port 49125", "Uptime: 0m"), hide playlist carousel during active match.
+   - `ScoreboardBanner.tsx`: Remove redundant player count badges ("X Players" on Blue and Orange sides), streamline icon boxes.
+2. Detail vertical spacing reductions:
+   - `ScoreboardBanner.tsx`: reduce `mb-8` to `mb-3`, reduce padding from `p-6` to `py-2.5 px-5`.
+   - `LiveGameView.tsx`: replace `space-y-6` with `space-y-3`.
+   - `App.tsx`: adjust main padding from `py-4` to `py-2`.
+3. Calculate and document the exact vertical height budget:
+   - Component-by-component heights on 1080p desktop (1920x1080, client viewport height ~920px).
+   - Confirm total vertical height is <= 450px, guaranteeing zero vertical scrolling across 1080p, 1440p, 4K, and 768p viewports.
+4. Provide concrete code diffs and recommendations.
+
+
+## 2026-10-06T09:32:17Z
+[Message] timestamp=2026-10-06T09:32:17Z sender=f26416a7-29be-4b99-8406-d28bf983644d priority=MESSAGE_PRIORITY_HIGH content=You are m3_explorer_2, an exploration agent for Milestone M3 (Requirement R1: Live Game UI Revamp).
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2
+
+You MUST read:
+1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
+2. Project specification: d:\code\rl-api-utils\PROJECT.md
+3. Survey report: d:\code\rl-api-utils\.agents\teamwork\survey_explorer_ui_1\handoff.md
+4. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2\DISPATCH.md
+
+Investigate elimination of superfluous UI elements, vertical spacing compression, and zero-scroll layout architecture in ScoreboardBanner.tsx, Header.tsx, App.tsx, and LiveGameView.tsx.
+Deliver your comprehensive handoff report at: d:\code\rl-api-utils\.agents\teamwork\m3_explorer_2\handoff.md and notify orchestrator_6.

@@ -1,50 +1,40 @@
-# Dispatch for M1 Reviewer 1
+# DISPATCH: m1_reviewer_1
 
-**Milestone**: M1 - Storage & Configuration
-**Role**: Reviewer 1 (`teamwork_preview_reviewer`)
-**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1`
-**Original Request**: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md`
-**Project Specification**: `d:\code\rl-api-utils\PROJECT.md`
-**Worker Handoff**: `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md`
+## Objective
+Review the implementation of Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) produced by `m1_worker_1`.
 
-## Objectives
-1. Read `ORIGINAL_REQUEST.md` and `PROJECT.md` (Interface Contracts and Feature Inventory for M1).
-2. Examine the implemented files:
-   - `internal/storage/store.go`
-   - `internal/storage/sqlite.go`
-   - `internal/storage/sqlite_test.go`
-   - `internal/storage/jsonstore.go`
-   - `internal/storage/jsonstore_test.go`
-   - `internal/config/config.go`
-   - `internal/config/config_test.go`
-   - `configs/config.example.yaml`
-   - `configs/config.example.json`
-   - `go.mod`, `go.sum`
-3. Execute unit tests:
-   ```powershell
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/storage/...
-   go test -v -count=1 ./internal/config/...
-   go vet ./internal/storage/... ./internal/config/...
-   ```
-4. Verify correctness, interface conformance, robustness, and code layout compliance.
-5. Provide a clear verdict (APPROVE or REQUEST_CHANGES) in `d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\handoff.md`.
-6. Send completion message to parent orchestrator.
+## Scope & Files to Review
+- `internal/playertrack/tracker.go`
+- `internal/playertrack/tracker_test.go`
+- `internal/session/models.go`
+- `internal/session/session.go`
+- `internal/session/session_test.go`
+- `web/src/types/api.ts`
 
-## 2026-09-25T03:19:47Z
-You are m1_reviewer_1.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md.
+## Evaluation Criteria
+1. **Correctness**: Does `Tracker.OnUpdateState` correctly retain departed participants and preserve their box score stats (`Score`, `Goals`, `Assists`, `Saves`, `Shots`, `Demos`) with `IsDisconnected = true`?
+2. **Reconnection & Edge Cases**: Are reconnecting players updated without creating duplicate rows? Are departed AI bots properly ignored? Is local player identity and team preserved if local player disconnects early?
+3. **Session & ConcludeMatch**: Does `SessionTracker` mirror `IsDisconnected`, aggregate goals from all participants into team scores, and compute `Won` properly?
+4. **Interface Conformance**: Conformance with contracts defined in `PROJECT.md`.
+5. **Verification**: Run `go test -v ./internal/playertrack/...`, `go test -v ./internal/session/...`, and `go test ./...`. Verify all tests pass cleanly.
 
-Review Milestone 1 (Storage & Configuration):
-1. Review internal/storage/store.go, sqlite.go, sqlite_test.go, jsonstore.go, jsonstore_test.go, internal/config/config.go, config_test.go, and configs/.
-2. Run build and tests:
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/storage/...
-   go test -v -count=1 ./internal/config/...
-   go vet ./internal/storage/... ./internal/config/...
-3. Provide your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\handoff.md and notify parent via send_message.
+Deliver verdict (`APPROVE` or `REQUEST_CHANGES`) with evidence in `d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\handoff.md` and send message back to orchestrator_6.
 
+
+## 2026-10-06T09:11:18Z
+You are m1_reviewer_1, a high-reliability review agent for Milestone M1 (Requirement R2: Persistent Player State on Disconnect).
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1
+
+You MUST read:
+1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
+2. Project specification: d:\code\rl-api-utils\PROJECT.md
+3. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\DISPATCH.md
+4. Worker handoff report: d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md
+
+Review files:
+- internal/playertrack/tracker.go & tracker_test.go
+- internal/session/models.go & session.go & session_test.go
+- web/src/types/api.ts
+
+Run tests (e.g. go test -v ./internal/playertrack/..., go test -v ./internal/session/..., go test ./...).
+Deliver your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\handoff.md and notify orchestrator_6.

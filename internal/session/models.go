@@ -70,23 +70,29 @@ func (p *PlaylistSessionStats) DeepClone() *PlaylistSessionStats {
 
 // SessionMatchPlayer captures an individual player's performance and credentials in a completed match.
 type SessionMatchPlayer struct {
-	PlayerID      string                         `json:"player_id"`
-	Platform      string                         `json:"platform"`
-	Name          string                         `json:"name"`
-	TeamNum       int                            `json:"team_num"` // 0 = Blue, 1 = Orange, 255 = Spectator
-	IsLocal       bool                           `json:"is_local"`
-	IsBot         bool                           `json:"is_bot"`
-	Stats         playertrack.PlayerStatsSummary `json:"stats"`
-	RankName      string                         `json:"rank_name"`
-	Tier          int                            `json:"tier"`
-	Division      int                            `json:"division"`
-	MMR           float64                        `json:"mmr"`
-	MatchupRecord *storage.PlayerMatchup         `json:"matchup_record,omitempty"`
+	PlayerID       string                         `json:"player_id"`
+	Platform       string                         `json:"platform"`
+	Name           string                         `json:"name"`
+	TeamNum        int                            `json:"team_num"` // 0 = Blue, 1 = Orange, 255 = Spectator
+	IsLocal        bool                           `json:"is_local"`
+	IsBot          bool                           `json:"is_bot"`
+	IsDisconnected bool                           `json:"is_disconnected,omitempty"`
+	Won            *bool                          `json:"won,omitempty"`
+	Stats          playertrack.PlayerStatsSummary `json:"stats"`
+	RankName       string                         `json:"rank_name"`
+	Tier           int                            `json:"tier"`
+	Division       int                            `json:"division"`
+	MMR            float64                        `json:"mmr"`
+	MatchupRecord  *storage.PlayerMatchup         `json:"matchup_record,omitempty"`
 }
 
 // DeepClone returns an isolated copy of SessionMatchPlayer.
 func (p SessionMatchPlayer) DeepClone() SessionMatchPlayer {
 	clone := p
+	if p.Won != nil {
+		won := *p.Won
+		clone.Won = &won
+	}
 	if p.MatchupRecord != nil {
 		rec := *p.MatchupRecord
 		clone.MatchupRecord = &rec

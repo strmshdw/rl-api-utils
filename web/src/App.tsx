@@ -35,6 +35,8 @@ export const App: React.FC = () => {
     return <OBSOverlayView />;
   }
 
+  const inMatch = !!match?.active_match;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Top Session & Identity Header */}
@@ -42,27 +44,30 @@ export const App: React.FC = () => {
         session={session}
         activePlaylistId={match?.playlist_id}
         onResetSession={resetSession}
+        inMatch={inMatch}
       />
 
       {/* Navigation Tabs */}
       <Navbar
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        inMatch={!!match?.active_match}
+        inMatch={inMatch}
         matchCount={session?.matches?.length ?? 0}
       />
 
       {/* Main View Area */}
-      <main className="flex-1 container mx-auto px-4 py-4">
+      <main className={`flex-1 container mx-auto px-4 ${activeTab === 'live' ? 'py-2' : 'py-4'}`}>
         {activeTab === 'live' && <LiveGameView session={session} />}
         {activeTab === 'history' && <SessionHistoryView />}
         {activeTab === 'players' && <PlayerDirectoryView />}
       </main>
 
-      {/* Subtle Footer */}
-      <footer className="border-t border-slate-900 py-3 text-center text-xs text-slate-500">
-        Rocket League Play Session Dashboard &bull; Local Daemon v1.0.0
-      </footer>
+      {/* Subtle Footer (hidden during live match view to ensure zero-scroll layout) */}
+      {!(activeTab === 'live' && inMatch) && (
+        <footer className="border-t border-slate-900 py-3 text-center text-xs text-slate-500">
+          Rocket League Play Session Dashboard &bull; Local Daemon v1.0.0
+        </footer>
+      )}
     </div>
   );
 };

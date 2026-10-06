@@ -1,46 +1,75 @@
-# Dispatch: m4_auditor_1
+# Final Victory Forensic Auditor Dispatch: m4_auditor_1
 
-**Milestone**: M4 - Syncer, Daemon Engine & CLI
-**Role**: Forensic Integrity Auditor (internal/syncer, internal/daemon, cmd/rl-sync)
+## Task Assignment
+**Role**: Final Victory Forensic Integrity Auditor (`m4_auditor_1`)  
+**Scope**: Entire Workspace — All Requirements (R1, R2, R3)  
+**Parent Agent**: `orchestrator_6`  
+**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m4_auditor_1`
 
-## Objectives
-Perform a comprehensive forensic integrity audit of Milestone 4 deliverables:
-1. Static analysis & code inspection:
-   - Audit `internal/syncer/interfaces.go`, `internal/syncer/syncer.go`, `internal/syncer/syncer_test.go`.
-   - Audit `internal/daemon/daemon.go`, `internal/daemon/daemon_test.go`.
-   - Audit `cmd/rl-sync/main.go`, `cmd/rl-sync/main_test.go`.
-   - Check for: hardcoded test outputs, dummy implementations, facade structs, fake assertions, circumvented requirements, or test bypasses.
-2. Execution validation:
-   - Verify all tests pass cleanly using standard Go toolchain:
-     ```powershell
-     $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-     cd d:\code\rl-api-utils
-     go test -v -count=1 ./internal/syncer/...
-     go test -v -count=1 ./internal/daemon/...
-     go test -v -count=1 ./cmd/rl-sync/...
-     go test -count=1 ./...
-     go vet ./...
+## Mandatory Documents to Read First
+1. Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
+2. Project Specification: `d:\code\rl-api-utils\PROJECT.md`
+3. Milestone Handoff Reports:
+   - `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md`
+   - `d:\code\rl-api-utils\.agents\teamwork\m1_auditor_1\handoff.md`
+   - `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md`
+   - `d:\code\rl-api-utils\.agents\teamwork\m3_auditor_1\handoff.md`
+   - `d:\code\rl-api-utils\.agents\teamwork\m4_worker_1\handoff.md`
+
+## Forensic Integrity Audit Tasks
+Systematically verify the entire system against all acceptance criteria:
+1. **R1: UI Revamp & Zero-Scroll Viewport**:
+   - Verify prominent player stat display (Score, Goals, Assists, Saves, Shots, Demos) without vertical scrolling on standard viewports in `PlayerRow.tsx` and `RosterTable.tsx`.
+   - Verify genuine elimination of superfluous UI elements in `ScoreboardBanner.tsx`, `Header.tsx`, and `App.tsx`.
+   - Verify automated DOM layout tests in `LiveGameView.layout.test.tsx` and adversarial tests in `LiveGameView.adversarial.test.tsx`.
+2. **R2: Persistent Player State on Disconnect**:
+   - Verify player information and stats are retained in the active game state when a player leaves or disconnects in `internal/playertrack/tracker.go` and `internal/session/session.go`.
+   - Verify automated programmatic tests simulating mid-game disconnects in `tracker_test.go` and `session_test.go`.
+3. **R3: Match Logging for Disconnected Players**:
+   - Verify win/loss outcomes are recorded in persistent storage (`storage.RecordMatchResults`) and session match history for all participants, including disconnected players.
+   - Verify automated tests confirming final match history records win or loss for disconnected players.
+4. **Authenticity & Integrity Check**:
+   - Confirm ZERO cheating, facade implementations, hardcoded test strings, or circumvented logic.
+5. **Execution Verification**:
+   - Execute:
+     ```bash
+     cd d:\code\rl-api-utils\web && npm test
+     cd d:\code\rl-api-utils\web && npm run build
+     cd d:\code\rl-api-utils && go test -count=1 ./...
+     cd d:\code\rl-api-utils && go build ./cmd/rl-sync
      ```
-3. Artifact hygiene:
-   - Verify no leftover temporary test files, database files, or stray artifacts in source tree.
+   - Confirm all tests pass with Exit Code 0 and `rl-sync.exe` compiles cleanly.
 
-Provide your verdict (CLEAN or INTEGRITY_VIOLATION) with full evidence in `d:\code\rl-api-utils\.agents\teamwork\m4_auditor_1\handoff.md` and notify parent via `send_message`.
+## Verdict Protocol
+Deliver a strict BINARY verdict:
+- `CLEAN`
+- `INTEGRITY VIOLATION`
 
-## 2026-09-25T04:34:00Z
-You are m4_auditor_1.
+Write your comprehensive forensic audit report in `d:\code\rl-api-utils\.agents\teamwork\m4_auditor_1\handoff.md` and send a message back.
+
+
+## 2026-10-06T10:19:06Z
+
+You are m4_auditor_1, the final victory forensic integrity auditor for rl-api-utils.
 Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m4_auditor_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m4_auditor_1\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m4_worker_1\handoff.md.
 
-Perform forensic integrity audit on Milestone 4 deliverables (internal/syncer, internal/daemon, cmd/rl-sync):
-1. Audit for hardcoded test outputs, dummy implementations, facade structs, fake assertions, or bypassed requirements.
-2. Check for pre-populated artifacts or stale output files.
-3. Verify test execution and go vet across the repository:
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/syncer/...
-   go test -v -count=1 ./internal/daemon/...
-   go test -v -count=1 ./cmd/rl-sync/...
-   go test -count=1 ./...
-   go vet ./...
-4. Provide your verdict (CLEAN or INTEGRITY_VIOLATION) with full evidence in d:\code\rl-api-utils\.agents\teamwork\m4_auditor_1\handoff.md and notify parent via send_message.
+You MUST read:
+1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
+2. Project specification: d:\code\rl-api-utils\PROJECT.md
+3. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m4_auditor_1\DISPATCH.md
+4. Preceding milestone worker and auditor handoffs:
+   - d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md
+   - d:\code\rl-api-utils\.agents\teamwork\m1_auditor_1\handoff.md
+   - d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md
+   - d:\code\rl-api-utils\.agents\teamwork\m3_auditor_1\handoff.md
+   - d:\code\rl-api-utils\.agents\teamwork\m4_worker_1\handoff.md
+
+Conduct comprehensive forensic integrity verification across all three requirements (R1 UI Revamp & Zero-Scroll Layout, R2 Persistent Player State on Disconnect, R3 Match Logging for Disconnected Participants):
+- Verify authentic implementation with no facades, dummy logic, or hardcoded test values.
+- Verify genuine automated tests covering every acceptance criterion.
+- Execute:
+  - cd d:\code\rl-api-utils\web && npm test
+  - cd d:\code\rl-api-utils\web && npm run build
+  - cd d:\code\rl-api-utils && go test -count=1 ./...
+  - cd d:\code\rl-api-utils && go build ./cmd/rl-sync
+- Deliver your strict binary verdict (CLEAN or INTEGRITY VIOLATION) in d:\code\rl-api-utils\.agents\teamwork\m4_auditor_1\handoff.md and notify orchestrator_6.

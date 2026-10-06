@@ -65,7 +65,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({ session }) => {
   }
 
   return (
-    <div className="py-2 space-y-6">
+    <div className="py-1 space-y-3">
       {/* Stadium Scoreboard Banner */}
       <ScoreboardBanner
         match={match}
@@ -74,7 +74,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({ session }) => {
       />
 
       {/* Dual Team Rosters (Blue on Left/Top, Orange on Right/Bottom) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <RosterTable
           teamNum={0}
           teamName="Blue Team"

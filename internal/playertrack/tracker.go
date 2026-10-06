@@ -51,9 +51,10 @@ type LobbyPlayer struct {
 	Platform      string                 `json:"platform"`                 // "Steam", "Epic", "Unknown"
 	Name          string                 `json:"name"`                     // In-game display name
 	TeamNum       int                    `json:"team_num"`                 // 0 = Blue, 1 = Orange, 255 = Spectator
-	IsLocal       bool                   `json:"is_local"`                 // True if this is the authenticated user
-	IsBot         bool                   `json:"is_bot"`                   // True if AI bot ("Unknown|0|0")
-	Stats         PlayerStatsSummary     `json:"stats"`                    // Real-time in-game box score
+	IsLocal        bool                   `json:"is_local"`                 // True if this is the authenticated user
+	IsBot          bool                   `json:"is_bot"`                   // True if AI bot ("Unknown|0|0")
+	IsDisconnected bool                   `json:"is_disconnected,omitempty"`// True if player left the active game early
+	Stats          PlayerStatsSummary     `json:"stats"`                    // Real-time in-game box score
 	CurrentRank   *PlayerPlaylistRank    `json:"current_rank,omitempty"`   // Rank for active match playlist
 	Ranks         PlayerRanksSnapshot    `json:"ranks,omitempty"`          // Full snapshot across all playlists
 	MatchupRecord *storage.PlayerMatchup `json:"matchup_record,omitempty"` // H2H record in this playlist
@@ -329,7 +330,15 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 
 	now := time.Now().UTC()
 
-	if t.currentMatch == nil || t.currentMatch.MatchGUID != trimmedGUID {
+	isSameMatch := (t.currentMatch != nil && t.currentMatch.MatchGUID == trimmedGUID)
+
+	// Capture previous participant snapshot if within the same match
+	var prevLocalPlayer *LobbyPlayer
+	var prevTeammates []LobbyPlayer
+	var prevOpponents []LobbyPlayer
+	var prevSpectators []LobbyPlayer
+
+	if !isSameMatch {
 		// New match detected: initialize new snapshot
 		t.currentMatch = &CurrentMatchResponse{
 			ActiveMatch:  true,
@@ -346,6 +355,17 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 		t.upsertedProfiles = make(map[string]string)
 		t.matchupInFlight = make(map[string]time.Time)
 	} else {
+		// Existing match: capture previous rosters for differential retention
+		prevLocalPlayer = t.currentMatch.LocalPlayer
+		prevTeammates = t.currentMatch.Teammates
+		prevOpponents = t.currentMatch.Opponents
+		prevSpectators = t.currentMatch.Spectators
+
+		// Fallback: if local player left/omitted in this frame, retain previously resolved local team
+		if resolvedLocal == nil && t.currentMatch.LocalTeam != nil && (*t.currentMatch.LocalTeam == 0 || *t.currentMatch.LocalTeam == 1) {
+			myTeamNum = *t.currentMatch.LocalTeam
+		}
+
 		// Update existing match metadata
 		if playlistID != 0 {
 			t.currentMatch.PlaylistID = playlistID
@@ -361,7 +381,7 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 	if myTeamNum == 0 || myTeamNum == 1 {
 		val := myTeamNum
 		t.currentMatch.LocalTeam = &val
-	} else {
+	} else if !isSameMatch {
 		t.currentMatch.LocalTeam = nil
 	}
 
@@ -369,6 +389,9 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 	var opponents []LobbyPlayer
 	var spectators []LobbyPlayer
 	var localPlayerLobby *LobbyPlayer
+
+	// Track observed player IDs in current frame to detect departures and deduplicate
+	seenThisFrame := make(map[string]bool, len(players))
 
 	var playersToUpsert []statsapi.StatsPlayer
 	var playersToFetchRank []rlapi.PlayerID
@@ -378,6 +401,16 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 
 	for _, p := range players {
 		isBot := p.IsBot()
+		normID := strings.ToLower(strings.TrimSpace(p.PrimaryId))
+
+		// Deduplicate human players within the same frame
+		if !isBot && normID != "" {
+			if seenThisFrame[normID] {
+				continue
+			}
+			seenThisFrame[normID] = true
+		}
+
 		isLocal := resolvedLocal != nil && strings.EqualFold(strings.TrimSpace(p.PrimaryId), strings.TrimSpace(resolvedLocal.PrimaryID))
 
 		// Profile upsert check for non-bot human players
@@ -446,12 +479,13 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 		}
 
 		lp := LobbyPlayer{
-			PlayerID: p.PrimaryId,
-			Platform: platform,
-			Name:     p.Name,
-			TeamNum:  p.TeamNum,
-			IsLocal:  isLocal,
-			IsBot:    isBot,
+			PlayerID:       p.PrimaryId,
+			Platform:       platform,
+			Name:           p.Name,
+			TeamNum:        p.TeamNum,
+			IsLocal:        isLocal,
+			IsBot:          isBot,
+			IsDisconnected: false,
 			Stats: PlayerStatsSummary{
 				Score:   p.Score,
 				Goals:   p.Goals,
@@ -473,6 +507,61 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 			opponents = append(opponents, lp)
 		} else {
 			spectators = append(spectators, lp)
+		}
+	}
+
+	// Differential Retention: Retain human participants from previous frame who departed mid-game
+	if isSameMatch {
+		// Retain disconnected local player
+		if localPlayerLobby == nil && prevLocalPlayer != nil {
+			retainedLocal := prevLocalPlayer.DeepClone()
+			retainedLocal.IsDisconnected = true
+			localPlayerLobby = &retainedLocal
+			if normID := strings.ToLower(strings.TrimSpace(retainedLocal.PlayerID)); normID != "" {
+				seenThisFrame[normID] = true
+			}
+		}
+
+		// Retain disconnected teammates
+		for _, oldP := range prevTeammates {
+			if oldP.IsBot {
+				continue // Do not retain departed AI bots
+			}
+			normID := strings.ToLower(strings.TrimSpace(oldP.PlayerID))
+			if normID != "" && !seenThisFrame[normID] {
+				retained := oldP.DeepClone()
+				retained.IsDisconnected = true
+				teammates = append(teammates, retained)
+				seenThisFrame[normID] = true
+			}
+		}
+
+		// Retain disconnected opponents
+		for _, oldP := range prevOpponents {
+			if oldP.IsBot {
+				continue // Do not retain departed AI bots
+			}
+			normID := strings.ToLower(strings.TrimSpace(oldP.PlayerID))
+			if normID != "" && !seenThisFrame[normID] {
+				retained := oldP.DeepClone()
+				retained.IsDisconnected = true
+				opponents = append(opponents, retained)
+				seenThisFrame[normID] = true
+			}
+		}
+
+		// Retain disconnected spectators
+		for _, oldP := range prevSpectators {
+			if oldP.IsBot {
+				continue
+			}
+			normID := strings.ToLower(strings.TrimSpace(oldP.PlayerID))
+			if normID != "" && !seenThisFrame[normID] {
+				retained := oldP.DeepClone()
+				retained.IsDisconnected = true
+				spectators = append(spectators, retained)
+				seenThisFrame[normID] = true
+			}
 		}
 	}
 

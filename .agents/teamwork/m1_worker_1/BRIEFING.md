@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-26T00:41:00Z
+# BRIEFING — 2026-10-06T09:09:00Z
 
 ## Mission
-Implement Milestone M1 (Stats API & Storage Schema Expansion): polymorphic EventData, StatsPlayer/StatsGame models, PlayerEventHandler in Stats API Listener, PlayerRecord/PlayerMatchup/PlayerSummary/PlayerOutcome models in store.go, full 8-method implementation and atomic deduplication in SQLite and JSONStore with parity, and comprehensive unit tests.
+Implement Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect): differential participant retention in tracker.go, IsDisconnected in LobbyPlayer and SessionMatchPlayer, ConcludeMatch mapping and goal tallying, TypeScript type updates, and comprehensive programmatic unit test suites.
 
 ## 🔒 My Identity
 - Archetype: worker
@@ -12,6 +12,8 @@ Implement Milestone M1 (Stats API & Storage Schema Expansion): polymorphic Event
 - Subagent Conversation ID: 2382f655-9d12-497d-8842-5d57d3fa6050
 - Current Parent Conversation ID: b82f99b4-2b9f-46d1-8c45-738eb9e9a7b1
 - Expansion Milestone: M1 - Stats API & Storage Schema Expansion
+- M1 R2 Milestone: Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect)
+- M1 R2 Parent Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
 
 ## 🔒 Key Constraints
 - Exclusive write ownership:
@@ -38,66 +40,66 @@ Implement Milestone M1 (Stats API & Storage Schema Expansion): polymorphic Event
     - internal/storage/sqlite_test.go
     - internal/storage/jsonstore.go
     - internal/storage/jsonstore_test.go
-- DO NOT touch other packages (internal/playertrack, internal/daemon, internal/config, cmd/rl-sync, etc.)
-- Integrity mandate: genuine implementations only, zero hardcoding or facades
-- 100% test pass on all repository packages
+- M1 R2 Exclusive write ownership:
+  - internal/playertrack/tracker.go
+  - internal/playertrack/tracker_test.go
+  - internal/session/models.go
+  - internal/session/session.go
+  - internal/session/session_test.go
+  - web/src/types/api.ts
+- DO NOT touch other source files outside this scope.
+- Integrity mandate: genuine implementations only, zero hardcoding or facades.
+- 100% test pass on all repository packages.
 
 ## Current Parent
-- Conversation ID: b82f99b4-2b9f-46d1-8c45-738eb9e9a7b1
-- Updated: 2026-09-26T00:41:00Z
+- Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
+- Updated: 2026-10-06T09:09:00Z
 
 ## Task Summary
-- **What to build**: M1 Stats API & Storage Schema Expansion for Player Tracking
+- **What to build**: Persistent Player State on Mid-Game Disconnect (M1 / Requirement R2)
 - **Success criteria**:
-  - `EventData.UnmarshalJSON` with polymorphic support (raw string vs object)
-  - `StatsPlayer`, `StatsGame`, `WinnerTeamNum *int`, `Playlist int`, `ParsePrimaryID`, and `StatsPlayer.IsBot()`
-  - `PlayerEventHandler` interface on `Listener`, `WithPlayerEventHandler`, `SetPlayerEventHandler`
-  - Event dispatch for `UpdateState` and `MatchEnded` in `handleRawMessage` while preserving `tracker.RecordMatch`
-  - Storage domain models: `PlayerRecord`, `PlayerMatchup`, `PlayerSummary`, `PlayerOutcome`, sentinel errors
-  - 8 new methods in `StateStore` implemented in both SQLite and JSONStore with 100% behavioral parity
-  - Atomic deduplication in `RecordMatchResults` via `processed_match_outcomes` / `processedMatches`
-  - Comprehensive unit tests in `listener_test.go`, `sqlite_test.go`, and `jsonstore_test.go`
-  - 100% pass on `go test ./...` and `go test ./internal/storage/...`
+  - Add `IsDisconnected bool json:"is_disconnected,omitempty"` to `LobbyPlayer`.
+  - Differential participant retention in `Tracker.OnUpdateState` when `isSameMatch`.
+  - Retain departed teammates, opponents, spectators with `IsDisconnected = true` and preserve last known box score stats.
+  - Reconnections restore active status (`IsDisconnected = false`), update stats, without duplicate entries.
+  - Preserve `LocalPlayer` and `LocalTeam` if local player disconnects early; ensure `OnMatchEnded` records outcomes.
+  - Exclude departed AI bots from retention.
+  - Clean reset on new match GUID transition.
+  - Add `IsDisconnected bool json:"is_disconnected,omitempty"` and `Won *bool json:"won,omitempty"` to `SessionMatchPlayer`.
+  - Update `SessionMatchPlayer.DeepClone()`.
+  - In `ConcludeMatch`, map `lp.IsDisconnected` to `SessionMatchPlayer.IsDisconnected`, compute `Won`, and sum goals from all participants into team scores.
+  - Update `web/src/types/api.ts` with `is_disconnected?: boolean;` on `LobbyPlayer` and `SessionMatchPlayer`, and `won?: boolean;`.
+  - Add programmatic unit test suites in `tracker_test.go` and `session_test.go`.
+  - 100% test pass across all packages and clean build.
 - **Interface contracts**: PROJECT.md § Interface Contracts
 - **Code layout**: PROJECT.md § Code Layout
 
 ## Key Decisions Made
-- Use pointer `WinnerTeamNum *int` so team 0 (Blue) is not confused with nil/unspecified.
-- Use `GetPlaylist()` to resolve playlist ID either from root `Playlist` or nested `Game.PlaylistId`.
-- In `RecordMatchResults`, auto-upsert player profile if not yet existing to satisfy foreign key integrity.
-- In `sqlite.go`, use single-transaction atomic insert into `processed_match_outcomes` with UNIQUE constraint, returning `ErrMatchAlreadyProcessed` on duplicate.
-- In `jsonstore.go`, use deep cloning for all reads/writes and RWMutex guarding to ensure zero race conditions.
-- Maintained full backward compatibility for `NewListener` and existing test suites using `ListenerOption`.
-- Updated `mockStateStore` in `internal/auth/auth_test.go` with stubs to prevent compilation breaks across `go test ./...`.
+- Differential retention in `OnUpdateState`: human participants absent from frame are retained with `IsDisconnected = true`; AI bots are excluded.
+- Local player / local team fallback in `OnUpdateState` preserves `LocalTeam` when local player drops, allowing `OnMatchEnded` to record outcomes.
+- Frame deduplication lookup (`seenThisFrame`) keyed by normalized `PrimaryId` prevents duplicate entries upon reconnection.
+- DeepClone copies `Won *bool` safely to avoid data races across concurrent readers.
 
 ## Artifact Index
-- internal/statsapi/types.go — Stats API models & polymorphic unmarshaler
-- internal/statsapi/listener.go — Stats API Listener with PlayerEventHandler dispatch
-- internal/statsapi/listener_test.go — Comprehensive tests for polymorphic unmarshaling and dispatch
-- internal/storage/store.go — StateStore interface & player tracking domain models
-- internal/storage/sqlite.go — SQLite implementation of player tracking & deduplication
-- internal/storage/sqlite_test.go — SQLite unit tests for player tracking (12 new tests)
-- internal/storage/jsonstore.go — JSONStore implementation with full parity and deep cloning
-- internal/storage/jsonstore_test.go — JSONStore unit tests for player tracking (12 new tests)
+- internal/playertrack/tracker.go — differential retention algorithm & LobbyPlayer
+- internal/playertrack/tracker_test.go — 5 new unit tests for mid-game disconnect lifecycle
+- internal/session/models.go — SessionMatchPlayer with IsDisconnected and Won
+- internal/session/session.go — ConcludeMatch mapping and team score calculation
+- internal/session/session_test.go — 4 new unit tests for disconnect propagation and conclusion
+- web/src/types/api.ts — TypeScript interfaces updated with is_disconnected
 
 ## Change Tracker
 - **Files modified**:
-  - `internal/statsapi/types.go`: polymorphic UnmarshalJSON, StatsPlayer, StatsGame, WinnerTeamNum, GetPlaylist, ParsePrimaryID, IsBot
-  - `internal/statsapi/listener.go`: PlayerEventHandler interface, WithPlayerEventHandler, SetPlayerEventHandler, dispatch in handleRawMessage
-  - `internal/statsapi/listener_test.go`: 10 comprehensive test functions for polymorphic unmarshaling and event dispatch
-  - `internal/storage/store.go`: PlayerRecord, PlayerMatchup, PlayerSummary, PlayerOutcome, ErrPlayerNotFound, ErrMatchAlreadyProcessed, 8 methods on StateStore
-  - `internal/storage/sqlite.go`: schemaDDL expanded with 3 tables, implemented 8 methods with transaction safety and deduplication
-  - `internal/storage/sqlite_test.go`: 12 new comprehensive unit tests covering all 8 methods, 4-way matrix, idempotency, pagination, cascade delete, concurrency
-  - `internal/storage/jsonstore.go`: jsonStatePayload and JSONStore expanded, deep cloning defense, 8 methods with full parity
-  - `internal/storage/jsonstore_test.go`: 12 new comprehensive unit tests covering all 8 methods, deep copying, pagination, idempotency, concurrency
-  - `internal/auth/auth_test.go`: added 8 stubs to mockStateStore for StateStore interface compatibility
-- **Build status**: PASS (`go build ./cmd/rl-sync`, `go test ./...`)
+  - `internal/playertrack/tracker.go`: Added `IsDisconnected` to `LobbyPlayer`; implemented differential retention in `OnUpdateState`.
+  - `internal/playertrack/tracker_test.go`: Added `makePlayerWithStats` and 5 comprehensive unit tests covering the disconnect lifecycle across SQLite and JSONStore.
+  - `internal/session/models.go`: Added `IsDisconnected` and `Won` to `SessionMatchPlayer`; updated `DeepClone`.
+  - `internal/session/session.go`: Mapped `IsDisconnected` and computed `Won` in `ConcludeMatch`.
+  - `internal/session/session_test.go`: Added 4 tests for active match disconnect observer propagation, SSE broadcasting, concluded match snapshots, and deep cloning.
+  - `web/src/types/api.ts`: Added `is_disconnected` and `won` to TypeScript interfaces.
+- **Build status**: PASS (`go build ./cmd/rl-sync`, `npm --prefix web run build`, `go test ./...`)
 - **Pending issues**: None
 
 ## Quality Status
-- **Build/test result**: 100% pass across all unit tests
-  - `go test -v -count=1 ./internal/statsapi/...`: PASS (13 tests)
-  - `go test -v -count=1 ./internal/storage/...`: PASS (43 tests)
-  - `go test -count=1 ./...`: PASS (11 packages)
-- **Lint status**: `go vet ./...` clean (0 warnings)
-- **Tests added/modified**: 10 tests in statsapi, 24 tests in storage
+- **Build/test result**: PASS (100% across all 14 Go packages, 112 frontend Vitest tests)
+- **Lint status**: clean (`go vet ./...` 0 warnings)
+- **Tests added/modified**: 9 new tests added (5 in playertrack, 4 in session)

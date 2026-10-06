@@ -44,7 +44,7 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
       }`}
     >
       {/* Player Identity Anchor */}
-      <td className="py-2.5 px-4 flex items-center gap-2">
+      <td data-testid="player-identity" className="py-2 px-4 flex items-center gap-2">
         {getPlatformIcon(player.platform)}
         <span
           className={`font-semibold truncate max-w-[150px] ${
@@ -66,16 +66,83 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
         )}
       </td>
 
-      {/* Platform Column */}
-      {columnConfig.platform && (
-        <td className="py-2.5 px-3 text-slate-400 text-xs">
-          {player.is_bot ? 'AI' : player.platform}
+      {/* Prioritized Box Score Performance Stats */}
+      {/* 1. Score: 18px font-black white */}
+      {columnConfig.score && (
+        <td
+          data-testid="stat-score"
+          className="py-2 px-3 text-right text-lg font-black font-mono text-white"
+        >
+          {stats.score}
         </td>
       )}
 
-      {/* Rank Column */}
+      {/* 2. Goals: 18px font-black amber glow */}
+      {columnConfig.goals && (
+        <td
+          data-testid="stat-goals"
+          className={`py-2 px-3 text-right text-lg font-black font-mono ${
+            stats.goals > 0
+              ? 'text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]'
+              : 'text-slate-500'
+          }`}
+        >
+          {stats.goals}
+        </td>
+      )}
+
+      {/* 3. Assists: 16px font-extrabold cyan */}
+      {columnConfig.assists && (
+        <td
+          data-testid="stat-assists"
+          className={`py-2 px-3 text-right text-base font-extrabold font-mono ${
+            stats.assists > 0 ? 'text-cyan-300' : 'text-slate-500'
+          }`}
+        >
+          {stats.assists}
+        </td>
+      )}
+
+      {/* 4. Saves: 16px font-extrabold emerald */}
+      {columnConfig.saves && (
+        <td
+          data-testid="stat-saves"
+          className={`py-2 px-3 text-right text-base font-extrabold font-mono ${
+            stats.saves > 0 ? 'text-emerald-400' : 'text-slate-500'
+          }`}
+        >
+          {stats.saves}
+        </td>
+      )}
+
+      {/* 5. Shots: 14px font-bold slate */}
+      {columnConfig.shots && (
+        <td
+          data-testid="stat-shots"
+          className={`py-2 px-3 text-right text-sm font-bold font-mono ${
+            stats.shots > 0 ? 'text-slate-200' : 'text-slate-500'
+          }`}
+        >
+          {stats.shots}
+        </td>
+      )}
+
+      {/* 6. Demos: 14px font-bold font-extrabold rose */}
+      {columnConfig.demos && (
+        <td
+          data-testid="stat-demos"
+          className={`py-2 px-3 text-right text-sm font-bold font-mono ${
+            stats.demos > 0 ? 'text-rose-400 font-extrabold' : 'text-slate-500'
+          }`}
+        >
+          {stats.demos}
+        </td>
+      )}
+
+      {/* Secondary Skill & Historical Matchup Columns */}
+      {/* 7. Rank Column */}
       {columnConfig.rank && (
-        <td className="py-2.5 px-3">
+        <td data-testid="stat-rank" className="py-2 px-3">
           <RankBadge
             rankName={player.current_rank?.rank_name || 'Unranked'}
             tier={player.current_rank?.tier ?? 0}
@@ -84,65 +151,27 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
         </td>
       )}
 
-      {/* MMR Column */}
+      {/* 8. MMR Column */}
       {columnConfig.mmr && (
-        <td className="py-2.5 px-3 text-right font-mono text-slate-300">
+        <td data-testid="stat-mmr" className="py-2 px-3 text-right font-mono text-slate-300">
           {player.current_rank?.mmr ? player.current_rank.mmr.toFixed(1) : '--'}
         </td>
       )}
 
-      {/* Box Score Stats Columns */}
-      {columnConfig.score && (
-        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100">
-          {stats.score}
-        </td>
-      )}
-
-      {columnConfig.goals && (
-        <td
-          className={`py-2.5 px-3 text-right font-mono font-bold ${
-            stats.goals > 0 ? 'text-amber-400' : 'text-slate-400'
-          }`}
-        >
-          {stats.goals}
-        </td>
-      )}
-
-      {columnConfig.assists && (
-        <td className="py-2.5 px-3 text-right font-mono text-slate-300">
-          {stats.assists}
-        </td>
-      )}
-
-      {columnConfig.saves && (
-        <td className="py-2.5 px-3 text-right font-mono text-slate-300">
-          {stats.saves}
-        </td>
-      )}
-
-      {columnConfig.shots && (
-        <td className="py-2.5 px-3 text-right font-mono text-slate-300">
-          {stats.shots}
-        </td>
-      )}
-
-      {columnConfig.demos && (
-        <td
-          className={`py-2.5 px-3 text-right font-mono ${
-            stats.demos > 0 ? 'text-rose-400 font-bold' : 'text-slate-400'
-          }`}
-        >
-          {stats.demos}
-        </td>
-      )}
-
-      {/* Head-to-Head (H2H) Column */}
+      {/* 9. Head-to-Head (H2H) Column */}
       {columnConfig.h2h && (
-        <td className="py-2.5 px-4 text-right">
+        <td data-testid="stat-h2h" className="py-2 px-4 text-right">
           <H2HBadge
             matchup={player.matchup_record}
             isTeammate={isTeammate}
           />
+        </td>
+      )}
+
+      {/* 10. Platform Column */}
+      {columnConfig.platform && (
+        <td data-testid="stat-platform" className="py-2 px-3 text-slate-400 text-xs">
+          {player.is_bot ? 'AI' : player.platform}
         </td>
       )}
     </tr>
