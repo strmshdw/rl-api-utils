@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -455,8 +456,12 @@ func TestWebIntegration_StaticAndSPAFallback(t *testing.T) {
 		t.Errorf("expected no-cache Cache-Control for index.html, got %s", cc)
 	}
 
-	// 3. Static JS/CSS asset serving
-	respJS, err := client.Get(server.URL + "/assets/index-ev8_Pgz-.js")
+	// 3. Static JS/CSS asset serving (filename is content-hashed, so read it from index.html)
+	m := regexp.MustCompile(`src="(/assets/[^"]+\.js)"`).FindStringSubmatch(string(bodyRoot))
+	if m == nil {
+		t.Fatalf("index.html does not reference a hashed /assets/*.js entry: %s", string(bodyRoot))
+	}
+	respJS, err := client.Get(server.URL + m[1])
 	if err != nil {
 		t.Fatalf("GET asset JS failed: %v", err)
 	}

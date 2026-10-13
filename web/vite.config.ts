@@ -8,18 +8,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, '../internal/web/dist'),
     emptyOutDir: true,
-    rollupOptions: {
-      output: {
-        entryFileNames: 'assets/index-ev8_Pgz-.js',
-        chunkFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: (assetInfo) => {
-          if (assetInfo.name && assetInfo.name.endsWith('.css')) {
-            return 'assets/index-tXepU5qp.css';
-          }
-          return 'assets/[name]-[hash][extname]';
-        },
-      },
-    },
+    // Keep Vite's default content-hashed filenames (assets/[name]-[hash].ext).
+    // The Go server serves /assets/* as immutable for a year and index.html as
+    // no-cache, so a new build only reaches browsers if the hashes change.
   },
   server: {
     port: 5173,
