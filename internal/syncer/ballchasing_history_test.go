@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,73 @@ import (
 
 func TestBallchasingHistorySyncer_Sync(t *testing.T) {
 	pageCount := 0
+	replaysDetailMap := map[string]ballchasing.ReplayItem{
+		"replay-page1": {
+			ID:           "replay-page1",
+			MatchGUID:    "guid-page1",
+			MapName:      "DFH Stadium",
+			PlaylistID:   "ranked-doubles",
+			PlaylistName: "Ranked Doubles",
+			Blue: ballchasing.ReplayTeam{
+				Goals: 3,
+				Players: []ballchasing.ReplayPlayer{
+					{
+						Name:  "HeroLocal",
+						Score: 500,
+						Goals: 2,
+						ID:    ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000001"},
+					},
+					{
+						Name:  "TeammateBob",
+						Score: 350,
+						Goals: 1,
+						ID:    ballchasing.PlayerIdentity{Platform: "epic", ID: "epic_bob"},
+					},
+				},
+			},
+			Orange: ballchasing.ReplayTeam{
+				Goals: 1,
+				Players: []ballchasing.ReplayPlayer{
+					{
+						Name:  "OpponentAlice",
+						Score: 200,
+						Goals: 1,
+						ID:    ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000002"},
+					},
+				},
+			},
+		},
+		"replay-page2": {
+			ID:           "replay-page2",
+			MatchGUID:    "guid-page2",
+			MapName:      "Utopia Stadium",
+			PlaylistID:   "ranked-doubles",
+			PlaylistName: "Ranked Doubles",
+			Blue: ballchasing.ReplayTeam{
+				Goals: 1,
+				Players: []ballchasing.ReplayPlayer{
+					{
+						Name:  "HeroLocal",
+						Score: 250,
+						Goals: 1,
+						ID:    ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000001"},
+					},
+				},
+			},
+			Orange: ballchasing.ReplayTeam{
+				Goals: 2,
+				Players: []ballchasing.ReplayPlayer{
+					{
+						Name:  "OpponentAlice",
+						Score: 300,
+						Goals: 2,
+						ID:    ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000002"},
+					},
+				},
+			},
+		},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			// Ping endpoint
@@ -25,47 +93,30 @@ func TestBallchasingHistorySyncer_Sync(t *testing.T) {
 			return
 		}
 
+		if strings.HasPrefix(r.URL.Path, "/replays/") {
+			replayID := strings.TrimPrefix(r.URL.Path, "/replays/")
+			if detail, ok := replaysDetailMap[replayID]; ok {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(detail)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
+
 		pageCount++
 		w.Header().Set("Content-Type", "application/json")
 
 		if pageCount == 1 {
-			// Page 1: 1 match
+			// Page 1: 1 match. Notice MatchGUID is empty in list (matching real Ballchasing API behavior)
 			resp := ballchasing.ReplayListResponse{
 				Count: 2,
 				List: []ballchasing.ReplayItem{
 					{
 						ID:         "replay-page1",
-						MatchGUID:  "guid-page1",
+						MatchGUID:  "", // Empty in list, will be populated by GetReplay
 						MapName:    "DFH Stadium",
 						PlaylistID: "ranked-doubles",
-						Blue: ballchasing.ReplayTeam{
-							Goals: 3,
-							Players: []ballchasing.ReplayPlayer{
-								{
-									Name:  "HeroLocal",
-									Score: 500,
-									Goals: 2,
-									ID:    ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000001"},
-								},
-								{
-									Name:  "TeammateBob",
-									Score: 350,
-									Goals: 1,
-									ID:    ballchasing.PlayerIdentity{Platform: "epic", ID: "epic_bob"},
-								},
-							},
-						},
-						Orange: ballchasing.ReplayTeam{
-							Goals: 1,
-							Players: []ballchasing.ReplayPlayer{
-								{
-									Name:  "OpponentAlice",
-									Score: 200,
-									Goals: 1,
-									ID:    ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000002"},
-								},
-							},
-						},
 					},
 				},
 				Next: "/replays?page=2",
@@ -80,31 +131,9 @@ func TestBallchasingHistorySyncer_Sync(t *testing.T) {
 			List: []ballchasing.ReplayItem{
 				{
 					ID:         "replay-page2",
-					MatchGUID:  "guid-page2",
+					MatchGUID:  "", // Empty in list, will be populated by GetReplay
 					MapName:    "Utopia Stadium",
 					PlaylistID: "ranked-doubles",
-					Blue: ballchasing.ReplayTeam{
-						Goals: 1,
-						Players: []ballchasing.ReplayPlayer{
-							{
-								Name:  "HeroLocal",
-								Score: 250,
-								Goals: 1,
-								ID:    ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000001"},
-							},
-						},
-					},
-					Orange: ballchasing.ReplayTeam{
-						Goals: 2,
-						Players: []ballchasing.ReplayPlayer{
-							{
-								Name:  "OpponentAlice",
-								Score: 300,
-								Goals: 2,
-								ID:    ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000002"},
-							},
-						},
-					},
 				},
 			},
 			Next: "",
@@ -187,6 +216,13 @@ func TestBallchasingHistorySyncer_Cancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqCount++
 		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/replays/") {
+			json.NewEncoder(w).Encode(ballchasing.ReplayItem{
+				ID:        "replay-cancel",
+				MatchGUID: "guid-cancel",
+			})
+			return
+		}
 		// Simulate infinite pages
 		resp := ballchasing.ReplayListResponse{
 			Count: 100,

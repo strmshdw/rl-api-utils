@@ -139,22 +139,64 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			totalReplays = res.Count
 		}
 
-		for _, item := range res.List {
-			guid := strings.TrimSpace(item.MatchGUID)
+		for _, listItem := range res.List {
+			select {
+			case <-ctx.Done():
+				b.mu.Lock()
+				b.progress.LastError = ctx.Err().Error()
+				b.mu.Unlock()
+				return nil, ctx.Err()
+			default:
+			}
+
+			replayID := strings.TrimSpace(listItem.ID)
+			if replayID == "" {
+				continue
+			}
+
+			// Strictly respect rate limits before each individual replay query
+			b.mu.RLock()
+			interval := b.rateInterval
+			b.mu.RUnlock()
+			if interval > 0 {
+				select {
+				case <-ctx.Done():
+					b.mu.Lock()
+					b.progress.LastError = ctx.Err().Error()
+					b.mu.Unlock()
+					return nil, ctx.Err()
+				case <-time.After(interval):
+				}
+			}
+
+			// Fetch full replay detail individually from Ballchasing to obtain MatchGUID and full rosters
+			detail, err := b.client.GetReplay(ctx, replayID)
+			if err != nil {
+				b.logger.Warn("failed to fetch individual replay detail from Ballchasing, falling back to list item",
+					slog.String("id", replayID),
+					slog.Any("error", err),
+				)
+				detail = &listItem
+			}
+
+			guid := strings.TrimSpace(detail.MatchGUID)
 			if guid == "" {
-				guid = strings.TrimSpace(item.ID)
+				guid = strings.TrimSpace(listItem.MatchGUID)
+			}
+			if guid == "" {
+				guid = replayID
 			}
 			if guid == "" {
 				continue
 			}
 
-			playlistID := ballchasing.MapPlaylistSlugToID(item.PlaylistID)
+			playlistID := ballchasing.MapPlaylistSlugToID(detail.PlaylistID)
 
 			var winnerTeam *int
-			if item.Blue.Goals > item.Orange.Goals {
+			if detail.Blue.Goals > detail.Orange.Goals {
 				w := 0
 				winnerTeam = &w
-			} else if item.Orange.Goals > item.Blue.Goals {
+			} else if detail.Orange.Goals > detail.Blue.Goals {
 				w := 1
 				winnerTeam = &w
 			}
@@ -169,10 +211,10 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			}
 			var allReplayPlayers []replayPlayerEntry
 
-			for _, p := range item.Blue.Players {
+			for _, p := range detail.Blue.Players {
 				allReplayPlayers = append(allReplayPlayers, replayPlayerEntry{team: 0, p: p})
 			}
-			for _, p := range item.Orange.Players {
+			for _, p := range detail.Orange.Players {
 				allReplayPlayers = append(allReplayPlayers, replayPlayerEntry{team: 1, p: p})
 			}
 
@@ -245,23 +287,31 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			}
 
 			// Sync into storage
-			dateStr := item.Date
+			dateStr := detail.Date
 			if dateStr == "" {
-				dateStr = item.Created
+				dateStr = detail.Created
+			}
+
+			bcLink := detail.Link
+			if bcLink == "" {
+				bcLink = listItem.Link
+			}
+			if bcLink == "" {
+				bcLink = fmt.Sprintf("https://ballchasing.com/replay/%s", replayID)
 			}
 
 			st := &storage.ReplayMatchStats{
 				MatchGUID:      guid,
-				MapName:        item.MapName,
+				MapName:        detail.MapName,
 				Playlist:       playlistID,
-				BlueScore:      item.Blue.Goals,
-				OrangeScore:    item.Orange.Goals,
+				BlueScore:      detail.Blue.Goals,
+				OrangeScore:    detail.Orange.Goals,
 				WinnerTeam:     winnerTeam,
-				Duration:       item.Duration,
+				Duration:       detail.Duration,
 				Date:           dateStr,
 				Players:        playerStats,
-				BallchasingID:  item.ID,
-				BallchasingURL: item.Link,
+				BallchasingID:  replayID,
+				BallchasingURL: bcLink,
 			}
 
 			if err := b.store.SyncReplayStats(ctx, st); err != nil {
@@ -278,6 +328,11 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			}
 
 			syncedMatches++
+			b.mu.Lock()
+			b.progress.TotalReplays = totalReplays
+			b.progress.SyncedMatches = syncedMatches
+			b.progress.SyncedPlayers = syncedPlayers
+			b.mu.Unlock()
 		}
 
 		b.mu.Lock()

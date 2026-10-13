@@ -744,3 +744,95 @@ func (c *Client) GetUploadedReplays(ctx context.Context, nextURL string) (*Repla
 
 	return nil, ErrRateLimitExhausted
 }
+
+// GetReplay queries Ballchasing API for a single replay by its Ballchasing replay ID.
+// Returns the detailed ReplayItem, which includes the match_guid and comprehensive box score.
+// Handles rate limits (HTTP 429) with exponential backoff and retries up to maxRetries.
+func (c *Client) GetReplay(ctx context.Context, id string) (*ReplayItem, error) {
+	trimmedID := strings.TrimSpace(id)
+	if trimmedID == "" {
+		return nil, fmt.Errorf("ballchasing: empty replay id")
+	}
+
+	reqURL := fmt.Sprintf("%s/replays/%s", strings.TrimRight(c.baseURL, "/"), url.PathEscape(trimmedID))
+
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("ballchasing: create get replay request: %w", err)
+		}
+
+		req.Header.Set("Authorization", c.apiKey)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if attempt < c.maxRetries {
+				backoff := c.calculateBackoff(attempt)
+				if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+					return nil, sleepErr
+				}
+				continue
+			}
+			return nil, fmt.Errorf("ballchasing: request failed: %w", err)
+		}
+
+		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("ballchasing: read response body: %w", readErr)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			var item ReplayItem
+			if err := json.Unmarshal(bodyBytes, &item); err != nil {
+				return nil, fmt.Errorf("ballchasing: decode replay: %w", err)
+			}
+			return &item, nil
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if attempt >= c.maxRetries {
+				return nil, ErrRateLimitExhausted
+			}
+			retryAfter := c.resolveRetryAfter(resp.Header.Get("Retry-After"), attempt)
+			if sleepErr := sleepWithContext(ctx, retryAfter); sleepErr != nil {
+				return nil, sleepErr
+			}
+			continue
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, ErrInvalidAPIKey
+		}
+
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("ballchasing: replay not found: %s", trimmedID)
+		}
+
+		if resp.StatusCode >= 500 {
+			if attempt < c.maxRetries {
+				backoff := c.calculateBackoff(attempt)
+				if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+					return nil, sleepErr
+				}
+				continue
+			}
+			return nil, fmt.Errorf("%w: HTTP %d", ErrServerError, resp.StatusCode)
+		}
+
+		return nil, fmt.Errorf("ballchasing: unexpected status HTTP %d: %s", resp.StatusCode, extractErrorMessage(bodyBytes))
+	}
+
+	return nil, ErrRateLimitExhausted
+}
+
