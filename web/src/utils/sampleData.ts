@@ -7,7 +7,7 @@ import {
 
 /**
  * Checks whether preview / demo mode is activated via URL query parameters.
- * Supported query params: ?demo=true, ?test=true, ?preview=true
+ * Supported query params: ?demo=true, ?test=true, ?preview=true, ?preview=idle
  */
 export function isDemoMode(): boolean {
   if (typeof window === 'undefined') return false;
@@ -15,8 +15,15 @@ export function isDemoMode(): boolean {
   return (
     params.get('demo') === 'true' ||
     params.get('test') === 'true' ||
-    params.get('preview') === 'true'
+    params.get('preview') === 'true' ||
+    params.get('preview') === 'idle'
   );
+}
+
+/** Demo mode with the simulated live match; ?preview=idle previews the between-matches state. */
+export function isDemoLiveMatch(): boolean {
+  if (!isDemoMode()) return false;
+  return new URLSearchParams(window.location.search).get('preview') !== 'idle';
 }
 
 export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
@@ -373,7 +380,7 @@ export const SAMPLE_HISTORICAL_MATCHES: HistoricalMatchRecord[] = [
       ballchasing_id: 'bc-demo-001',
       ballchasing_url: 'https://ballchasing.com/replay/bc-demo-001',
       players: [
-        { name: 'You (Demo)', platform: 'Epic', online_id: 'p1', team: 0, score: 550, goals: 2, assists: 1, saves: 3, shots: 5, demos: 1 },
+        { name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 550, goals: 2, assists: 1, saves: 3, shots: 5, demos: 1 },
         { name: 'AeroPulse', platform: 'Steam', online_id: 'p2', team: 0, score: 410, goals: 2, assists: 1, saves: 2, shots: 4, demos: 0 },
         { name: 'VortexRL', platform: 'Steam', online_id: 'p3', team: 1, score: 380, goals: 1, assists: 1, saves: 3, shots: 4, demos: 2 },
         { name: 'Zenith_99', platform: 'PlayStation', online_id: 'p4', team: 1, score: 310, goals: 1, assists: 0, saves: 1, shots: 3, demos: 0 },
@@ -411,7 +418,7 @@ export const SAMPLE_HISTORICAL_MATCHES: HistoricalMatchRecord[] = [
       ballchasing_id: 'bc-demo-002',
       ballchasing_url: 'https://ballchasing.com/replay/bc-demo-002',
       players: [
-        { name: 'You (Demo)', platform: 'Epic', online_id: 'p1', team: 0, score: 480, goals: 2, assists: 0, saves: 2, shots: 4, demos: 0 },
+        { name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 480, goals: 2, assists: 0, saves: 2, shots: 4, demos: 0 },
         { name: 'Squishy', platform: 'Steam', online_id: 'sq', team: 0, score: 430, goals: 1, assists: 2, saves: 1, shots: 3, demos: 1 },
         { name: 'GarrettG', platform: 'Steam', online_id: 'gg', team: 0, score: 390, goals: 0, assists: 1, saves: 3, shots: 2, demos: 0 },
         { name: 'Jstn', platform: 'Epic', online_id: 'jstn', team: 1, score: 450, goals: 1, assists: 0, saves: 4, shots: 5, demos: 2 },
@@ -451,7 +458,7 @@ export const SAMPLE_HISTORICAL_MATCHES: HistoricalMatchRecord[] = [
       ballchasing_id: 'bc-demo-003',
       ballchasing_url: 'https://ballchasing.com/replay/bc-demo-003',
       players: [
-        { name: 'You (Demo)', platform: 'Epic', online_id: 'p1', team: 0, score: 510, goals: 1, assists: 1, saves: 4, shots: 6, demos: 2 },
+        { name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 510, goals: 1, assists: 1, saves: 4, shots: 6, demos: 2 },
         { name: 'AeroPulse', platform: 'Steam', online_id: 'p2', team: 0, score: 340, goals: 1, assists: 0, saves: 2, shots: 3, demos: 0 },
         { name: 'DanielRL', platform: 'Epic', online_id: 'dan', team: 1, score: 620, goals: 2, assists: 1, saves: 5, shots: 7, demos: 1 },
         { name: 'BeastMode', platform: 'Steam', online_id: 'bm', team: 1, score: 440, goals: 1, assists: 2, saves: 3, shots: 4, demos: 3 },

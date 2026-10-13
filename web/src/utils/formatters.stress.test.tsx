@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { renderToString } from 'react-dom/server';
 import {
   formatMMR,
   formatMMRDelta,
@@ -9,7 +8,6 @@ import {
   formatRelativeTime,
   getRankTierColor,
 } from './formatters';
-import { RankBadge } from '../components/common/RankBadge';
 
 describe('formatters adversarial stress testing', () => {
   describe('formatMMRDelta edge cases', () => {
@@ -156,43 +154,6 @@ describe('formatters adversarial stress testing', () => {
       expect(getRankTierColor(23)).toBe('text-slate-400 border-slate-700 bg-slate-900/30');
       expect(getRankTierColor(99)).toBe('text-slate-400 border-slate-700 bg-slate-900/30');
       expect(getRankTierColor(NaN)).toBe('text-slate-400 border-slate-700 bg-slate-900/30');
-    });
-  });
-
-  describe('RankBadge fallback for unknown tiers & names', () => {
-    it('renders fallback name Unranked when rankName is empty or missing', () => {
-      const html1 = renderToString(<RankBadge rankName="" tier={0} />);
-      expect(html1).toContain('Unranked');
-
-      const html2 = renderToString(<RankBadge rankName={undefined as unknown as string} tier={0} />);
-      expect(html2).toContain('Unranked');
-    });
-
-    it('renders unranked styling for tier <= 0', () => {
-      const html = renderToString(<RankBadge rankName="Unranked" tier={0} />);
-      expect(html).toContain('text-slate-400');
-      expect(html).toContain('border-slate-700');
-    });
-
-    it('falls back to unranked neutral slate styling for unknown tiers (>22) and non-numeric tiers, requiring tier 22 for SSL', () => {
-      const html99 = renderToString(<RankBadge rankName="Unknown Tier" tier={99} />);
-      expect(html99).not.toContain('animate-pulse');
-      expect(html99).not.toContain('from-fuchsia-950/50');
-      expect(html99).toContain('text-slate-400');
-      expect(html99).toContain('border-slate-700');
-
-      const htmlNaN = renderToString(<RankBadge rankName="Corrupted Tier" tier={NaN} />);
-      expect(htmlNaN).not.toContain('animate-pulse');
-      expect(htmlNaN).toContain('text-slate-400');
-
-      const htmlUndef = renderToString(<RankBadge rankName="Missing Tier" tier={undefined as unknown as number} />);
-      expect(htmlUndef).not.toContain('animate-pulse');
-      expect(htmlUndef).toContain('text-slate-400');
-
-      const htmlSSL = renderToString(<RankBadge rankName="Supersonic Legend" tier={22} />);
-      expect(htmlSSL).toContain('animate-pulse');
-      expect(htmlSSL).toContain('text-fuchsia-300');
-      expect(htmlSSL).toContain('from-fuchsia-950/50');
     });
   });
 });

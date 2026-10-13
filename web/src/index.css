@@ -4,23 +4,41 @@
 
 @layer base {
   body {
-    @apply bg-slate-950 text-slate-100 min-h-screen font-sans antialiased;
+    @apply bg-page text-ink min-h-screen font-sans antialiased;
+  }
+
+  input::placeholder {
+    @apply text-faint;
+  }
+
+  ::selection {
+    @apply bg-blue-ink text-page;
   }
 }
 
-/* Defer rendering for long lists (Modern Web Guidance) */
-.deferred-card {
-  content-visibility: auto;
-  contain-intrinsic-size: auto none auto 120px;
+/* Angled outer edges of the live scorebug team slabs (28px slant). */
+.slab-left {
+  clip-path: polygon(28px 0, 100% 0, 100% 100%, 0 100%);
+}
+.slab-right {
+  clip-path: polygon(0 0, calc(100% - 28px) 0, 100% 100%, 0 100%);
 }
 
-/* Hide scrollbars for pill carousels while keeping scrollability */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
+/* Native <dialog> resets: no UA padding/border/colours, full-viewport scrim. */
+dialog.broadcast-dialog {
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow-y: auto;
 }
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+dialog.broadcast-dialog::backdrop {
+  background: rgba(5, 6, 8, 0.82);
 }
 
 /* Transparent OBS streaming overlay mode */

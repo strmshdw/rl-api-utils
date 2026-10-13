@@ -1,16 +1,18 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useSession } from './hooks/useSession';
 import { useLiveMatch } from './hooks/useLiveMatch';
-import { Header } from './components/layout/Header';
-import { Navbar, DashboardTab } from './components/layout/Navbar';
+import { TopBar, DashboardTab } from './components/layout/TopBar';
 import { LiveGameView } from './components/live/LiveGameView';
-import { SessionHistoryView } from './components/session/SessionHistoryView';
-import { HistoricalGamesView } from './components/historical/HistoricalGamesView';
-import { PlayerDirectoryView } from './components/players/PlayerDirectoryView';
+import { SessionView } from './components/session/SessionView';
+import { HistoryView } from './components/historical/HistoryView';
+import { PlayersView } from './components/players/PlayersView';
 import { OBSOverlayView } from './components/overlay/OBSOverlayView';
+import { isDemoLiveMatch, isDemoMode, SAMPLE_CURRENT_MATCH, SAMPLE_SESSION_RESPONSE } from './utils/sampleData';
+import { chronological, onlineIdOf } from './utils/broadcast';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>('live');
+  const [columnsOpen, setColumnsOpen] = useState(false);
 
   // Route / mode switch: detect OBS overlay mode via query param or path
   const isOverlayMode = useMemo(() => {
@@ -19,57 +21,69 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (isOverlayMode) {
-      document.documentElement.classList.add('overlay-mode');
-      document.body.classList.add('overlay-mode');
-    } else {
-      document.documentElement.classList.remove('overlay-mode');
-      document.body.classList.remove('overlay-mode');
-    }
+    document.documentElement.classList.toggle('overlay-mode', isOverlayMode);
+    document.body.classList.toggle('overlay-mode', isOverlayMode);
   }, [isOverlayMode]);
 
-  const { session, resetSession } = useSession();
-  const { match } = useLiveMatch();
+  const { session: liveSession, isLoading: sessionLoading, error: sessionError, resetSession } = useSession();
+  const { match: liveMatch, status } = useLiveMatch();
 
-  // If streaming overlay mode is active, render OBS HUD exclusively
+  // Preview / demo mode (?preview=true, or ?preview=idle) falls back to sample data.
+  const session = useMemo(() => {
+    if (liveSession && liveSession.matches?.length > 0) return liveSession;
+    return isDemoMode() ? SAMPLE_SESSION_RESPONSE : liveSession;
+  }, [liveSession]);
+
+  const match = useMemo(() => {
+    if (liveMatch?.active_match) return liveMatch;
+    return isDemoLiveMatch() ? SAMPLE_CURRENT_MATCH : liveMatch;
+  }, [liveMatch]);
+
+  // IDs the local player has appeared under, used to orient historical replays.
+  const localPlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (match?.local_player?.player_id) ids.add(onlineIdOf(match.local_player.player_id));
+    session?.matches?.forEach((m) => m.players?.forEach((p) => p.is_local && ids.add(onlineIdOf(p.player_id))));
+    ids.delete('');
+    return ids;
+  }, [match, session]);
+
   if (isOverlayMode) {
     return <OBSOverlayView />;
   }
 
   const inMatch = !!match?.active_match;
+  const lastMatch = chronological(session?.matches).pop();
+  const headerPlaylistId = inMatch ? match?.playlist_id : lastMatch?.playlist_id;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Top Session & Identity Header */}
-      <Header
-        session={session}
-        activePlaylistId={match?.playlist_id}
-        onResetSession={resetSession}
-        inMatch={inMatch}
-      />
-
-      {/* Navigation Tabs */}
-      <Navbar
+    <div className="min-h-screen bg-page text-ink flex flex-col font-display">
+      <TopBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
         inMatch={inMatch}
-        matchCount={session?.matches?.length ?? 0}
+        session={session}
+        playlistId={headerPlaylistId}
+        onOpenColumns={activeTab === 'live' && inMatch ? () => setColumnsOpen(true) : undefined}
       />
 
-      {/* Main View Area */}
-      <main className={`flex-1 container mx-auto px-4 ${activeTab === 'live' ? 'py-2' : 'py-4'}`}>
-        {activeTab === 'live' && <LiveGameView session={session} />}
-        {(activeTab === 'session' || activeTab === 'history') && <SessionHistoryView />}
-        {activeTab === 'historical' && <HistoricalGamesView />}
-        {activeTab === 'players' && <PlayerDirectoryView />}
+      <main className="flex-1 w-full max-w-[1440px] mx-auto box-border px-8 pb-12">
+        {activeTab === 'live' && (
+          <LiveGameView
+            match={match}
+            session={session}
+            connection={status}
+            columnsOpen={columnsOpen}
+            onCloseColumns={() => setColumnsOpen(false)}
+            onShowSession={() => setActiveTab('session')}
+          />
+        )}
+        {activeTab === 'session' && (
+          <SessionView session={session} isLoading={sessionLoading} error={sessionError} onResetSession={resetSession} />
+        )}
+        {activeTab === 'history' && <HistoryView localPlayerIds={localPlayerIds} />}
+        {activeTab === 'players' && <PlayersView />}
       </main>
-
-      {/* Subtle Footer (hidden during live match view to ensure zero-scroll layout) */}
-      {!(activeTab === 'live' && inMatch) && (
-        <footer className="border-t border-slate-900 py-3 text-center text-xs text-slate-500">
-          Rocket League Play Session Dashboard &bull; Local Daemon v1.0.0
-        </footer>
-      )}
     </div>
   );
 };

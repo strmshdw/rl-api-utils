@@ -1,129 +1,79 @@
-import React, { useState, useMemo } from 'react';
-import { useLiveMatch } from '../../hooks/useLiveMatch';
+import React, { useMemo } from 'react';
 import { useColumnConfig } from '../../hooks/useColumnConfig';
-import { ScoreboardBanner } from './ScoreboardBanner';
-import { RosterTable } from './RosterTable';
+import { ConnectionStatus } from '../../hooks/useLiveMatch';
+import { CurrentMatchResponse, LobbyPlayer, SessionResponse } from '../../types/api';
+import { Scorebug } from './Scorebug';
+import { LivePlayerCard, statLeaders } from './LivePlayerCard';
 import { IdleStateView } from './IdleStateView';
 import { ColumnConfigModal } from './ColumnConfigModal';
-import { MatchDetailModal } from '../session/MatchDetailModal';
-import { SessionResponse, LobbyPlayer, SessionMatchDetail } from '../../types/api';
-import { isDemoMode, SAMPLE_CURRENT_MATCH } from '../../utils/sampleData';
 
 interface LiveGameViewProps {
+  match: CurrentMatchResponse | null;
   session: SessionResponse | null;
+  connection: ConnectionStatus;
+  columnsOpen: boolean;
+  onCloseColumns: () => void;
+  onShowSession: () => void;
 }
 
-export const LiveGameView: React.FC<LiveGameViewProps> = ({ session }) => {
-  const { match } = useLiveMatch();
-  const {
-    config,
-    toggleColumn,
-    applyPreset,
-    resetToDefault,
-    activePreset,
-  } = useColumnConfig();
+/** Local player, teammates and opponents, de-duplicated; spectators are excluded. */
+export function lobbyPlayers(match: CurrentMatchResponse): LobbyPlayer[] {
+  const all: LobbyPlayer[] = [];
+  if (match.local_player) all.push(match.local_player);
+  if (match.teammates) all.push(...match.teammates);
+  if (match.opponents) all.push(...match.opponents);
+  const seen = new Set<string>();
+  return all.filter((p) => {
+    if (p.team_num !== 0 && p.team_num !== 1) return false;
+    if (seen.has(p.player_id)) return false;
+    seen.add(p.player_id);
+    return true;
+  });
+}
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
+const byScore = (a: LobbyPlayer, b: LobbyPlayer) => (b.stats?.score || 0) - (a.stats?.score || 0);
 
-  // Fallback to sample match in preview / demo mode if no real match is active
-  const activeMatch = useMemo(() => {
-    if (match && match.active_match) return match;
-    if (isDemoMode()) return SAMPLE_CURRENT_MATCH;
-    return match;
-  }, [match]);
+export const LiveGameView: React.FC<LiveGameViewProps> = ({ match, session, connection, columnsOpen, onCloseColumns, onShowSession }) => {
+  const { config, toggleColumn, applyPreset, resetToDefault, activePreset } = useColumnConfig();
 
-  // Group players by team (0 = Blue, 1 = Orange)
-  const { bluePlayers, orangePlayers } = useMemo(() => {
-    if (!activeMatch || !activeMatch.active_match) {
-      return { bluePlayers: [], orangePlayers: [] };
-    }
+  const lobby = useMemo(() => (match?.active_match ? lobbyPlayers(match) : []), [match]);
+  const leaders = useMemo(() => statLeaders(lobby), [lobby]);
 
-    const all: LobbyPlayer[] = [];
-    if (activeMatch.local_player) all.push(activeMatch.local_player);
-    if (activeMatch.teammates) all.push(...activeMatch.teammates);
-    if (activeMatch.opponents) all.push(...activeMatch.opponents);
-    if (activeMatch.spectators) all.push(...activeMatch.spectators);
-
-    const seen = new Set<string>();
-    const deduped = all.filter(p => {
-      if (seen.has(p.player_id)) return false;
-      seen.add(p.player_id);
-      return true;
-    });
-
-    return {
-      bluePlayers: deduped.filter(p => p.team_num === 0),
-      orangePlayers: deduped.filter(p => p.team_num === 1),
-    };
-  }, [activeMatch]);
-
-  // Current playlist MMR delta from session
-  const playlistDelta = useMemo(() => {
-    if (!session || !activeMatch?.playlist_id) return undefined;
-    const stats = session.playlists[activeMatch.playlist_id.toString()] || session.playlists[activeMatch.playlist_id];
-    return stats ? stats.mmr_delta : undefined;
-  }, [session, activeMatch]);
-
-  // If outside a match, display IdleStateView
-  if (!activeMatch || !activeMatch.active_match) {
-    return (
-      <div className="py-2">
-        <IdleStateView session={session} onSelectMatch={setSelectedMatch} />
-        <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />
-      </div>
-    );
+  if (!match || !match.active_match) {
+    return <IdleStateView session={session} connection={connection} onShowSession={onShowSession} />;
   }
 
+  const localId = match.local_player?.player_id;
+  const localTeam = match.local_team ?? match.local_player?.team_num ?? 0;
+  const teams = [0, 1].map((team) => lobby.filter((p) => p.team_num === team).sort(byScore));
+  const sessionRecord = { wins: session?.total_wins ?? 0, losses: session?.total_losses ?? 0 };
+
   return (
-    <div className="py-1 space-y-3">
-      {/* Demo Mode Notice */}
-      {isDemoMode() && (!match || !match.active_match) && (
-        <div className="flex items-center justify-between px-4 py-2 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-300">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-            <span className="font-semibold tracking-wide">SIMULATED PREVIEW / DEMO MODE ACTIVE</span>
-            <span className="text-cyan-400/70">— Showing simulated Grand Champion doubles match telemetry.</span>
+    <div data-testid="live-match">
+      <Scorebug match={match} bluePlayers={teams[0]} orangePlayers={teams[1]} localTeam={localTeam} />
+
+      <div className="grid grid-cols-2 gap-7">
+        {teams.map((players, team) => (
+          <div key={team} data-testid={`team-${team === 0 ? 'blue' : 'orange'}`} className="flex flex-col gap-3 min-w-0">
+            <div className={`h-1 ${team === 0 ? 'bg-blue-ink' : 'bg-orange-ink'}`} />
+            {players.map((p) => (
+              <LivePlayerCard
+                key={p.player_id}
+                player={p}
+                isLocal={p.is_local || p.player_id === localId}
+                isTeammate={team === localTeam}
+                leaders={leaders}
+                columns={config}
+                sessionRecord={sessionRecord}
+              />
+            ))}
           </div>
-          <a href={window.location.pathname} className="text-cyan-400 hover:text-white underline font-mono text-xs">
-            Exit Preview
-          </a>
-        </div>
-      )}
-
-      {/* Stadium Scoreboard Banner */}
-      <ScoreboardBanner
-        match={activeMatch}
-        playlistMmrDelta={playlistDelta}
-        onOpenColumnConfig={() => setIsModalOpen(true)}
-      />
-
-      {/* Dual Team Rosters (Blue on Left/Top, Orange on Right/Bottom) */}
-      <div className="grid grid-cols-1 gap-4">
-        <RosterTable
-          teamNum={0}
-          teamName="Blue Team"
-          players={bluePlayers}
-          localPlayerId={activeMatch.local_player?.player_id}
-          localTeamNum={activeMatch.local_team}
-          columnConfig={config}
-          activePlaylistId={activeMatch.playlist_id}
-        />
-        <RosterTable
-          teamNum={1}
-          teamName="Orange Team"
-          players={orangePlayers}
-          localPlayerId={activeMatch.local_player?.player_id}
-          localTeamNum={activeMatch.local_team}
-          columnConfig={config}
-          activePlaylistId={activeMatch.playlist_id}
-        />
+        ))}
       </div>
 
-      {/* Column Configurator Modal */}
       <ColumnConfigModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        isOpen={columnsOpen}
+        onClose={onCloseColumns}
         config={config}
         toggleColumn={toggleColumn}
         applyPreset={applyPreset}
