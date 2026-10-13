@@ -1,3 +1,8 @@
 config.yaml
 replays
 .agents
+# Local rl-sync state (per-user data and login tokens; see scripts/reset-data.ps1)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
