@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0a0b0d;color:#f2f3f5;font-family:Barlow,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#f2f3f5;text-decoration:none}a:hover{color:oklch(0.72 0.15 240)}
+input::placeholder{color:#4a4e57}
+</style>
+</helmet>
+<div style="min-height:100vh;background:#0a0b0d;color:#f2f3f5;font-family:Barlow,sans-serif;display:flex;flex-direction:column">
+  <div style="height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;border-bottom:1px solid #1c1e22;position:sticky;top:0;background:#0a0b0d;z-index:10">
+    <div style="display:flex;align-items:center;gap:40px;height:100%">
+      <div style="font:italic 800 22px 'Barlow Condensed',sans-serif;letter-spacing:.04em">RL<span style="color:oklch(0.72 0.15 240)">/</span>SYNC</div>
+      <div style="display:flex;gap:28px;height:100%;font:700 15px 'Barlow Condensed',sans-serif;letter-spacing:.08em">
+        <sc-for list="{{ nav }}" as="n" hint-placeholder-count="4">
+          <button onClick="{{ n.go }}" style="background:none;border:0;padding:0;cursor:pointer;font:inherit;letter-spacing:inherit;color:{{ n.color }};box-shadow:{{ n.bar }};display:flex;align-items:center;gap:8px;height:100%">
+            <sc-if value="{{ n.dot }}"><span style="width:7px;height:7px;background:{{ n.dotColor }};border-radius:50%"></span></sc-if>{{ n.label }}<sc-if value="{{ n.count }}"><span style="color:#4c5059">{{ n.count }}</span></sc-if>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:24px;font:600 15px 'Barlow Condensed',sans-serif;letter-spacing:.06em">
+      <span style="color:#7b7f88">SESSION <span style="color:#fff">4–1</span></span>
+      <span style="color:#7b7f88">DOUBLES <span style="color:#fff">1485</span> <span style="color:oklch(0.78 0.15 150)">+20</span></span>
+      <a href="#" style="color:#7b7f88;border:1px solid #2a2d33;padding:4px 10px">OVERLAY ↗</a>
+    </div>
+  </div>
+
+  <div style="flex:1;width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:0 32px 48px">
+
+    <!-- LIVE · IN MATCH -->
+    <sc-if value="{{ showMatch }}">
+      <div style="display:flex;justify-content:center;padding:36px 0 28px">
+        <div style="display:flex;align-items:stretch;height:92px;width:100%;justify-content:center">
+          <div style="flex:1 1 300px;max-width:300px;min-width:0;background:oklch(0.55 0.16 245);clip-path:polygon(28px 0,100% 0,100% 100%,0 100%);display:flex;flex-direction:column;justify-content:center;align-items:flex-end;padding-right:24px"><div style="font:800 30px 'Barlow Condensed',sans-serif;letter-spacing:.06em;line-height:1">BLUE</div><div style="font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.08em;opacity:.85">AVG 1494 · YOUR TEAM</div></div>
+          <div style="width:110px;background:#f2f3f5;color:#0a0b0d;display:flex;align-items:center;justify-content:center;font:800 76px 'Barlow Condensed',sans-serif">3</div>
+          <div style="width:150px;background:#16181c;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px"><div style="font:700 13px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:oklch(0.72 0.19 25)">● LIVE</div><div style="font:600 15px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:#c4c7cd">RANKED 2V2</div><div style="font:500 12px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#6c7079">EVEN MATCH</div></div>
+          <div style="width:110px;background:#f2f3f5;color:#0a0b0d;display:flex;align-items:center;justify-content:center;font:800 76px 'Barlow Condensed',sans-serif">2</div>
+          <div style="flex:1 1 300px;max-width:300px;min-width:0;background:oklch(0.66 0.17 50);clip-path:polygon(0 0,calc(100% - 28px) 0,100% 100%,0 100%);display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding-left:24px;color:#0a0b0d"><div style="font:800 30px 'Barlow Condensed',sans-serif;letter-spacing:.06em;line-height:1">ORANGE</div><div style="font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.08em;opacity:.8">AVG 1497</div></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px">
+        <sc-for list="{{ teamsA }}" as="t" hint-placeholder-count="2">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="height:4px;background:{{ t.color }}"></div>
+            <sc-for list="{{ t.players }}" as="p" hint-placeholder-count="2">
+              <div style="background:#121418;padding:22px 26px;display:flex;flex-direction:column;gap:18px;border-left:{{ p.youBar }}">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+                  <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+                    <div style="font:700 34px 'Barlow Condensed',sans-serif;letter-spacing:.02em;line-height:1;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.name }}</div>
+                    <div style="font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;color:#7b7f88;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.platform }} · <span style="color:#c4c7cd">{{ p.rank }}</span> · {{ p.mmr }}</div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
+                    <div style="font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.12em;color:#7b7f88">{{ p.h2hLabel }}</div>
+                    <div style="display:flex;align-items:center;gap:10px"><div style="display:flex;gap:3px"><sc-for list="{{ p.cells }}" as="c" hint-placeholder-count="5"><span style="width:10px;height:18px;background:{{ c.bg }}"></span></sc-for></div><div style="font:700 24px 'Barlow Condensed',sans-serif;color:{{ p.h2hColor }}">{{ p.rec }}</div></div>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1.6fr repeat(5,1fr);border-top:1px solid #23262c;padding-top:14px">
+                  <sc-for list="{{ p.stats }}" as="s" hint-placeholder-count="6"><div style="display:flex;flex-direction:column"><span style="font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#6c7079">{{ s.k }}</span><span style="font:800 44px 'Barlow Condensed',sans-serif;line-height:1;color:{{ s.ink }}">{{ s.v }}</span></div></sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- LIVE · IDLE -->
+    <sc-if value="{{ showIdle }}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:48px 0 32px;border-bottom:1px solid #1c1e22">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88;display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:#4a4e57"></span>NO ACTIVE MATCH</div>
+          <div style="font:italic 800 72px 'Barlow Condensed',sans-serif;line-height:.9;letter-spacing:.01em">WAITING FOR KICKOFF</div>
+        </div>
+        <div style="display:flex;gap:24px;font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;color:#7b7f88;padding-bottom:6px">
+          <span style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.78 0.15 150)"></span>STATS API :49124</span>
+          <span style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.78 0.15 150)"></span>RANK QUERIES READY</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;padding-top:32px">
+        <div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">LAST MATCH · 9 MIN AGO</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:stretch;background:#121418">
+          <div style="height:84px;width:120px;background:oklch(0.78 0.15 150);color:#0a0b0d;display:flex;align-items:center;justify-content:center;font:800 26px 'Barlow Condensed',sans-serif;letter-spacing:.06em">WIN</div>
+          <div style="height:84px;flex:0 1 220px;min-width:110px;box-sizing:border-box;background:oklch(0.55 0.16 245);display:flex;align-items:center;justify-content:flex-end;padding-right:20px;white-space:nowrap;font:800 24px 'Barlow Condensed',sans-serif;letter-spacing:.06em">BLUE · YOU</div>
+          <div style="height:84px;width:84px;background:#f2f3f5;color:#0a0b0d;display:flex;align-items:center;justify-content:center;font:800 60px 'Barlow Condensed',sans-serif">4</div>
+          <div style="height:84px;width:84px;background:#f2f3f5;color:#0a0b0d;display:flex;align-items:center;justify-content:center;font:800 60px 'Barlow Condensed',sans-serif;border-left:1px solid #c4c7cd">2</div>
+          <div style="height:84px;flex:0 1 220px;min-width:110px;box-sizing:border-box;background:oklch(0.66 0.17 50);color:#0a0b0d;display:flex;align-items:center;padding-left:20px;font:800 24px 'Barlow Condensed',sans-serif;letter-spacing:.06em">ORANGE</div>
+          <div style="flex:1 1 380px;min-height:84px;display:flex;align-items:center;justify-content:space-between;padding:14px 28px;gap:24px;box-sizing:border-box">
+            <div style="display:flex;flex-direction:column;gap:2px;font:600 15px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#7b7f88"><span style="color:#f2f3f5">RANKED DOUBLES · 5:54</span><span>YOU + AEROPULSE vs VORTEXRL, ZENITH_99</span></div>
+            <div style="display:flex;align-items:center;gap:28px"><span style="font:800 32px 'Barlow Condensed',sans-serif;color:oklch(0.78 0.15 150)">+10</span><button onClick="{{ goSession }}" style="background:none;border:1px solid #2a2d33;color:#f2f3f5;font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;padding:8px 14px;cursor:pointer">ALL SESSION MATCHES →</button></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(540px,1fr));gap:2px;background:#0a0b0d">
+          <sc-for list="{{ lastBox }}" as="t" hint-placeholder-count="2">
+            <div style="background:#121418;padding:16px 22px 18px;border-top:3px solid {{ t.color }};display:flex;flex-direction:column;min-width:0;overflow:hidden">
+              <div style="display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,.9fr) 52px repeat(6,36px);column-gap:8px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#4a4e57;padding-bottom:6px"><span>{{ t.label }}</span><span>RANK</span><span style="text-align:right">MMR</span><span style="text-align:right">PTS</span><span style="text-align:right">G</span><span style="text-align:right">A</span><span style="text-align:right">SV</span><span style="text-align:right">SH</span><span style="text-align:right">D</span></div>
+              <sc-for list="{{ t.players }}" as="p" hint-placeholder-count="2">
+                <div style="display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,.9fr) 52px repeat(6,36px);column-gap:8px;align-items:center;padding:8px 0;border-top:1px solid #1c1e22;font:700 20px 'Barlow Condensed',sans-serif">
+                  <span style="display:flex;align-items:center;gap:8px;min-width:0"><span style="letter-spacing:.04em;text-transform:uppercase;color:{{ p.nameInk }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.name }}</span><sc-if value="{{ p.mvp }}"><span style="font-size:11px;letter-spacing:.14em;background:#f2f3f5;color:#0a0b0d;padding:1px 5px;flex-shrink:0">MVP</span></sc-if></span>
+                  <span style="font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:#7b7f88;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.rank }}</span>
+                  <span style="text-align:right;color:#c4c7cd;font-size:17px">{{ p.mmr }}</span>
+                  <span style="text-align:right">{{ p.score }}</span>
+                  <span style="text-align:right;color:{{ p.gi }}">{{ p.goals }}</span>
+                  <span style="text-align:right;color:{{ p.ai }}">{{ p.assists }}</span>
+                  <span style="text-align:right;color:{{ p.si }}">{{ p.saves }}</span>
+                  <span style="text-align:right;color:#9a9ea7">{{ p.shots }}</span>
+                  <span style="text-align:right;color:{{ p.di }}">{{ p.demos }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:28px;padding-top:40px">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">THIS SESSION · 1H 40M</div>
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:#121418">
+            <sc-for list="{{ sessionKpis }}" as="k" hint-placeholder-count="4"><div style="padding:20px 24px;display:flex;flex-direction:column;gap:6px;border-right:1px solid #0a0b0d"><span style="font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#6c7079">{{ k.k }}</span><span style="font:800 48px 'Barlow Condensed',sans-serif;line-height:1;color:{{ k.ink }}">{{ k.v }}</span><span style="font:500 13px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:#7b7f88">{{ k.sub }}</span></div></sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">PLAYLISTS</div>
+          <sc-for list="{{ playlists }}" as="pl" hint-placeholder-count="2">
+            <div style="background:#121418;padding:16px 22px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+              <div style="display:flex;flex-direction:column;gap:2px"><span style="font:700 22px 'Barlow Condensed',sans-serif;letter-spacing:.04em">{{ pl.name }}</span><span style="font:500 13px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#7b7f88">{{ pl.rec }} · {{ pl.from }} → {{ pl.to }}</span></div>
+              <span style="font:800 30px 'Barlow Condensed',sans-serif;color:oklch(0.78 0.15 150)">{{ pl.delta }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- SESSION -->
+    <sc-if value="{{ showSession }}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:40px 0 24px">
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">STARTED 1H 40M AGO · 5 MATCHES</div><div style="font:italic 800 64px 'Barlow Condensed',sans-serif;line-height:.9">SESSION</div></div>
+        <button style="background:none;border:1px solid #2a2d33;color:#7b7f88;font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;padding:8px 14px;cursor:pointer" style-hover="color:oklch(0.72 0.19 25);border-color:oklch(0.72 0.19 25)">RESET SESSION</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) minmax(0,1.3fr);background:#121418">
+        <sc-for list="{{ sessionKpis }}" as="k" hint-placeholder-count="4"><div style="padding:22px 26px;display:flex;flex-direction:column;gap:6px;border-right:1px solid #0a0b0d"><span style="font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#6c7079">{{ k.k }}</span><span style="font:800 52px 'Barlow Condensed',sans-serif;line-height:1;color:{{ k.ink }}">{{ k.v }}</span><span style="font:500 13px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:#7b7f88">{{ k.sub }}</span></div></sc-for>
+        <div style="padding:22px 26px;display:flex;flex-direction:column;gap:12px">
+          <span style="font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#6c7079">PLAYLISTS</span>
+          <sc-for list="{{ playlists }}" as="pl" hint-placeholder-count="2"><div style="display:flex;justify-content:space-between;align-items:baseline;font:600 17px 'Barlow Condensed',sans-serif;letter-spacing:.04em"><span>{{ pl.name }} <span style="color:#7b7f88">{{ pl.rec }}</span></span><span style="color:#7b7f88">{{ pl.to }} <span style="color:oklch(0.78 0.15 150)">{{ pl.delta }}</span></span></div></sc-for>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:36px 0 14px">
+        <div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">MATCHES · NEWEST FIRST</div>
+        <div style="display:flex;border:1px solid #2a2d33">
+          <sc-for list="{{ sesFilters }}" as="f" hint-placeholder-count="3"><button onClick="{{ f.go }}" style="background:{{ f.bg }};color:{{ f.color }};border:0;font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;padding:7px 16px;cursor:pointer">{{ f.label }}</button></sc-for>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:72px 120px minmax(0,1fr) repeat(4,64px) 90px 90px;padding:0 0 8px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#4a4e57">
+        <span></span><span>SCORE</span><span>MATCH</span><span style="text-align:right">G</span><span style="text-align:right">A</span><span style="text-align:right">SV</span><span style="text-align:right">PTS</span><span style="text-align:right">MMR</span><span style="text-align:right">WHEN</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <sc-for list="{{ sesRows }}" as="m" hint-placeholder-count="5">
+          <div style="display:grid;grid-template-columns:72px 120px minmax(0,1fr) repeat(4,64px) 90px 90px;align-items:center;height:72px;background:#121418;cursor:pointer" style-hover="background:#171a1f">
+            <div style="height:100%;background:{{ m.resBg }};color:#0a0b0d;display:flex;align-items:center;justify-content:center;font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em">{{ m.res }}</div>
+            <div style="display:flex;align-items:center;gap:8px;padding-left:22px;font:800 38px 'Barlow Condensed',sans-serif;line-height:1"><span style="color:{{ m.usColor }}">{{ m.us }}</span><span style="color:#4a4e57;font-size:26px">–</span><span style="color:{{ m.themColor }}">{{ m.them }}</span></div>
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:0;padding-right:16px">
+              <div style="display:flex;align-items:center;gap:10px;font:700 18px 'Barlow Condensed',sans-serif;letter-spacing:.06em">{{ m.playlist }}<span style="font-size:14px;color:#7b7f88;font-weight:600">{{ m.dur }}</span><sc-if value="{{ m.mvp }}"><span style="font-size:12px;letter-spacing:.14em;background:#f2f3f5;color:#0a0b0d;padding:1px 6px">MVP</span></sc-if></div>
+              <div style="font:500 14px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:#7b7f88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.roster }}</div>
+            </div>
+            <span style="text-align:right;font:700 26px 'Barlow Condensed',sans-serif;color:{{ m.gInk }}">{{ m.g }}</span>
+            <span style="text-align:right;font:700 26px 'Barlow Condensed',sans-serif;color:{{ m.aInk }}">{{ m.a }}</span>
+            <span style="text-align:right;font:700 26px 'Barlow Condensed',sans-serif;color:{{ m.svInk }}">{{ m.sv }}</span>
+            <span style="text-align:right;font:700 26px 'Barlow Condensed',sans-serif;color:#f2f3f5">{{ m.pts }}</span>
+            <span style="text-align:right;font:800 26px 'Barlow Condensed',sans-serif;color:{{ m.mmrInk }}">{{ m.mmr }}</span>
+            <span style="text-align:right;padding-right:22px;font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#7b7f88">{{ m.when }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- HISTORY -->
+    <sc-if value="{{ showHistory }}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:40px 0 24px">
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">LOCAL STORE · REPLAYS + BALLCHASING</div><div style="font:italic 800 64px 'Barlow Condensed',sans-serif;line-height:.9">HISTORY</div></div>
+        <button style="background:#f2f3f5;border:0;color:#0a0b0d;font:800 15px 'Barlow Condensed',sans-serif;letter-spacing:.1em;padding:10px 18px;cursor:pointer" style-hover="background:oklch(0.72 0.15 240)">SYNC FROM BALLCHASING</button>
+      </div>
+      <div style="display:flex;gap:12px;align-items:stretch;padding-bottom:16px">
+        <input placeholder="SEARCH ARENA, PLAYER OR ID" style="flex:1;background:#121418;border:1px solid #1c1e22;color:#f2f3f5;font:600 15px 'Barlow Condensed',sans-serif;letter-spacing:.08em;padding:10px 16px;outline:none"></input>
+        <div style="display:flex;border:1px solid #2a2d33">
+          <sc-for list="{{ plFilters }}" as="f" hint-placeholder-count="4"><button onClick="{{ f.go }}" style="background:{{ f.bg }};color:{{ f.color }};border:0;font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;padding:7px 16px;cursor:pointer">{{ f.label }}</button></sc-for>
+        </div>
+        <div style="display:flex;border:1px solid #2a2d33">
+          <sc-for list="{{ histFilters }}" as="f" hint-placeholder-count="3"><button onClick="{{ f.go }}" style="background:{{ f.bg }};color:{{ f.color }};border:0;font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;padding:7px 16px;cursor:pointer">{{ f.label }}</button></sc-for>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:72px 120px minmax(0,1.2fr) minmax(0,1fr) 90px 150px 140px;padding:0 0 8px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#4a4e57">
+        <span></span><span>SCORE</span><span>PLAYLIST · ARENA</span><span>PLAYERS</span><span style="text-align:right">LENGTH</span><span style="text-align:right">REPLAY</span><span style="text-align:right">DATE</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <sc-for list="{{ histRows }}" as="m" hint-placeholder-count="8">
+          <div style="display:flex;flex-direction:column;background:#121418">
+            <div onClick="{{ m.toggle }}" style="display:grid;grid-template-columns:72px 120px minmax(0,1.2fr) minmax(0,1fr) 90px 150px 140px;align-items:center;height:64px;cursor:{{ m.cursor }}" style-hover="background:#171a1f">
+              <div style="height:100%;background:{{ m.resBg }};color:#0a0b0d;display:flex;align-items:center;justify-content:center;font:800 20px 'Barlow Condensed',sans-serif;letter-spacing:.06em">{{ m.res }}</div>
+              <div style="display:flex;align-items:center;gap:8px;padding-left:22px;font:800 34px 'Barlow Condensed',sans-serif;line-height:1"><span style="color:oklch(0.72 0.15 240)">{{ m.b }}</span><span style="color:#4a4e57;font-size:24px">–</span><span style="color:oklch(0.72 0.17 50)">{{ m.o }}</span></div>
+              <div style="display:flex;flex-direction:column;gap:2px"><span style="font:700 18px 'Barlow Condensed',sans-serif;letter-spacing:.06em">{{ m.playlist }}</span><span style="font:500 14px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:#7b7f88">{{ m.map }}</span></div>
+              <span style="font:500 14px 'Barlow Condensed',sans-serif;letter-spacing:.04em;color:#7b7f88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:16px">{{ m.players }}</span>
+              <span style="text-align:right;font:700 18px 'Barlow Condensed',sans-serif;letter-spacing:.04em;color:#c4c7cd">{{ m.dur }}<sc-if value="{{ m.ot }}"><span style="color:oklch(0.72 0.19 25);font-size:13px;letter-spacing:.12em"> OT</span></sc-if></span>
+              <span style="text-align:right;font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;color:{{ m.replayInk }}">{{ m.replay }}</span>
+              <span style="text-align:right;padding-right:22px;font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#7b7f88">{{ m.date }}</span>
+            </div>
+            <sc-if value="{{ m.open }}">
+              <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;border-top:1px solid #0a0b0d">
+                <sc-for list="{{ m.box }}" as="t" hint-placeholder-count="2">
+                  <div style="padding:16px 22px 18px;border-top:3px solid {{ t.color }};display:flex;flex-direction:column">
+                    <div style="display:grid;grid-template-columns:minmax(90px,1fr) repeat(6,36px);column-gap:8px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#4a4e57;padding-bottom:6px"><span>{{ t.label }}</span><span style="text-align:right">PTS</span><span style="text-align:right">G</span><span style="text-align:right">A</span><span style="text-align:right">SV</span><span style="text-align:right">SH</span><span style="text-align:right">D</span></div>
+                    <sc-for list="{{ t.players }}" as="p" hint-placeholder-count="2"><div style="display:grid;grid-template-columns:minmax(90px,1fr) repeat(6,36px);column-gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid #1c1e22;font:700 20px 'Barlow Condensed',sans-serif"><span style="letter-spacing:.04em;text-transform:uppercase;color:{{ p.nameInk }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ p.name }}</span><span style="text-align:right">{{ p.score }}</span><span style="text-align:right;color:{{ p.gi }}">{{ p.goals }}</span><span style="text-align:right;color:{{ p.ai }}">{{ p.assists }}</span><span style="text-align:right;color:{{ p.si }}">{{ p.saves }}</span><span style="text-align:right;color:#9a9ea7">{{ p.shots }}</span><span style="text-align:right;color:{{ p.di }}">{{ p.demos }}</span></div></sc-for>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- PLAYERS -->
+    <sc-if value="{{ showPlayers }}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:40px 0 24px">
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">EVERYONE YOU'VE PLAYED WITH OR AGAINST</div><div style="font:italic 800 64px 'Barlow Condensed',sans-serif;line-height:.9">PLAYERS</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding-bottom:28px">
+        <sc-for list="{{ spotlights }}" as="s" hint-placeholder-count="3">
+          <div style="background:#121418;border-top:4px solid {{ s.color }};padding:18px 22px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px">
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:0"><span style="font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#6c7079">{{ s.k }}</span><span style="font:700 30px 'Barlow Condensed',sans-serif;letter-spacing:.02em;text-transform:uppercase;line-height:1">{{ s.name }}</span><span style="font:500 13px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#7b7f88">{{ s.sub }}</span></div>
+            <span style="font:800 40px 'Barlow Condensed',sans-serif;line-height:1;color:{{ s.color }}">{{ s.v }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:12px;align-items:stretch;padding-bottom:16px">
+        <input placeholder="SEARCH NAME OR PLAYER ID" style="flex:1;background:#121418;border:1px solid #1c1e22;color:#f2f3f5;font:600 15px 'Barlow Condensed',sans-serif;letter-spacing:.08em;padding:10px 16px;outline:none"></input>
+        <div style="display:flex;border:1px solid #2a2d33">
+          <sc-for list="{{ roleFilters }}" as="f" hint-placeholder-count="5"><button onClick="{{ f.go }}" style="background:{{ f.bg }};color:{{ f.color }};border:0;font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;padding:7px 16px;cursor:pointer">{{ f.label }}</button></sc-for>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(140px,1.4fr) 90px minmax(0,1fr) 64px 130px 130px 56px 100px;padding:0 0 8px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#4a4e57">
+        <span style="padding-left:22px">PLAYER</span><span>PLATFORM</span><span style="white-space:nowrap">RANK · 2V2</span><span style="text-align:right">MMR</span><span style="padding-left:16px">WITH YOU</span><span style="padding-left:16px">VS YOU</span><span style="text-align:right">GAMES</span><span style="text-align:right;padding-right:22px">LAST SEEN</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <sc-for list="{{ playerRows }}" as="p" hint-placeholder-count="8">
+          <div onClick="{{ p.open }}" style="display:grid;grid-template-columns:minmax(140px,1.4fr) 90px minmax(0,1fr) 64px 130px 130px 56px 100px;align-items:center;height:60px;background:#121418;cursor:pointer" style-hover="background:#171a1f">
+            <span style="padding-left:22px;font:700 22px 'Barlow Condensed',sans-serif;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.name }}</span>
+            <span style="font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;color:#7b7f88;text-transform:uppercase">{{ p.platform }}</span>
+            <span style="font:600 16px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:#c4c7cd;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px">{{ p.rank }}</span>
+            <span style="text-align:right;font:700 20px 'Barlow Condensed',sans-serif;color:#c4c7cd">{{ p.mmr }}</span>
+            <div style="display:flex;align-items:center;gap:10px;padding-left:16px"><div style="display:flex;gap:3px"><sc-for list="{{ p.withCells }}" as="c" hint-placeholder-count="5"><span style="width:8px;height:16px;background:{{ c.bg }}"></span></sc-for></div><span style="font:700 20px 'Barlow Condensed',sans-serif;color:{{ p.withInk }}">{{ p.withRec }}</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding-left:16px"><div style="display:flex;gap:3px"><sc-for list="{{ p.vsCells }}" as="c" hint-placeholder-count="5"><span style="width:8px;height:16px;background:{{ c.bg }}"></span></sc-for></div><span style="font:700 20px 'Barlow Condensed',sans-serif;color:{{ p.vsInk }}">{{ p.vsRec }}</span></div>
+            <span style="text-align:right;font:700 20px 'Barlow Condensed',sans-serif">{{ p.games }}</span>
+            <span style="text-align:right;padding-right:22px;font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#7b7f88">{{ p.seen }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <!-- PLAYER PROFILE -->
+  <sc-if value="{{ showProfile }}">
+    <div onClick="{{ closeProfile }}" style="position:fixed;inset:0;z-index:50;background:rgba(5,6,8,.82);display:flex;align-items:flex-start;justify-content:center;padding:56px 24px;box-sizing:border-box;overflow-y:auto">
+      <div onClick="{{ stop }}" style="width:100%;max-width:980px;background:#0f1114;border-top:4px solid #f2f3f5;display:flex;flex-direction:column">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding:28px 32px 24px;border-bottom:1px solid #1c1e22">
+          <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+            <div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">PLAYER PROFILE · {{ pr.platformUc }}</div>
+            <div style="font:italic 800 64px 'Barlow Condensed',sans-serif;line-height:.9;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ pr.name }}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#7b7f88">
+              <span style="color:#c4c7cd">{{ pr.id }}</span>
+              <button onClick="{{ copyId }}" style="background:none;border:0;padding:0;cursor:pointer;font:inherit;letter-spacing:inherit;color:#7b7f88" style-hover="color:#f2f3f5">{{ copyLabel }}</button>
+              <a href="{{ pr.tracker }}" target="_blank" style="color:#f2f3f5">RL TRACKER ↗</a>
+            </div>
+          </div>
+          <button onClick="{{ closeProfile }}" style="background:none;border:1px solid #2a2d33;color:#7b7f88;font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.1em;padding:8px 12px;cursor:pointer;flex-shrink:0" style-hover="color:#f2f3f5;border-color:#f2f3f5">ESC ✕</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;background:#0a0b0d">
+          <sc-for list="{{ pr.h2h }}" as="h" hint-placeholder-count="2">
+            <div style="background:#121418;padding:22px 28px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+                <span style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">{{ h.k }} · {{ h.games }}</span>
+                <sc-if value="{{ h.tag }}"><span style="font:700 12px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#0a0b0d;background:{{ h.ink }};padding:2px 8px">{{ h.tag }}</span></sc-if>
+              </div>
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+                <span style="font:800 64px 'Barlow Condensed',sans-serif;line-height:.9;color:{{ h.ink }}">{{ h.rec }}</span>
+                <span style="font:700 30px 'Barlow Condensed',sans-serif;color:{{ h.pctInk }}">{{ h.pct }}</span>
+              </div>
+              <div style="display:flex;gap:3px"><sc-for list="{{ h.cells }}" as="c" hint-placeholder-count="10"><span style="flex:1;height:14px;background:{{ c.bg }}"></span></sc-for></div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:24px 32px 8px;display:flex;flex-direction:column;gap:12px">
+          <div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88">RANKS</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
+            <sc-for list="{{ pr.ranks }}" as="r" hint-placeholder-count="2">
+              <div style="background:#121418;padding:14px 18px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px">
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#6c7079">{{ r.playlist }}</span><span style="font:700 22px 'Barlow Condensed',sans-serif;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.rank }}</span></div>
+                <span style="font:700 22px 'Barlow Condensed',sans-serif;color:#c4c7cd">{{ r.mmr }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="padding:24px 32px 28px;display:flex;flex-direction:column;gap:8px">
+          <div style="font:700 14px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:#7b7f88;padding-bottom:4px">BY PLAYLIST</div>
+          <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 70px 120px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#4a4e57;padding:0 18px">
+            <span>PLAYLIST</span><span>WITH YOU</span><span>VS YOU</span><span style="text-align:right">GAMES</span><span style="text-align:right">LAST MET</span>
+          </div>
+          <sc-for list="{{ pr.byPlaylist }}" as="b" hint-placeholder-count="2">
+            <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 70px 120px;align-items:center;height:52px;background:#121418;padding:0 18px">
+              <span style="font:700 18px 'Barlow Condensed',sans-serif;letter-spacing:.06em">{{ b.playlist }}</span>
+              <span style="font:700 20px 'Barlow Condensed',sans-serif;color:{{ b.withInk }}">{{ b.withRec }} <span style="font-size:14px;color:#7b7f88;font-weight:600">{{ b.withPct }}</span></span>
+              <span style="font:700 20px 'Barlow Condensed',sans-serif;color:{{ b.vsInk }}">{{ b.vsRec }} <span style="font-size:14px;color:#7b7f88;font-weight:600">{{ b.vsPct }}</span></span>
+              <span style="text-align:right;font:700 20px 'Barlow Condensed',sans-serif">{{ b.games }}</span>
+              <span style="text-align:right;font:600 14px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:#7b7f88">{{ b.last }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:14px 32px;border-top:1px solid #1c1e22;font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.12em;color:#6c7079">
+          <span>FIRST SEEN {{ pr.first }}</span><span>LAST SEEN {{ pr.seen }}</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;startTab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;live&quot;,&quot;session&quot;,&quot;history&quot;,&quot;players&quot;],&quot;default&quot;:&quot;live&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;liveState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;match&quot;,&quot;idle&quot;],&quot;default&quot;:&quot;idle&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { tab: null, sesF: 'all', histF: 'all', plF: 'all', roleF: 'all', open: 'h1' };
+  componentDidMount() { this._esc = e => { if (e.key === 'Escape' && this.state.profile) this.setState({ profile: null }); }; window.addEventListener('keydown', this._esc); }
+  componentWillUnmount() { window.removeEventListener('keydown', this._esc); }
+  renderVals() {
+    const tab = this.state.tab ?? this.props.startTab ?? 'live';
+    const inMatch = (this.props.liveState ?? 'idle') === 'match';
+    const W = 'oklch(0.78 0.15 150)', L = 'oklch(0.72 0.19 25)', EMPTY = '#23262c';
+    const BLUE = 'oklch(0.72 0.15 240)', ORANGE = 'oklch(0.72 0.17 50)';
+    const go = t => () => this.setState({ tab: t });
+    const nav = [
+      { id: 'live', label: 'LIVE', dot: true, dotColor: inMatch ? L : '#4a4e57' },
+      { id: 'session', label: 'SESSION', count: '5' },
+      { id: 'history', label: 'HISTORY' },
+      { id: 'players', label: 'PLAYERS' },
+    ].map(n => ({ ...n, go: go(n.id), color: tab === n.id ? '#fff' : '#7b7f88', bar: tab === n.id ? 'inset 0 -3px 0 #fff' : 'none' }));
+    const cells = (w, l, n = 5) => { const a = []; for (let i = 0; i < Math.min(w, n); i++) a.push({ bg: W }); for (let i = 0; i < Math.min(l, n - a.length); i++) a.push({ bg: L }); while (a.length < n) a.push({ bg: EMPTY }); return a; };
+    const recInk = (w, l) => w + l === 0 ? '#4a4e57' : w > l ? W : w < l ? L : '#c4c7cd';
+    const seg = (key, cur, opts) => opts.map(([id, label]) => ({ label, go: () => this.setState({ [key]: id }), bg: cur === id ? '#f2f3f5' : 'transparent', color: cur === id ? '#0a0b0d' : '#7b7f88' }));
+
+    // live match
+    const live = [
+      { team: 0, name: 'You', platform: 'Epic', rank: 'Grand Champion I', mmr: 1485, score: 480, g: 2, a: 1, sv: 3, sh: 5, d: 1, local: true },
+      { team: 0, name: 'AeroPulse', platform: 'Steam', rank: 'Grand Champion I', mmr: 1502, score: 390, g: 1, a: 2, sv: 1, sh: 4, d: 2, w: 4, l: 1, mate: true },
+      { team: 1, name: 'VortexRL', platform: 'Steam', rank: 'Grand Champion I', mmr: 1478, score: 420, g: 1, a: 1, sv: 4, sh: 6, d: 0, w: 2, l: 3 },
+      { team: 1, name: 'Zenith_99', platform: 'PlayStation', rank: 'Grand Champion I', mmr: 1515, score: 350, g: 1, a: 0, sv: 2, sh: 3, d: 1, w: 1, l: 1 },
+    ];
+    const keys = [['SCORE', 'score'], ['G', 'g'], ['A', 'a'], ['SV', 'sv'], ['SH', 'sh'], ['D', 'd']];
+    const max = {}; keys.forEach(([, k]) => max[k] = Math.max(...live.map(p => p[k])));
+    const A = p => ({ ...p, youBar: p.local ? '3px solid ' + BLUE : '3px solid transparent',
+      h2hLabel: p.local ? 'THIS SESSION' : p.mate ? 'WITH YOU' : 'VS YOU', rec: p.local ? '4–1' : `${p.w}–${p.l}`,
+      h2hColor: p.local ? '#f2f3f5' : recInk(p.w, p.l), cells: p.local ? cells(4, 1) : cells(p.w, p.l),
+      stats: keys.map(([k, f]) => ({ k, v: p[f], ink: p[f] === max[f] && p[f] > 0 ? '#ffffff' : p[f] === 0 ? '#4a4e57' : '#9a9ea7' })) });
+
+    // session
+    const ses = [
+      { res: 'W', us: 4, them: 2, team: 0, playlist: 'RANKED DOUBLES', dur: '5:54', mvp: true, roster: 'You + AeroPulse vs VortexRL, Zenith_99', g: 2, a: 1, sv: 3, pts: 550, mmr: 10, when: '9 MIN' },
+      { res: 'W', us: 3, them: 1, team: 0, playlist: 'RANKED DOUBLES', dur: '5:20', roster: 'You + AeroPulse vs Kaiju_rl, Nyxen', g: 1, a: 1, sv: 2, pts: 410, mmr: 9, when: '26 MIN' },
+      { res: 'L', us: 2, them: 3, team: 1, playlist: 'RANKED DOUBLES', dur: '5:40', roster: 'You + AeroPulse vs DanielRL, BeastMode', g: 1, a: 0, sv: 4, pts: 470, mmr: -9, when: '42 MIN' },
+      { res: 'W', us: 5, them: 2, team: 0, playlist: 'RANKED STANDARD', dur: '6:45', mvp: true, roster: 'You + Squishy, GarrettG vs Jstn, Chicago, Firstkiller', g: 2, a: 1, sv: 1, pts: 520, mmr: 11, when: '58 MIN' },
+      { res: 'W', us: 2, them: 0, team: 0, playlist: 'RANKED DOUBLES', dur: '5:10', roster: 'You + Mistral vs Rizzo, Hal_9k', g: 0, a: 1, sv: 3, pts: 360, mmr: 10, when: '79 MIN' },
+    ];
+    const z = v => v === 0 ? '#4a4e57' : '#f2f3f5';
+    const sesRows = ses.filter(m => this.state.sesF === 'all' || m.res === this.state.sesF).map(m => ({ ...m,
+      resBg: m.res === 'W' ? W : L, usColor: m.team === 0 ? BLUE : ORANGE, themColor: m.team === 0 ? ORANGE : BLUE,
+      gInk: z(m.g), aInk: z(m.a), svInk: z(m.sv), mmr: (m.mmr > 0 ? '+' : '') + m.mmr, mmrInk: m.mmr > 0 ? W : L }));
+    const sessionKpis = [
+      { k: 'RECORD', v: '4–1', sub: '80% WIN RATE', ink: '#f2f3f5' },
+      { k: 'NET MMR', v: '+31', sub: 'ALL PLAYLISTS', ink: W },
+      { k: 'GOAL DIFF', v: '+8', sub: '16 FOR · 8 AGAINST', ink: '#f2f3f5' },
+      { k: 'STREAK', v: 'W2', sub: 'BEST W2 · HIGH 550', ink: '#f2f3f5' },
+    ];
+    const playlists = [
+      { name: 'RANKED DOUBLES', rec: '3–1', from: 1465, to: 1485, delta: '+20' },
+      { name: 'RANKED STANDARD', rec: '1–0', from: 1410, to: 1421, delta: '+11' },
+    ];
+
+    // history
+    const bx = (n, sc, g, a, sv, sh, d, you) => ({ name: n, score: sc, goals: g, assists: a, saves: sv, shots: sh, demos: d, you });
+    const hist = [
+      { id: 'h1', res: 'W', b: 4, o: 2, pl: 'doubles', playlist: 'RANKED DOUBLES', map: 'DFH Stadium', dur: '5:40', date: 'YESTERDAY', up: 'UPLOADED',
+        box: [[bx('You', 550, 2, 1, 3, 5, 1, 1), bx('AeroPulse', 410, 2, 1, 2, 4, 0)], [bx('VortexRL', 380, 1, 1, 3, 4, 2), bx('Zenith_99', 310, 1, 0, 1, 3, 0)]] },
+      { id: 'h2', res: 'W', b: 3, o: 1, pl: 'standard', playlist: 'RANKED STANDARD', map: 'Champions Field', dur: '5:00', date: '2 DAYS AGO', up: 'UPLOADED',
+        box: [[bx('You', 480, 2, 0, 2, 4, 0, 1), bx('Squishy', 430, 1, 2, 1, 3, 1), bx('GarrettG', 390, 0, 1, 3, 2, 0)], [bx('Jstn', 450, 1, 0, 4, 5, 2), bx('Chicago', 340, 0, 1, 2, 3, 0), bx('Firstkiller', 310, 0, 0, 2, 3, 1)]] },
+      { id: 'h3', res: 'L', b: 2, o: 3, pl: 'doubles', playlist: 'RANKED DOUBLES', map: 'Utopia Coliseum', dur: '6:25', ot: true, date: '3 DAYS AGO', up: 'UPLOADED',
+        box: [[bx('You', 510, 1, 1, 4, 6, 2, 1), bx('AeroPulse', 340, 1, 0, 2, 3, 0)], [bx('DanielRL', 620, 2, 1, 5, 7, 1), bx('BeastMode', 440, 1, 2, 3, 4, 3)]] },
+      { id: 'h4', res: 'W', b: 3, o: 0, pl: 'doubles', playlist: 'RANKED DOUBLES', map: 'Mannfield', dur: '5:00', date: '3 DAYS AGO', up: 'DOWNLOADED', names: 'You, AeroPulse vs Rizzo, Hal_9k' },
+      { id: 'h5', res: 'L', b: 1, o: 2, pl: 'duel', playlist: 'RANKED DUEL', map: 'Beckwith Park', dur: '5:00', date: '4 DAYS AGO', up: 'DOWNLOADED', names: 'You vs Kaiju_rl' },
+      { id: 'h6', res: 'W', b: 4, o: 3, pl: 'standard', playlist: 'RANKED STANDARD', map: 'Neo Tokyo', dur: '7:12', ot: true, date: '5 DAYS AGO', up: 'PENDING', names: 'You, Squishy, Mistral vs Nyxen, Jstn, BeastMode' },
+      { id: 'h7', res: 'L', b: 0, o: 2, pl: 'doubles', playlist: 'RANKED DOUBLES', map: 'Urban Central', dur: '5:00', date: '6 DAYS AGO', up: 'FAILED', names: 'You, Mistral vs DanielRL, VortexRL' },
+    ];
+    const hf = this.state.histF, plf = this.state.plF;
+    const histRows = hist.filter(m => (hf === 'all' || m.res === hf) && (plf === 'all' || m.pl === plf)).map(m => {
+      const open = !!m.box && this.state.open === m.id;
+      const names = m.names || m.box.map(t => t.map(p => p.name).join(', ')).join(' vs ');
+      const mk = (t, i) => { const all = m.box.flat(); const mx = k => Math.max(...all.map(p => p[k]));
+        return { label: i === 0 ? 'BLUE' : 'ORANGE', color: i === 0 ? 'oklch(0.55 0.16 245)' : 'oklch(0.66 0.17 50)', players: t.map(p => ({ ...p,
+          nameInk: p.you ? BLUE : '#f2f3f5', gi: p.goals ? '#f2f3f5' : '#4a4e57', ai: p.assists ? '#f2f3f5' : '#4a4e57', si: p.saves ? '#f2f3f5' : '#4a4e57', di: p.demos ? '#f2f3f5' : '#4a4e57' })) }; };
+      return { ...m, players: names, open, box: m.box ? m.box.map(mk) : [], cursor: m.box ? 'pointer' : 'default',
+        toggle: m.box ? () => this.setState(s => ({ open: s.open === m.id ? null : m.id })) : undefined,
+        resBg: m.res === 'W' ? W : L,
+        replay: m.up === 'UPLOADED' ? 'BALLCHASING ↗' : m.up === 'DOWNLOADED' ? 'LOCAL ONLY' : m.up === 'PENDING' ? 'DOWNLOADING…' : 'FAILED · RETRY',
+        replayInk: m.up === 'UPLOADED' ? '#f2f3f5' : m.up === 'FAILED' ? L : '#7b7f88' };
+    });
+
+    // players
+    const pls = [
+      { name: 'AeroPulse', platform: 'Steam', rank: 'Grand Champion I', mmr: 1502, ww: 4, wl: 1, vw: 2, vl: 1, seen: '9 MIN AGO' },
+      { name: 'VortexRL', platform: 'Steam', rank: 'Grand Champion I', mmr: 1478, ww: 1, wl: 0, vw: 2, vl: 3, seen: '9 MIN AGO' },
+      { name: 'DanielRL', platform: 'Epic', rank: 'Grand Champion III', mmr: 1640, ww: 0, wl: 0, vw: 0, vl: 3, seen: '42 MIN AGO' },
+      { name: 'Squishy', platform: 'Steam', rank: 'Grand Champion II', mmr: 1560, ww: 3, wl: 1, vw: 0, vl: 1, seen: '58 MIN AGO' },
+      { name: 'GarrettG', platform: 'Steam', rank: 'Grand Champion II', mmr: 1548, ww: 2, wl: 1, vw: 1, vl: 0, seen: '58 MIN AGO' },
+      { name: 'Jstn', platform: 'Epic', rank: 'Grand Champion I', mmr: 1530, ww: 0, wl: 0, vw: 1, vl: 2, seen: '58 MIN AGO' },
+      { name: 'Zenith_99', platform: 'PlayStation', rank: 'Grand Champion I', mmr: 1515, ww: 0, wl: 0, vw: 1, vl: 1, seen: 'YESTERDAY' },
+      { name: 'BeastMode', platform: 'Steam', rank: 'Grand Champion I', mmr: 1497, ww: 0, wl: 0, vw: 1, vl: 1, seen: '42 MIN AGO' },
+      { name: 'Mistral', platform: 'Xbox', rank: 'Champion III', mmr: 1420, ww: 1, wl: 1, vw: 0, vl: 0, seen: '79 MIN AGO' },
+      { name: 'Chicago', platform: 'Epic', rank: 'Champion III', mmr: 1405, ww: 0, wl: 0, vw: 1, vl: 0, seen: '58 MIN AGO' },
+    ];
+    const meta = {
+      AeroPulse: { id: 'Steam|76561198000000010|0', first: 'AUG 14, 2026', split: { '2V2': [4, 1, 2, 1, '9 MIN AGO'] } },
+      VortexRL: { id: 'Steam|76561198000000020|0', first: 'SEP 02, 2026', split: { '2V2': [1, 0, 2, 3, '9 MIN AGO'] } },
+      Zenith_99: { id: 'PS4|psn_zenith99|0', first: 'OCT 11, 2026' },
+      DanielRL: { id: 'Epic|danielrl|0', first: 'SEP 28, 2026' },
+      Squishy: { id: 'Steam|76561198000000031|0', first: 'JUL 30, 2026', split: { '3V3': [3, 1, 0, 0, '58 MIN AGO'], '2V2': [0, 0, 0, 1, 'SEP 19'] } },
+      GarrettG: { id: 'Steam|76561198000000032|0', first: 'AUG 21, 2026', split: { '3V3': [2, 1, 1, 0, '58 MIN AGO'] } },
+      Jstn: { id: 'Epic|jstn|0', first: 'SEP 09, 2026', split: { '3V3': [0, 0, 1, 2, '58 MIN AGO'] } },
+      BeastMode: { id: 'Steam|76561198000000040|0', first: 'OCT 09, 2026' },
+      Mistral: { id: 'Xbox|2533274900000001|0', first: 'OCT 05, 2026' },
+      Chicago: { id: 'Epic|chicago|0', first: 'OCT 12, 2026', split: { '3V3': [0, 0, 1, 0, '58 MIN AGO'] } },
+    };
+    const rankFor = m => m < 1435 ? 'Champion III' : m < 1520 ? 'Grand Champion I' : m < 1635 ? 'Grand Champion II' : m < 1860 ? 'Grand Champion III' : 'Supersonic Legend';
+    const pct = (w, l) => w + l ? Math.round(w / (w + l) * 100) + '%' : '';
+    const tagOf = (w, l, mate) => { const t = w + l; if (t < 2) return null; const r = w / t; return mate ? (r >= .6 ? 'STRONG SYNERGY' : r >= .4 ? 'BALANCED' : 'STRUGGLED') : (r >= .6 ? 'DOMINANT' : r >= .4 ? 'EVEN RIVALRY' : 'TOUGH OPPONENT'); };
+    const sel = pls.find(p => p.name === this.state.profile);
+    let pr = null;
+    if (sel) {
+      const m = meta[sel.name] || {};
+      const split = m.split || { '2V2': [sel.ww, sel.wl, sel.vw, sel.vl, sel.seen] };
+      const plat = sel.platform === 'PlayStation' ? 'psn' : sel.platform === 'Xbox' ? 'xbl' : sel.platform.toLowerCase();
+      const tid = sel.platform === 'Steam' ? m.id.split('|')[1] : sel.name;
+      pr = { name: sel.name, platformUc: sel.platform.toUpperCase(), id: m.id, first: m.first, seen: sel.seen,
+        tracker: `https://rocketleague.tracker.network/rocket-league/profile/${plat}/${encodeURIComponent(tid)}/overview`,
+        h2h: [
+          { k: 'WITH YOU', games: (sel.ww + sel.wl) + ' GAMES', w: sel.ww, l: sel.wl, mate: true },
+          { k: 'VS YOU', games: (sel.vw + sel.vl) + ' GAMES', w: sel.vw, l: sel.vl },
+        ].map(h => ({ ...h, rec: h.w + h.l ? `${h.w}–${h.l}` : '—', pct: pct(h.w, h.l), ink: recInk(h.w, h.l), pctInk: '#7b7f88', tag: tagOf(h.w, h.l, h.mate), cells: cells(h.w, h.l, 10) })),
+        ranks: [['RANKED 2V2', sel.mmr], ['RANKED 3V3', sel.mmr - 34], ['RANKED 1V1', sel.mmr - 262]].map(([playlist, v]) => ({ playlist, mmr: v, rank: playlist === 'RANKED 1V1' ? rankFor(v + 240) : rankFor(v) })),
+        byPlaylist: Object.entries(split).map(([k, [ww, wl, vw, vl, last]]) => ({ playlist: 'RANKED ' + k, games: ww + wl + vw + vl, last,
+          withRec: ww + wl ? `${ww}–${wl}` : '—', withPct: pct(ww, wl), withInk: recInk(ww, wl),
+          vsRec: vw + vl ? `${vw}–${vl}` : '—', vsPct: pct(vw, vl), vsInk: recInk(vw, vl) })) };
+    }
+    const rf = this.state.roleF;
+    const playerRows = pls.filter(p => {
+      const mt = p.ww + p.wl, ot = p.vw + p.vl;
+      return rf === 'all' || (rf === 'frequent' && mt + ot >= 2) || (rf === 'mates' && mt > 0) || (rf === 'opps' && ot > 0) || (rf === 'synergy' && mt > 0 && p.ww / mt >= .5);
+    }).map(p => ({ ...p, open: () => this.setState({ profile: p.name, copied: false }), games: p.ww + p.wl + p.vw + p.vl,
+      withRec: p.ww + p.wl ? `${p.ww}–${p.wl}` : '—', vsRec: p.vw + p.vl ? `${p.vw}–${p.vl}` : '—',
+      withInk: recInk(p.ww, p.wl), vsInk: recInk(p.vw, p.vl), withCells: cells(p.ww, p.wl), vsCells: cells(p.vw, p.vl) }));
+    const spotlights = [
+      { k: 'BEST TEAMMATE', name: 'AeroPulse', sub: '4–1 TOGETHER', v: '80%', color: W },
+      { k: 'MOST FACED', name: 'VortexRL', sub: '5 GAMES AS OPPONENT', v: '2–3', color: '#c4c7cd' },
+      { k: 'TOUGHEST RIVAL', name: 'DanielRL', sub: 'NEVER BEATEN', v: '0–3', color: L },
+    ];
+
+    return {
+      nav, goSession: go('session'),
+      showMatch: tab === 'live' && inMatch, showIdle: tab === 'live' && !inMatch,
+      showSession: tab === 'session', showHistory: tab === 'history', showPlayers: tab === 'players',
+      teamsA: [{ color: BLUE, players: live.filter(p => p.team === 0).map(A) }, { color: ORANGE, players: live.filter(p => p.team === 1).map(A) }],
+      lastBox: [
+        { label: 'BLUE · WIN', color: 'oklch(0.55 0.16 245)', players: [
+          { name: 'You', you: 1, mvp: true, rank: 'Grand Champion I', mmr: 1485, score: 550, goals: 2, assists: 1, saves: 3, shots: 5, demos: 1 },
+          { name: 'AeroPulse', rank: 'Grand Champion I', mmr: 1502, score: 410, goals: 2, assists: 1, saves: 2, shots: 4, demos: 0 }] },
+        { label: 'ORANGE', color: 'oklch(0.66 0.17 50)', players: [
+          { name: 'VortexRL', rank: 'Grand Champion I', mmr: 1478, score: 380, goals: 1, assists: 1, saves: 3, shots: 4, demos: 2 },
+          { name: 'Zenith_99', rank: 'Grand Champion I', mmr: 1515, score: 310, goals: 1, assists: 0, saves: 1, shots: 3, demos: 0 }] },
+      ].map(t => ({ ...t, players: t.players.map(p => ({ ...p, nameInk: p.you ? BLUE : '#f2f3f5',
+        gi: p.goals ? '#f2f3f5' : '#4a4e57', ai: p.assists ? '#f2f3f5' : '#4a4e57', si: p.saves ? '#f2f3f5' : '#4a4e57', di: p.demos ? '#f2f3f5' : '#4a4e57' })) })),
+      sessionKpis, playlists, sesRows,
+      sesFilters: seg('sesF', this.state.sesF, [['all', 'ALL'], ['W', 'WINS'], ['L', 'LOSSES']]),
+      histRows,
+      histFilters: seg('histF', hf, [['all', 'ALL'], ['W', 'WINS'], ['L', 'LOSSES']]),
+      plFilters: seg('plF', plf, [['all', 'ALL'], ['duel', '1V1'], ['doubles', '2V2'], ['standard', '3V3']]),
+      roleFilters: seg('roleF', rf, [['all', 'ALL'], ['frequent', 'FREQUENT'], ['mates', 'TEAMMATES'], ['opps', 'OPPONENTS'], ['synergy', 'SYNERGY ≥50%']]),
+      playerRows, spotlights,
+      showProfile: !!pr, pr: pr || {},
+      closeProfile: () => this.setState({ profile: null }),
+      stop: e => e.stopPropagation(),
+      copyLabel: this.state.copied ? 'COPIED ✓' : 'COPY ID',
+      copyId: () => { try { navigator.clipboard.writeText(pr.id); } catch (e) {} this.setState({ copied: true }); },
+    };
+  }
+}
+</script>
+</body>
+</html>
