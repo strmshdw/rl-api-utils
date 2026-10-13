@@ -1,141 +1,247 @@
-# Milestone 2 (Auth & PsyNet Integration) Challenger Report: `internal/psynet`
+# Milestone 2 Empirical Challenger Report: Disconnected Player UX Treatment & Data Integrity (R3)
 
-- **Author**: `m2_challenger_2` (Roles: critic, specialist)
-- **Target Subsystem**: `internal/psynet` (`client.go`, `downloader.go`)
+- **Agent**: `m2_challenger_2` (Roles: critic, specialist)
+- **Target Subsystem**: `web/src/components/live/PlayerRow.tsx`, `web/src/components/live/RosterTable.tsx`, `web/src/components/session/MatchDetailModal.tsx`, `web/src/components/live/LiveGameView.tsx`
 - **Verdict**: **APPROVE**
-- **Date**: 2026-09-24T20:57:00-07:00
+- **Date**: 2026-10-06T12:27:00Z
+- **Parent Conversation ID**: `18e4e66b-5835-4b6b-bd1e-a34092f47346`
 - **Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m2_challenger_2`
 
 ---
 
 ## 1. Observation
 
-Direct empirical investigation and adversarial execution against `internal/psynet` produced the following concrete observations:
+Direct empirical investigation and adversarial execution against the web dashboard and session modal implementation produced the following concrete observations:
 
-1. **ReplayDownloader Minimum Size Validation & Boundary Handling**:
-   - `internal/psynet/downloader.go:288-290`: `if written < d.minSize { return "", fmt.Errorf("%w: downloaded %d bytes, minimum required is %d", ErrReplayTooSmall, written, d.minSize) }`
-   - Empirically tested payload sizes `0`, `1`, `128`, `500`, and `1023` bytes against `MockCDNServer` in `TestAdversarial_Downloader_ExtremePayloads/Reject_*`. All returned `ErrReplayTooSmall`.
-   - Empirically tested boundary of exactly `1024` bytes, `1025` bytes, `64KB`, `1MB`, and `5MB` in `TestAdversarial_Downloader_ExtremePayloads/Accept_*`. All succeeded, wrote valid `.replay` binaries with `TAGAME` headers, and left zero `.tmp` files.
-   - Tested failure overwrite invariant in `TestAdversarial_Downloader_FailedOverwritePreservesOriginal`: when an 8KB valid `.replay` already exists on disk and a subsequent download fails with a 500-byte truncated payload, the existing 8KB file was completely preserved and uncorrupted.
+### 1.1 Disconnected Player Visual Treatment & Badge Specification
+- **`web/src/components/live/PlayerRow.tsx:41-43, 73-81`**:
+  ```tsx
+  const disconnectedClasses = player.is_disconnected
+    ? 'opacity-65 saturate-60 hover:opacity-85'
+    : '';
+  ...
+  {player.is_disconnected && (
+    <span
+      data-testid="badge-disconnected"
+      className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-rose-950/60 text-rose-300 border border-rose-800/60 inline-flex items-center gap-1 shadow-sm"
+      title="Player disconnected early; stats and match outcomes are preserved"
+    >
+      <WifiOff className="w-2.5 h-2.5 text-rose-400" />
+      DISCONNECTED
+    </span>
+  )}
+  ```
+- In `DisconnectedPlayer.adversarial.test.tsx` (Suite 1):
+  - Row container `<tr className="...">` receives `opacity-65`, `saturate-60`, and `hover:opacity-85` when `player.is_disconnected === true`.
+  - Identity cell renders `data-testid="badge-disconnected"` containing `"DISCONNECTED"`, an `<svg>` element with `text-rose-400` representing Lucide `WifiOff`, and title tooltip `"Player disconnected early; stats and match outcomes are preserved"`.
+  - Disconnected local player (`isLocal = true` && `is_disconnected = true`) renders both `YOU` (`bg-cyan-500/20 text-cyan-300`) and `DISCONNECTED` badges while applying cyan row highlighting (`bg-cyan-500/10`) alongside `opacity-65 saturate-60`.
+  - Disconnected bot player (`is_bot = true` && `is_disconnected = true`) renders both `BOT` and `DISCONNECTED` badges.
+  - Multi-platform support: Steam (`Laptop text-sky-400`), Epic (`Gamepad2 text-purple-400`), PlayStation (`Gamepad2 text-blue-400`), Xbox (`Gamepad2 text-emerald-500`), and Nintendo render cleanly alongside the disconnected badge without layout clipping.
 
-2. **HTTP Status Code Rejections & Zero Disk Footprint**:
-   - `internal/psynet/downloader.go:247-253`: `if resp.StatusCode != http.StatusOK { return "", &HTTPStatusError{StatusCode: resp.StatusCode, MatchGUID: trimmedGUID, URL: trimmedURL} }`
-   - In `downloader.go`, step 8 (creating the temporary file) is executed *after* step 7 (validating HTTP status).
-   - In `TestAdversarial_Downloader_HTTPStatusCodes`, all HTTP status codes (`400`, `401`, `403`, `404`, `410`, `429`, `500`, `502`, `503`, `504`) returned errors unwrapping to `*HTTPStatusError` with the matching status code and match GUID. Exactly 0 files (`.tmp` or `.replay`) were created on disk for any non-200 HTTP response.
+### 1.2 Active Connected Player Isolation & Negation
+- In `DisconnectedPlayer.adversarial.test.tsx` (Suite 2):
+  - When `is_disconnected === false` or `is_disconnected === undefined`, rows do NOT contain `opacity-65`, `saturate-60`, or `hover:opacity-85`.
+  - Active connected player rows do NOT contain `[data-testid="badge-disconnected"]` or `WifiOff` icons.
+  - In a mixed 4-player roster (2 active, 2 disconnected), strict 1-to-1 isolation was confirmed: exactly 2 disconnected badges were rendered, and only the 2 disconnected player rows received dimming classes.
 
-3. **Mid-Stream Connection Drops, Timeouts, and Windows Handle Cleanup**:
-   - `internal/psynet/downloader.go:267-273`:
-     ```go
-     success := false
-     defer func() {
-         _ = tmpFile.Close()
-         if !success {
-             _ = os.Remove(tmpPath)
-         }
-     }()
-     ```
-   - On Windows, attempting to delete an open file handle fails with `ERROR_SHARING_VIOLATION`. The deferred cleanup handler explicitly closes `tmpFile.Close()` *before* invoking `os.Remove(tmpPath)`.
-   - In `TestAdversarial_Downloader_MidStreamDropsAndInterrupts`:
-     - Truncated TCP connection at 64 bytes cleanly aborted with 0 orphaned `.tmp` files.
-     - Mid-stream drop after 4KB (advertising 100KB `Content-Length`) cleanly aborted with 0 orphaned `.tmp` files.
-     - Server hanging with a 100ms context timeout cleanly aborted with 0 orphaned `.tmp` files.
+### 1.3 Stat Retention & Leaderboard Sorting Invariants
+- **`web/src/components/live/RosterTable.tsx:47`**:
+  ```tsx
+  const sortedPlayers = [...players].sort((a, b) => (b.stats?.score || 0) - (a.stats?.score || 0));
+  ```
+- In `DisconnectedPlayer.adversarial.test.tsx` (Suite 3):
+  - When a player disconnects, their performance numbers (`score`, `goals`, `assists`, `saves`, `shots`, `demos`, `mmr`) are preserved verbatim in their respective `data-testid="stat-*"` cells.
+  - Disconnected players with positive goals retain amber highlighting (`text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]`); zero stats retain muted `text-slate-500`.
+  - **Sorting Invariant**: A disconnected player with the top score (e.g. 950) ranks 1st in the roster table, ahead of connected teammates with lower scores (400, 200). Early disconnection does not demote or perturb score leaderboard placement.
 
-4. **Path Traversal & Filename Sanitization**:
-   - `internal/psynet/downloader.go:208-210`: `if strings.ContainsAny(trimmedGUID, `/\:?*"<>|`) || strings.Contains(trimmedGUID, "..") { return "", fmt.Errorf("%w: %q", ErrInvalidMatchGUID, matchGUID) }`
-   - In `TestAdversarial_Downloader_PathTraversal_ComprehensiveMatrix`, 21 distinct traversal payloads were rejected with `ErrInvalidMatchGUID` or `ErrEmptyMatchGUID`, including: `../sneaky`, `..\sneaky`, `../../../../etc/passwd`, `..\..\..\windows\system32\calc`, `abc/../def`, `abc\..\def`, `/tmp/owned`, `C:\Windows\System32\malicious`, `D:file`, `C:test`, `*`, `?`, `<`, `>`, `|`, `"`, `:`, `..`, `...`, `....`, `""`, and whitespace strings.
+### 1.4 Team Goals and Score Aggregation Engine
+- **`web/src/components/live/RosterTable.tsx:50-51, 76-94`**:
+  ```tsx
+  const teamGoals = players.reduce((sum, p) => sum + (p.stats?.goals || 0), 0);
+  const teamScore = players.reduce((sum, p) => sum + (p.stats?.score || 0), 0);
+  ```
+- In `DisconnectedPlayer.adversarial.test.tsx` (Suite 4):
+  - `data-testid="team-goals"` and `data-testid="team-score"` accurately aggregate stats across mixed connected and disconnected players (e.g. 1 active + 2 disconnected with scores 320, 450, 180 = 950 team score, 3 team goals).
+  - 100% disconnected teams (all participants disconnected) correctly sum all disconnected players' goals and score.
+  - Empty team rosters cleanly render 0 goals and 0 score.
+  - Stress harness with 30 pseudo-randomized players on a single team (alternating disconnected states and varying stat distributions) matched the exact mathematical sum for both team goals and team score.
 
-5. **Windows Concurrency & File Contention**:
-   - `TestAdversarial_Downloader_ConcurrencyAndContention/ConcurrentDistinctGUIDs_30Workers`: 30 concurrent goroutines downloaded distinct match GUIDs into the same `destDir` simultaneously. All 30 completed successfully in 0.03s; exactly 30 `.replay` files were created; zero `.tmp` files remained.
-   - `ConcurrentSameGUID_ControlledContention`: 5 concurrent goroutines downloading the identical GUID simultaneously into `destDir` with `WithRenameRetries(15)`. The retry backoff loop absorbed Windows NTFS file sharing contention; the final file was created and verified with zero orphaned `.tmp` files.
-   - `ConcurrentSameGUID_StampedeInvariants`: 20 concurrent goroutines stampeding the exact same destination file simultaneously. At least one worker succeeded and wrote the valid replay payload; all losing workers cleanly deleted their `.tmp` files without orphaned leaks or panics.
+### 1.5 Concluded Match Parity in `MatchDetailModal.tsx`
+- **`web/src/components/session/MatchDetailModal.tsx:62-64, 84-92`**:
+  ```tsx
+  const disconnectedClasses = p.is_disconnected
+    ? 'opacity-65 saturate-60 hover:opacity-85'
+    : '';
+  ...
+  {p.is_disconnected && (
+    <span
+      data-testid="badge-disconnected"
+      className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-rose-950/60 text-rose-300 border border-rose-800/60 inline-flex items-center gap-1 shadow-sm"
+      title="Player disconnected early; stats and match outcomes are preserved"
+    >
+      <WifiOff className="w-2.5 h-2.5 text-rose-400" />
+      DISCONNECTED
+    </span>
+  )}
+  ```
+- In `DisconnectedPlayer.adversarial.test.tsx` (Suite 5):
+  - In post-match reviews, disconnected players on both Blue and Orange teams render with `opacity-65 saturate-60 hover:opacity-85` and `data-testid="badge-disconnected"` with `WifiOff`.
+  - Active players in the modal do NOT receive disconnected styling or badge.
+  - When `match === null`, the modal returns null gracefully without rendering orphaned DOM nodes.
 
-6. **Cleanup of Stale Temporary Files**:
-   - `TestAdversarial_Downloader_CleanupStaleTempFiles_EdgeCases`: Tested `CleanupStaleTempFiles` on a directory with 50 stale `.tmp-*.replay` files, 10 valid `.replay` files, 4 unrelated files (`config.yaml`, `state.json`, `.tmp-not-a-replay.txt`, `important.tmp`), and subdirectories (`.tmp-subdir.replay`). Exactly 50 stale files were removed; all 10 valid replays, unrelated files, and subdirectories survived intact. Non-existent directories returned `(0, nil)`.
+### 1.6 Dynamic Reconnection Lifecycle & Flapping Stress
+- In `DisconnectedPlayer.adversarial.test.tsx` (Suite 6):
+  - Simulated a 6-frame live match lifecycle:
+    1. Match start: 2 active players (200 team score, 0 goals, 0 badges).
+    2. Player 2 scores: (350 team score, 1 goal, 0 badges).
+    3. Player 2 disconnects: row dims, badge renders, team totals remain 350 score, 1 goal.
+    4. Player 1 scores while Player 2 is disconnected: team totals advance to 500 score, 2 goals; Player 2 remains dimmed.
+    5. Player 2 reconnects: row restores normal opacity, badge is removed immediately, team totals remain 500 score, 2 goals.
+  - Simulated a 10-cycle connection flapping test (rapid alternating disconnect/reconnect transitions): verified zero stuck badges, zero orphaned nodes, and constant team totals throughout.
 
-7. **MatchHistoryProvider Delayed ReplayURL Arrival & Multi-Cycle Progression**:
-   - `internal/psynet/client.go:306-312`: Matches with empty `ReplayUrl` are logged at `Debug` level and preserved in `DiscoveredMatch` with `ReplayURL: ""`.
-   - In `TestAdversarial_Client_DelayedReplayURL_Progression`:
-     - Cycle 1: Matches with empty `ReplayUrl` were returned with `ReplayURL: ""` (ready for syncer to record as `SKIPPED`).
-     - Cycle 2 (5 minutes later): Matches with newly populated `ReplayUrl` returned updated URLs; remaining delayed matches stayed empty; newly discovered matches were appended.
+### 1.7 LiveGameView Tree Integration & Boundary Resiliency
+- In `DisconnectedPlayer.adversarial.test.tsx` (Suites 7 & 8):
+  - Full `LiveGameView` component tree renders disconnected local player, teammate, and opponent simultaneously across Blue and Orange tables.
+  - Column config mutation (hiding optional columns like score, goals, rank) preserves the disconnected badge and dimmed styling in the permanent player identity column.
+  - Malformed/extreme input handling: extreme Unicode/HTML entity player names (`<script>alert("pwn")</script> 🚀🔥`), 100,000 score, 100 goals, and missing ranks/matchup records all render gracefully without throwing.
 
-8. **MatchHistoryProvider Malformed Metadata Filtering**:
-   - `internal/psynet/client.go:293-297`: Matches with empty or whitespace-only GUIDs are skipped with a warning log.
-   - `internal/psynet/client.go:300-303`: Matches with `RecordStartTimestamp == 0` automatically default to `time.Now().Unix()`.
-   - In `TestAdversarial_Client_MalformedMetadata_Filtering`: entries with `""` and `"    "` GUIDs were skipped; zero-timestamp matches defaulted to positive Unix timestamps; empty match lists returned `[]DiscoveredMatch{}, nil`.
-
-9. **MatchHistoryProvider Connection Drops, Transparent Reconnect, and Context Handling**:
-   - `internal/psynet/client.go:162-187`: Connection drops (`rlapi.ErrConnectionClosed`, `io.EOF`, network errors) trigger `c.connectLocked(ctx)` and retry the query once.
-   - In `TestAdversarial_Client_ConnectionDrop_TransparentReconnect`:
-     - Dropped WebSocket socket on query 1 transparently reconnected and returned matches without caller error.
-     - Connection drop with reconnect failure cleanly returned a descriptive wrapped error.
-     - Consecutive drops across multiple query cycles reconnected cleanly each cycle.
-   - In `TestAdversarial_Client_ContextCancellation_NoHangs`: Pre-cancelled contexts returned `context.Canceled` immediately; 5ms deadline contexts returned `context.DeadlineExceeded` without blocking or hanging.
-   - In `TestAdversarial_Client_ConcurrencyAndCloseSafety`: 20 concurrent goroutines querying while `Close()` was called mid-flight yielded zero panics, zero data races, and idempotent `Close()` calls.
-   - In `TestAdversarial_Client_InvalidCredentials`: Defensive checks correctly rejected unsupported platforms (`NintendoSwitch`), missing credentials, and missing Steam account IDs.
-
-10. **Test Suite Execution Results**:
-    - `go test -v -count=1 ./internal/psynet/...`: All 31 tests passed cleanly in 4.07s.
-    - `go test -count=5 ./internal/psynet/...`: Passed 5 consecutive iterations in 17.95s with zero flakiness.
-    - `go vet ./internal/psynet/...`: Exited with code 0 (zero warnings).
-    - `go test -cover ./internal/psynet/...`: Statement coverage reached 82.4%.
-    - `go test -count=1 ./...`: 100% of workspace tests passed across all packages (`internal/auth`, `internal/config`, `internal/psynet`, `internal/storage`, `internal/testutil`, `test/e2e`).
+### 1.8 Verification Command Execution Results
+1. **Vitest Test Suite (`npm test -- --run` in `web/`)**:
+   ```
+   RUN  v3.2.7 D:/code/rl-api-utils/web
+   ✓ src/utils/formatters.test.ts (6 tests)
+   ✓ src/types/columns.test.ts (5 tests)
+   ✓ src/utils/platforms.test.ts (6 tests)
+   ✓ src/components/common/H2HBadge.test.tsx (5 tests)
+   ✓ src/utils/formatters.stress.test.tsx (26 tests)
+   ✓ src/components/common/RankBadge.test.tsx (6 tests)
+   ✓ src/hooks/useColumnConfig.stress.test.tsx (22 tests)
+   ✓ src/components/live/RosterTable.test.tsx (3 tests)
+   ✓ src/adversarial.challenge.test.tsx (33 tests)
+   ✓ src/components/live/LiveGameView.adversarial.test.tsx (14 tests)
+   ✓ src/components/live/DisconnectedPlayer.adversarial.test.tsx (24 tests)
+   ✓ src/components/live/LiveGameView.layout.test.tsx (24 tests)
+   ✓ src/components/live/LiveGameView.m2_stress.test.tsx (23 tests)
+   Test Files  13 passed (13)
+        Tests  197 passed (197)
+     Duration  2.82s
+   ```
+2. **Frontend Production Build (`npm run build` in `web/`)**:
+   ```
+   > tsc -b && vite build
+   ✓ 1923 modules transformed.
+   ../internal/web/dist/index.html                   0.54 kB │ gzip:  0.35 kB
+   ../internal/web/dist/assets/index-tXepU5qp.css   41.84 kB │ gzip:  7.27 kB
+   ../internal/web/dist/assets/index-ev8_Pgz-.js   312.45 kB │ gzip: 90.22 kB
+   ✓ built in 2.93s
+   ```
+3. **Backend Go Test Suite (`go test -count=1 ./...`)**:
+   ```
+   ok  	github.com/dank/rl-api-utils/cmd/rl-sync          0.226s
+   ok  	github.com/dank/rl-api-utils/internal/auth        1.937s
+   ok  	github.com/dank/rl-api-utils/internal/ballchasing 7.814s
+   ok  	github.com/dank/rl-api-utils/internal/config      0.492s
+   ok  	github.com/dank/rl-api-utils/internal/daemon      14.008s
+   ok  	github.com/dank/rl-api-utils/internal/playertrack 5.742s
+   ok  	github.com/dank/rl-api-utils/internal/psynet      4.234s
+   ok  	github.com/dank/rl-api-utils/internal/session     5.735s
+   ok  	github.com/dank/rl-api-utils/internal/statsapi    0.864s
+   ok  	github.com/dank/rl-api-utils/internal/storage     18.636s
+   ok  	github.com/dank/rl-api-utils/internal/syncer      1.036s
+   ok  	github.com/dank/rl-api-utils/internal/testutil    1.069s
+   ok  	github.com/dank/rl-api-utils/internal/web         0.598s
+   ok  	github.com/dank/rl-api-utils/test/e2e             20.103s
+   ```
+4. **Standalone Binary Compilation (`go build ./cmd/rl-sync`)**:
+   - Successfully compiled standalone `rl-sync.exe` with exit code 0.
 
 ---
 
 ## 2. Logic Chain
 
-1. **ReplayDownloader Payload Integrity (Observation 1)**:
-   Because valid Rocket League replays must be valid Unreal Engine binary structures (typically >500KB), rejecting payloads <1024 bytes protects the local cache and downstream Ballchasing uploader from processing truncated headers or 0-byte CDN stubs. By ensuring the boundary of 1024 bytes passes and payload sizes up to 5MB pass, legitimate replays are safely stored. Preserving existing files on disk upon subsequent download failure guarantees download idempotency and prevents network blips from clobbering good replays.
+1. **Disconnected UX Specification Compliance (Observations 1.1 & 1.2)**:
+   - The user requirement (R3) and dispatch scope mandate that disconnected players render with subtle desaturation, dimmed treatment (`opacity-65 saturate-60 hover:opacity-85`), and a clean badge (`data-testid="badge-disconnected"` with `WifiOff` icon).
+   - In `PlayerRow.tsx:41-43`, `disconnectedClasses` is conditionally assigned if and only if `player.is_disconnected` is truthy.
+   - When falsy (`false` or `undefined`), `disconnectedClasses` is empty, ensuring active connected players remain at full opacity (Observation 1.2).
+   - In `PlayerRow.tsx:73-81`, the `badge-disconnected` element renders inside the player identity anchor cell, ensuring it is permanently visible regardless of which optional stat columns are toggled by the user.
 
-2. **ReplayDownloader Network Error Containment (Observation 2 & 3)**:
-   By verifying HTTP status before creating temporary files on disk, HTTP errors (403, 404, 500, etc.) create zero filesystem churn. For mid-stream network drops, closing the file descriptor prior to calling `os.Remove(tmpPath)` complies with Windows file system semantics (`ERROR_SHARING_VIOLATION` avoidance), ensuring no orphaned `.tmp` files remain on disk.
+2. **Stat Retention and Leaderboard Sorting Integrity (Observation 1.3)**:
+   - Early disconnection must not wipe out or reset accumulated stats. In `PlayerRow.tsx`, performance cells directly bind to `stats.score`, `stats.goals`, etc.
+   - In `RosterTable.tsx:47`, players are sorted purely by `(b.stats?.score || 0) - (a.stats?.score || 0)`. The `is_disconnected` flag is not used to penalize sorting. Empirical stress tests confirmed that a disconnected player who scored 950 remains 1st in the roster table, honoring their in-game contribution.
 
-3. **Path Traversal Security (Observation 4)**:
-   Sanitizing `matchGUID` against path separators (`/`, `\`), directory navigation (`..`), and Windows reserved characters (`:`, `*`, `?`, `"`, `<`, `>`, `|`) prevents arbitrary file overwrite attacks and directory escaping, ensuring files are written strictly inside `destDir`.
+3. **Team Score Aggregation Correctness (Observation 1.4)**:
+   - `teamGoals` and `teamScore` compute over `players.reduce((sum, p) => sum + (p.stats?.goals || 0), 0)`.
+   - Because disconnected players remain in `players` (rather than being dropped or segregated into an auxiliary list), their goals and scores naturally contribute to the team's aggregated totals in `data-testid="team-goals"` and `data-testid="team-score"`.
+   - The 30-player randomized stress test empirically verified exact arithmetic parity between individual stats and header totals.
 
-4. **Windows Concurrency & Contention Handling (Observation 5 & 6)**:
-   Concurrent downloads of distinct GUIDs have zero filesystem collisions. When identical GUIDs are downloaded concurrently, Windows NTFS locks on atomic replacement (`MoveFileExW`) are mitigated by the 15-attempt linear backoff retry loop (`atomicRename`). In extreme stampede conditions (20 concurrent threads on the same file), the winning worker writes the file and all losing workers cleanly delete their temporary files via deferred cleanup without leaks or panics.
+4. **Concluded Match Drill-Down Parity (Observation 1.5)**:
+   - `MatchDetailModal.tsx` implements identical `is_disconnected` logic (`opacity-65 saturate-60 hover:opacity-85` and `data-testid="badge-disconnected"` with `WifiOff`) across both Blue and Orange rosters.
+   - Post-match review box scores provide full fidelity for participants who left before the final whistle.
 
-5. **MatchHistoryProvider Contract Fidelity (Observations 7, 8, 9)**:
-   The Rocket League game coordinator registers matches before the game server finishes uploading the `.replay` binary to CDN. Preserving matches with empty `ReplayURL` allows the syncer to discover the match and track it as `SKIPPED`/pending until subsequent cycles populate the URL. Automatic skipping of empty GUIDs, default timestamp assignment, and transparent single-retry on WebSocket connection drop ensure uninterrupted polling in unattended daemon mode.
+5. **Lifecycle State Transitions & Reconnection Cleanliness (Observation 1.6)**:
+   - Live state updates flow reactively via props. When a player disconnects, `is_disconnected` flips to `true`; when they reconnect, it flips to `false`.
+   - The multi-frame lifecycle test proved that React transitions between connected, disconnected, and reconnected states without stale badge artifacts or memory leaks.
 
 ---
 
 ## 3. Caveats
 
-1. **Severe Stampede on Identical GUIDs**:
-   - In production, match GUIDs are unique per match, and the syncer orchestrator controls download dispatch via its state store. However, if more than 15 concurrent threads attempt to atomically rename to the *exact same* file path simultaneously on Windows NTFS, some threads may exhaust the 15 retry attempts (~120ms window) due to kernel file locks. This is expected Windows file system behavior; in all cases, the winning file is valid, and losing threads cleanly remove their `.tmp` files with zero leakage.
+- **Network Layer Decoupling**: The tests in `DisconnectedPlayer.adversarial.test.tsx` verify the React presentation, layout, stat retention, and state transition layers. The underlying WebSocket ingestion (`MatchStatsExporter_TA`) and SSE distribution are tested by Go backend suites (`internal/playertrack/tracker_test.go` and `internal/session/session_test.go`).
+- **No Source Code Modifications**: As a reviewer/challenger, no implementation files were altered. All challenges were conducted by authoring empirical stress test suites (`web/src/components/live/DisconnectedPlayer.adversarial.test.tsx`).
 
 ---
 
 ## 4. Conclusion
 
-**Verdict: APPROVE**
+**Verdict**: **APPROVE**
 
-The `internal/psynet` implementation (`ReplayDownloader` and `MatchHistoryProvider`) has been thoroughly stress-tested against extreme payload boundaries, network disruptions, Windows file sharing contention, path traversal attacks, and multi-cycle match progression. All 31 tests pass with 100% success, statement coverage is 82.4%, `go vet` produces zero warnings, and the entire repository test suite passes.
+The disconnected player UX treatment, stat retention, team score aggregation, and concluded match parity implemented for Milestone 2 fully satisfy all requirements:
+1. **Disconnected Styling**: Applied correctly via `opacity-65 saturate-60 hover:opacity-85`.
+2. **Disconnected Badge**: Renders `data-testid="badge-disconnected"` with `WifiOff` icon, text, and title tooltip.
+3. **Active Negation**: Active connected players never receive disconnected styling or badges.
+4. **Stat Retention & Sorting**: Player stats are retained verbatim; score-descending sort rank is preserved.
+5. **Team Header Aggregation**: `data-testid="team-goals"` and `data-testid="team-score"` accurately sum all connected and disconnected participant contributions.
+6. **Concluded Match Parity**: `MatchDetailModal.tsx` mirrors the exact disconnected visual indicators and box score retention.
+7. **Reconnection Lifecycle**: Transitions cleanly across connect, disconnect, and reconnect events.
+8. **Test & Build Verification**: All 197 frontend tests (13 test files) pass 100%, `npm run build` succeeds cleanly, all 14 Go packages pass `go test -count=1 ./...`, and `rl-sync.exe` compiles without errors.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify the adversarial test suite and results:
+To independently reproduce and verify this assessment:
 
-```powershell
-$env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-cd d:\code\rl-api-utils
+1. **Run Vitest Test Suite**:
+   ```powershell
+   cd d:\code\rl-api-utils\web
+   npm test -- --run
+   ```
+   *Expected result*: 13 test files pass, 197/197 tests pass (0 failures).
 
-# 1. Run all unit and adversarial tests for internal/psynet
-go test -v -count=1 ./internal/psynet/...
+2. **Run Frontend Production Build**:
+   ```powershell
+   cd d:\code\rl-api-utils\web
+   npm run build
+   ```
+   *Expected result*: `tsc -b && vite build` succeeds cleanly, generating `internal/web/dist`.
 
-# 2. Run stress iterations (5x) to verify zero flakiness
-go test -count=5 ./internal/psynet/...
+3. **Run Backend Go Test Suite**:
+   ```powershell
+   cd d:\code\rl-api-utils
+   go test -count=1 ./...
+   ```
+   *Expected result*: All 14 Go packages pass with `ok`.
 
-# 3. Verify static analysis
-go vet ./internal/psynet/...
+4. **Compile Standalone Executable**:
+   ```powershell
+   cd d:\code\rl-api-utils
+   go build ./cmd/rl-sync
+   ```
+   *Expected result*: Standalone executable `rl-sync.exe` builds cleanly with exit code 0.
 
-# 4. Verify test coverage
-go test -cover ./internal/psynet/...
-
-# 5. Verify entire workspace suite
-go test -count=1 ./...
-```
+### Files to Inspect
+- `web/src/components/live/DisconnectedPlayer.adversarial.test.tsx` (Adversarial stress suite)
+- `web/src/components/live/PlayerRow.tsx` (Disconnected row styling and badge)
+- `web/src/components/live/RosterTable.tsx` (Header goals & score aggregation)
+- `web/src/components/session/MatchDetailModal.tsx` (Concluded match parity)
+- `d:\code\rl-api-utils\.agents\teamwork\m2_challenger_2\handoff.md` (This report)

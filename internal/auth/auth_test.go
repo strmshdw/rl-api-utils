@@ -218,6 +218,12 @@ func (s *mockStateStore) GetPlayerMatchup(ctx context.Context, playerID string, 
 func (s *mockStateStore) GetPlayerMatchups(ctx context.Context, playerID string) ([]*storage.PlayerMatchup, error) {
 	return nil, nil
 }
+func (s *mockStateStore) SyncReplayStats(ctx context.Context, stats *storage.ReplayMatchStats) error {
+	return nil
+}
+func (s *mockStateStore) ListHistoricalMatches(ctx context.Context, filter storage.MatchFilter) ([]*storage.HistoricalMatchRecord, int, error) {
+	return nil, 0, nil
+}
 
 // ============================================================================
 // Factory & Validation Tests

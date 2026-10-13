@@ -55,8 +55,60 @@ type MatchRecord struct {
 	UploadedAt           *time.Time     `json:"uploaded_at,omitempty"`
 	RetryCount           int            `json:"retry_count"`
 	LastError            string         `json:"last_error"`
+	BlueScore            int            `json:"blue_score"`
+	OrangeScore          int            `json:"orange_score"`
+	WinnerTeam           *int           `json:"winner_team,omitempty"`
+	ReplayStatsJSON      string         `json:"replay_stats_json,omitempty"`
+	SyncedAt             *time.Time     `json:"synced_at,omitempty"`
 	CreatedAt            time.Time      `json:"created_at"`
 	UpdatedAt            time.Time      `json:"updated_at"`
+}
+
+// ReplayPlayerStats contains per-player statistics extracted from a replay or ballchasing record.
+type ReplayPlayerStats struct {
+	Name     string `json:"name"`
+	Platform string `json:"platform"`
+	OnlineID string `json:"online_id"`
+	Team     int    `json:"team"` // 0 = Blue, 1 = Orange
+	Score    int    `json:"score"`
+	Goals    int    `json:"goals"`
+	Assists  int    `json:"assists"`
+	Saves    int    `json:"saves"`
+	Shots    int    `json:"shots"`
+	Demos    int    `json:"demos,omitempty"`
+	IsBot    bool   `json:"is_bot"`
+}
+
+// ReplayMatchStats holds end-of-game replay statistics to enrich local match records.
+type ReplayMatchStats struct {
+	MatchGUID      string              `json:"match_guid"`
+	MapName        string              `json:"map_name"`
+	Playlist       int                 `json:"playlist"`
+	BlueScore      int                 `json:"blue_score"`
+	OrangeScore    int                 `json:"orange_score"`
+	WinnerTeam     *int                `json:"winner_team,omitempty"`
+	Duration       int                 `json:"duration"`
+	Overtime       bool                `json:"overtime"`
+	Date           string              `json:"date"`
+	Players        []ReplayPlayerStats `json:"players"`
+	BallchasingID  string              `json:"ballchasing_id,omitempty"`
+	BallchasingURL string              `json:"ballchasing_url,omitempty"`
+	RawJSON        string              `json:"raw_json,omitempty"`
+}
+
+// MatchFilter specifies search and pagination criteria for historical matches.
+type MatchFilter struct {
+	Playlist int    `json:"playlist"`
+	Query    string `json:"query"`
+	Limit    int    `json:"limit"`
+	Offset   int    `json:"offset"`
+}
+
+// HistoricalMatchRecord represents a historical match enriched with replay and outcome stats.
+type HistoricalMatchRecord struct {
+	MatchRecord
+	Stats  *ReplayMatchStats `json:"stats,omitempty"`
+	Result string            `json:"result,omitempty"` // "victory", "defeat", "draw", "unknown"
 }
 
 // AuthRecord represents persisted authentication tokens and metadata for an auth provider.
@@ -185,6 +237,14 @@ type StateStore interface {
 
 	// GetPlayerMatchups retrieves all playlist matchups for a player ordered by playlist_id ASC.
 	GetPlayerMatchups(ctx context.Context, playerID string) ([]*PlayerMatchup, error)
+
+	// SyncReplayStats enriches or upserts a match record with end-of-game replay statistics,
+	// keyed by MatchGUID.
+	SyncReplayStats(ctx context.Context, stats *ReplayMatchStats) error
+
+	// ListHistoricalMatches returns paginated historical matches matching the filter,
+	// ordered by record_start_timestamp DESC, match_guid ASC.
+	ListHistoricalMatches(ctx context.Context, filter MatchFilter) ([]*HistoricalMatchRecord, int, error)
 }
 
 // NewStore initializes a StateStore backend based on the database path or URI.

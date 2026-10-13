@@ -50,3 +50,24 @@ export function getRankTierColor(tier: number): string {
   if (tier === 22) return 'text-white border-cyan-400/80 bg-gradient-to-r from-purple-900/40 via-cyan-900/40 to-slate-900/40 shadow-[0_0_12px_rgba(56,189,248,0.4)]';
   return 'text-slate-400 border-slate-700 bg-slate-900/30';
 }
+
+export function formatPlaylistName(id: number): string {
+  switch (id) {
+    case 1: return 'Casual Duel 1v1';
+    case 2: return 'Casual Doubles 2v2';
+    case 3: return 'Casual Standard 3v3';
+    case 4: return 'Casual Chaos 4v4';
+    case 10: return 'Ranked Duel 1v1';
+    case 11: return 'Ranked Doubles 2v2';
+    case 12: return 'Ranked Solo Standard 3v3';
+    case 13: return 'Ranked Standard 3v3';
+    case 27: return 'Ranked Hoops';
+    case 28: return 'Ranked Rumble';
+    case 29: return 'Ranked Dropshot';
+    case 30: return 'Ranked Snow Day';
+    case 34: return 'Tournament';
+    default:
+      if (id > 0) return `Playlist ${id}`;
+      return 'Unknown Playlist';
+  }
+}

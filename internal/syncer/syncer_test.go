@@ -234,6 +234,12 @@ func (m *mockStore) RecoverInFlight(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockStore) SyncReplayStats(ctx context.Context, stats *storage.ReplayMatchStats) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return nil
+}
+
 type mockHistoryProvider struct {
 	mu      sync.Mutex
 	matches []DiscoveredMatch

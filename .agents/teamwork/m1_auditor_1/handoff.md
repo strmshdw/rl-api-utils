@@ -1,167 +1,234 @@
-# Forensic Audit Report: Milestone M1 (Requirement R2: Persistent Player State on Disconnect)
+# Forensic Audit Report & Handoff: Milestone 1 - True In-Game MMR Conversion (R1)
 
-**Work Product**: Milestone M1 changes in `internal/playertrack/tracker.go`, `internal/session/models.go`, `internal/session/session.go`, `web/src/types/api.ts`, and test suites `internal/playertrack/tracker_test.go`, `internal/session/session_test.go`.  
+**Work Product**: `internal/playertrack/rank_client.go`, `internal/playertrack/rank_client_test.go`, `internal/session/session_mmr_test.go`, `internal/daemon/daemon_mmr_test.go`  
 **Profile**: General Project  
-**Integrity Mode**: Development (per `ORIGINAL_REQUEST.md ## 2026-10-06T08:30:09Z`)  
-**Verdict**: CLEAN  
+**Integrity Mode**: Development (per `ORIGINAL_REQUEST.md` `## 2026-10-06T11:02:53Z`)  
+**Auditor**: `m1_auditor_1`  
+**Verdict**: **CLEAN**  
 
 ---
 
-### Phase Results
-- **Hardcoded Output Detection**: PASS — Zero hardcoded test outputs, strings, or canned return values detected.
-- **Facade Detection**: PASS — Genuine state tracking algorithms implemented; differential retention, local player fallback, and goal aggregation operate dynamically on live frames.
-- **Pre-populated Artifact Detection**: PASS — No pre-populated `.log`, result, or output verification artifacts exist in the repository.
-- **Build and Run**: PASS — `go test -count=1 ./...` (all 14 packages), `go vet ./...`, `go build ./cmd/rl-sync`, `npm test`, and `npm run build` all pass cleanly with 100% success.
-- **Differential Retention & Stats Preservation**: PASS — Omitted participants are retained in active match rosters with `IsDisconnected = true` and exact accumulated box score stats.
-- **Pointer & Concurrency Safety**: PASS — `SessionMatchPlayer.DeepClone()` isolates the `Won *bool` pointer, preventing race conditions or mutation across session snapshots.
+## Forensic Audit Summary
+
+| # | Forensic Check | Description | Status | Evidence Summary |
+|---|----------------|-------------|:------:|------------------|
+| 1 | **Hardcoded Test Results** | Detection of fixed returns or test-specific switch/case branches | **PASS** | Grep scan for `1050` and `47.5` in `internal/playertrack` non-test code returned 0 matches. Real math formula executed. |
+| 2 | **Facade Implementations** | Detection of dummy stubs or hollow interfaces returning constants | **PASS** | `ConvertSkillRatingToMMR`, `FromSkill`, and `ParseRanksJSON` execute genuine calculation and normalization. |
+| 3 | **Pre-populated Artifacts** | Detection of stale pre-existing logs, result outputs, or attestations | **PASS** | File scan across `./internal` and `./cmd` for `*.log`, `*result*`, `*output*` returned 0 artifacts. |
+| 4 | **Build & Compilation** | Full binary compilation and static vet analysis | **PASS** | `go build ./cmd/rl-sync` and `go vet ./...` executed cleanly with exit code 0. |
+| 5 | **Behavioral Verification** | Execution of added programmatic unit & integration test suites | **PASS** | 100% pass rate across all added MMR conversion, session delta, and daemon API serialization tests. |
+| 6 | **Execution Delegation** | Unauthorized third-party libraries or external execution delegation | **PASS** | Standard Go library (`math`, `strings`, `strconv`, `encoding/json`) utilized exclusively. |
 
 ---
 
 ## 1. Observation
 
-### 1.1 Direct Code Inspection
-1. **`internal/playertrack/tracker.go:51-60`**:
-   `LobbyPlayer` includes `IsDisconnected bool` with `json:"is_disconnected,omitempty"`:
-   ```go
-   type LobbyPlayer struct {
-       PlayerID       string                 `json:"player_id"`
-       Platform       string                 `json:"platform"`
-       Name           string                 `json:"name"`
-       TeamNum        int                    `json:"team_num"`
-       IsLocal        bool                   `json:"is_local"`
-       IsBot          bool                   `json:"is_bot"`
-       IsDisconnected bool                   `json:"is_disconnected,omitempty"`
-       Stats          PlayerStatsSummary     `json:"stats"`
-       CurrentRank    *PlayerPlaylistRank    `json:"current_rank,omitempty"`
-       Ranks          PlayerRanksSnapshot    `json:"ranks,omitempty"`
-       MatchupRecord  *storage.PlayerMatchup `json:"matchup_record,omitempty"`
-   }
-   ```
+### 1.1 Source Code Inspection (`internal/playertrack/rank_client.go`)
+- **Mathematical Formula & Guards**:
+  Lines 646–654 implement `ConvertSkillRatingToMMR`:
+  ```go
+  func ConvertSkillRatingToMMR(skillRating float64) float64 {
+  	if skillRating <= 0.0 {
+  		return 0.0
+  	}
+  	if skillRating > 150.0 {
+  		return skillRating
+  	}
+  	return math.Round((skillRating * 20.0) + 100.0)
+  }
+  ```
+  - Directly applies `math.Round((skillRating * 20.0) + 100.0)`.
+  - Zero/negative guard (`skillRating <= 0.0 -> 0.0`) ensures unranked/casual playlists do not output false `100.0` MMR.
+  - Idempotency guard (`skillRating > 150.0 -> skillRating`) preserves already-converted MMR fixtures.
+  - Zero hardcoded lookup tables, zero test-specific conditional branches.
 
-2. **`internal/playertrack/tracker.go:330-575`**:
-   `OnUpdateState` implements genuine differential participant retention:
-   - Detects frame boundary: `isSameMatch := (t.currentMatch != nil && t.currentMatch.MatchGUID == trimmedGUID)`.
-   - On frame update of existing match, captures previous rosters (`prevLocalPlayer`, `prevTeammates`, `prevOpponents`, `prevSpectators`).
-   - If local player is omitted from current frame, falls back to `prevLocalPlayer` with `IsDisconnected = true` and preserves `myTeamNum = *t.currentMatch.LocalTeam`.
-   - Populates `seenThisFrame` map (keyed by normalized player ID) for active human participants, marking them `IsDisconnected = false`.
-   - For all previous human participants (`!oldP.IsBot`) absent from `seenThisFrame`, clones them via `DeepClone()`, sets `IsDisconnected = true`, and reattaches them to `teammates`, `opponents`, or `spectators`.
-   - Departed bots (`oldP.IsBot == true`) are deliberately skipped to prevent bot ghost accumulation.
-   - When a new match GUID arrives (`!isSameMatch`), retention is skipped, resetting state cleanly.
+- **Single Chokepoint Ingestion (`FromSkill`)**:
+  Lines 657–667 in `internal/playertrack/rank_client.go`:
+  ```go
+  func FromSkill(s rlapi.Skill) PlayerPlaylistRank {
+  	return PlayerPlaylistRank{
+  		PlaylistID:    s.Playlist,
+  		PlaylistName:  FormatPlaylist(s.Playlist),
+  		Tier:          s.Tier,
+  		Division:      s.Division,
+  		RankName:      FormatRank(s.Tier, s.Division),
+  		MMR:           ConvertSkillRatingToMMR(s.MMR),
+  		MatchesPlayed: s.MatchesPlayed,
+  	}
+  }
+  ```
+  `FromSkill` converts raw `s.MMR` via `ConvertSkillRatingToMMR`, ensuring that all callers (`BuildRanksSnapshot`, `SerializeRanksJSON`, and active match rosters) receive true in-game display MMR numbers.
 
-3. **`internal/session/models.go:70-96` & `session.go:279-310`**:
-   - `SessionMatchPlayer` has `IsDisconnected bool` and `Won *bool`.
-   - `SessionMatchPlayer.DeepClone()` allocates an isolated boolean copy for `clone.Won = &won`.
-   - In `ConcludeMatch`, team goal totals (`blueScore`, `orangeScore`) iterate through all players including disconnected ones, accurately accumulating goals.
-   - `won` status is computed dynamically from `lp.TeamNum == *match.WinnerTeam`.
+- **Legacy Deserialization Normalization (`ParseRanksJSON`)**:
+  Lines 724–731 in `internal/playertrack/rank_client.go`:
+  ```go
+  		if rank.MMR > 0.0 && rank.MMR <= 150.0 {
+  			rank.MMR = ConvertSkillRatingToMMR(rank.MMR)
+  			changed = true
+  		} else if rank.MMR < 0.0 {
+  			rank.MMR = 0.0
+  			changed = true
+  		}
+  ```
+  Dynamically migrates legacy raw ratings stored in SQLite/JSONStore rows to true in-game MMR upon deserialization without altering table schemas.
 
-4. **`web/src/types/api.ts:44-45, 91`**:
-   - `SessionMatchPlayer` interfaces include `is_disconnected?: boolean;` and `won?: boolean;`.
-   - `LobbyPlayer` interface includes `is_disconnected?: boolean;`.
+### 1.2 Programmatic Search for Hardcoded Output Patterns
+- Grep query `1050` across non-test files in `internal/playertrack`:
+  ```
+  Results: No results found
+  ```
+- Grep query `47.5` across non-test files in `internal/playertrack`:
+  ```
+  Results: No results found
+  ```
+- Grep query `1050` across non-test files in `internal/session`:
+  ```
+  Results: No results found
+  ```
+- Grep query `1050` across non-test files in `internal/daemon`:
+  ```
+  Results: No results found
+  ```
 
-### 1.2 Independent Verification Tool Commands & Outputs
-1. **Uncached Playertrack Tests**:
-   - Command: `go test -v -count=1 ./internal/playertrack/...`
+### 1.3 Pre-populated Artifact Inspection
+- Command: `Get-ChildItem -Recurse -File -Include *.log,*result*,*output* -Path ./internal,./cmd`
+  ```
+  Exit code: 0
+  Stdout: (empty)
+  ```
+  No pre-populated test logs, result files, or fabricated verification outputs exist in the project packages.
+
+### 1.4 Independent Dynamic Execution & Test Results
+1. **Compilation Check**:
+   - Command: `go build ./cmd/rl-sync`
+   - Result: Exit code 0, binary `rl-sync.exe` generated cleanly.
+2. **Go Vet Check**:
+   - Command: `go vet ./...`
+   - Result: Exit code 0, 0 warnings.
+3. **Playertrack MMR Tests**:
+   - Command: `go test -v -count=1 ./internal/playertrack -run "TestConvertSkillRatingToMMR|TestFromSkill|TestParseRanksJSON|TestBuildRanksSnapshot"`
    - Output:
      ```
-     === RUN   TestTracker_MidGameDisconnect_Lifecycle_TeammateAndLocal
-     === RUN   TestTracker_MidGameDisconnect_Lifecycle_TeammateAndLocal/SQLite
-     === RUN   TestTracker_MidGameDisconnect_Lifecycle_TeammateAndLocal/JSONStore
-     --- PASS: TestTracker_MidGameDisconnect_Lifecycle_TeammateAndLocal (0.03s)
-     === RUN   TestTracker_MidGameDisconnect_OpponentDisconnectAndReconnect
-     --- PASS: TestTracker_MidGameDisconnect_OpponentDisconnectAndReconnect (0.03s)
-     === RUN   TestTracker_MidGameDisconnect_MultipleSimultaneous
-     --- PASS: TestTracker_MidGameDisconnect_MultipleSimultaneous (0.03s)
-     === RUN   TestTracker_MidGameDisconnect_MatchTransition_ResetsOldDisconnected
-     --- PASS: TestTracker_MidGameDisconnect_MatchTransition_ResetsOldDisconnected (0.03s)
-     === RUN   TestTracker_MidGameDisconnect_BotReplacement
-     --- PASS: TestTracker_MidGameDisconnect_BotReplacement (0.03s)
+     === RUN   TestConvertSkillRatingToMMR_StandardValues
+     --- PASS: TestConvertSkillRatingToMMR_StandardValues (0.00s)
+     === RUN   TestConvertSkillRatingToMMR_CasualAndNegative
+     --- PASS: TestConvertSkillRatingToMMR_CasualAndNegative (0.00s)
+     === RUN   TestConvertSkillRatingToMMR_HighMMRAndIdempotency
+     --- PASS: TestConvertSkillRatingToMMR_HighMMRAndIdempotency (0.00s)
+     === RUN   TestFromSkill_TrueInGameMMR
+     --- PASS: TestFromSkill_TrueInGameMMR (0.00s)
+     === RUN   TestParseRanksJSON_LegacyRawRatingMigration
+     --- PASS: TestParseRanksJSON_LegacyRawRatingMigration (0.00s)
+     === RUN   TestParseRanksJSON_MultiPlaylistMixedPayload
+     --- PASS: TestParseRanksJSON_MultiPlaylistMixedPayload (0.00s)
+     === RUN   TestBuildRanksSnapshot_And_SerializeRanksJSON_TrueInGameMMR
+     --- PASS: TestBuildRanksSnapshot_And_SerializeRanksJSON_TrueInGameMMR (0.00s)
      PASS
-     ok  github.com/dank/rl-api-utils/internal/playertrack 4.184s
+     ok  github.com/dank/rl-api-utils/internal/playertrack 0.119s
      ```
-
-2. **Uncached Session Tracker Tests**:
-   - Command: `go test -v -count=1 ./internal/session/...`
+4. **Session Tracker MMR Tests**:
+   - Command: `go test -v -count=1 ./internal/session -run "TestSessionTracker_TrueInGameMMR"`
    - Output:
      ```
-     === RUN   TestSessionTracker_MidGameDisconnect_ActiveMatchObserverPropagation
-     --- PASS: TestSessionTracker_MidGameDisconnect_ActiveMatchObserverPropagation (0.02s)
-     === RUN   TestSessionTracker_MidGameDisconnect_SSEBroadcast
-     --- PASS: TestSessionTracker_MidGameDisconnect_SSEBroadcast (0.02s)
-     === RUN   TestSessionTracker_MidGameDisconnect_ConcludeMatchSnapshotPreservation
-     --- PASS: TestSessionTracker_MidGameDisconnect_ConcludeMatchSnapshotPreservation (0.00s)
-     === RUN   TestSessionTracker_DeepClone_PreservesDisconnect
-     --- PASS: TestSessionTracker_DeepClone_PreservesDisconnect (0.00s)
+     === RUN   TestSessionTracker_TrueInGameMMR_ScaleAndDelta
+     --- PASS: TestSessionTracker_TrueInGameMMR_ScaleAndDelta (0.00s)
+     === RUN   TestSessionTracker_TrueInGameMMR_LateRankArrival
+     --- PASS: TestSessionTracker_TrueInGameMMR_LateRankArrival (0.00s)
+     === RUN   TestSessionTracker_TrueInGameMMR_RosterAndDisconnectedSnapshots
+     --- PASS: TestSessionTracker_TrueInGameMMR_RosterAndDisconnectedSnapshots (0.00s)
+     === RUN   TestSessionTracker_TrueInGameMMR_CasualZeroGuard
+     --- PASS: TestSessionTracker_TrueInGameMMR_CasualZeroGuard (0.00s)
      PASS
-     ok  github.com/dank/rl-api-utils/internal/session 5.203s
+     ok  github.com/dank/rl-api-utils/internal/session 0.670s
      ```
-
-3. **Repository-Wide Go Tests (All 14 Packages)**:
-   - Command: `go test -count=1 ./...`
-   - Result: Exit code 0 across all 14 packages:
+5. **Daemon API & SSE MMR Tests**:
+   - Command: `go test -v -count=1 ./internal/daemon -run "TestDaemonAPI.*InGameMMR"`
+   - Output:
      ```
-     ok  github.com/dank/rl-api-utils/cmd/rl-sync        0.446s
-     ok  github.com/dank/rl-api-utils/internal/auth       2.483s
-     ok  github.com/dank/rl-api-utils/internal/ballchasing 8.971s
-     ok  github.com/dank/rl-api-utils/internal/config     0.982s
-     ok  github.com/dank/rl-api-utils/internal/daemon     16.626s
-     ok  github.com/dank/rl-api-utils/internal/playertrack 11.107s
-     ok  github.com/dank/rl-api-utils/internal/psynet     5.140s
-     ok  github.com/dank/rl-api-utils/internal/session    5.827s
-     ok  github.com/dank/rl-api-utils/internal/statsapi   1.178s
-     ok  github.com/dank/rl-api-utils/internal/storage    37.757s
-     ok  github.com/dank/rl-api-utils/internal/syncer     1.677s
-     ok  github.com/dank/rl-api-utils/internal/testutil   1.418s
-     ok  github.com/dank/rl-api-utils/internal/web        0.820s
-     ok  github.com/dank/rl-api-utils/test/e2e            29.810s
+     === RUN   TestDaemonAPI_CurrentMatch_InGameMMRSerialization
+     --- PASS: TestDaemonAPI_CurrentMatch_InGameMMRSerialization (0.01s)
+     === RUN   TestDaemonAPI_Session_InGameMMRSerialization
+     --- PASS: TestDaemonAPI_Session_InGameMMRSerialization (0.00s)
+     === RUN   TestDaemonAPI_Players_InGameMMRSerialization
+     --- PASS: TestDaemonAPI_Players_InGameMMRSerialization (0.00s)
+     === RUN   TestDaemonAPI_SSE_InGameMMREvents
+     --- PASS: TestDaemonAPI_SSE_InGameMMREvents (0.05s)
+     PASS
+     ok  github.com/dank/rl-api-utils/internal/daemon 0.185s
      ```
-
-4. **Static Analysis & Compilation**:
-   - Command: `go vet ./...` -> Clean (0 warnings, 0 errors).
-   - Command: `go build ./cmd/rl-sync` -> Clean exit code 0.
-
-5. **Frontend Tests & Build**:
-   - Command: `npm --prefix web test` -> 9 test files passed, 112 tests passed (0 failures).
-   - Command: `npm --prefix web run build` -> `tsc -b && vite build` completed cleanly, bundling into `internal/web/dist`.
+6. **Package Regression Runs**:
+   - `go test -count=1 ./internal/session`: `ok (5.574s)`
+   - `go test -count=1 ./internal/daemon`: `ok (16.277s)`
+   - `go test -count=1 ./internal/storage`: `ok (17.159s)`
 
 ---
 
 ## 2. Logic Chain
 
-1. **Integrity Mode & Ground Truth**:
-   - `ORIGINAL_REQUEST.md` specifies `Integrity mode: development`.
-   - Under this mode, hardcoded test results, facade implementations, and fabricated verification outputs are strictly prohibited.
-2. **Implementation Verification**:
-   - Inspection of `internal/playertrack/tracker.go` confirms that player departure retention is implemented with dynamic state comparison across successive `OnUpdateState` invocations using `seenThisFrame` and deep cloning of previous participant vectors.
-   - No hardcoded player IDs, test GUIDs, or constant return mocks exist in production logic.
-   - The retention mechanism properly discriminates AI bots from human players, avoids leaking across match boundaries, and correctly deduplicates returning players.
-3. **Behavioral Corroboration**:
-   - Running the test suites independently with `-count=1` confirmed that all assertions execute genuinely against live SQLite and JSONStore backends.
-   - All tests pass with zero flakiness or side effects.
+1. **Authenticity of Implementation**:
+   - Observation 1.1 confirms that `ConvertSkillRatingToMMR` applies the true algebraic conversion formula `math.Round((skillRating * 20.0) + 100.0)`.
+   - Observation 1.2 confirms that no hardcoded constants (`1050`, `47.5`, etc.) exist in production logic.
+   - Observation 1.3 confirms zero pre-populated test logs or artifacts exist.
+   - Therefore, the implementation is authentic and contains zero cheating or facade mechanisms.
+
+2. **Downstream Delivery & Integrity Across Layers**:
+   - `FromSkill` is the single entrance point for constructing `PlayerPlaylistRank` from PsyNet `rlapi.Skill` payloads.
+   - Converting `s.MMR` at `FromSkill` guarantees that active match state (`LobbyPlayer.CurrentRank`), database records (`ranks_json`), session telemetry (`InitialMMR`, `CurrentMMR`, `MMRDelta`, `StartingMMR`, `EndingMMR`, `MMRChange`), and daemon endpoints (`/api/current-match`, `/api/session`, `/api/players`, `/api/events`) natively consume in-game MMR numbers without architectural divergence.
+   - Observation 1.4 confirms end-to-end execution across unit, session, and daemon API tests.
+
+3. **Conformance to Specifications**:
+   - `ORIGINAL_REQUEST.md` (Requirement R1) mandates converting raw PsyNet skill ratings using `round((SkillRating * 20) + 100)`.
+   - `PROJECT.md` Feature 27 mandates casual guard (`<= 0 -> 0.0`) and idempotency guard (`> 150 -> unchanged`).
+   - The implementation directly matches the specification in both spirit and detail.
 
 ---
 
-## 3. Caveats
+## 3. Caveats & Adversarial Findings
 
-- **No caveats.** The scope of Milestone M1 is strictly Requirement R2 (Persistent Player State on Disconnect). Milestone M2 will handle persistent outcome logging into storage (`player_matchups`). All M1 deliverables and interface contracts are cleanly satisfied.
+### 3.1 Idempotency Boundary Condition on Interval `(0.0, 2.5]`
+- During adversarial testing, an empirical challenge in `TestAdversarial_Concurrency_HighLoadMMRConversion` revealed that for raw ratings $x \in (0.0, 2.5]$, `ConvertSkillRatingToMMR(x)` yields an in-game MMR $y \in (100.0, 150.0]$.
+- Because the idempotency guard threshold is strictly `> 150.0` (as specified in Feature 27 of `PROJECT.md`), invoking `ConvertSkillRatingToMMR(y)` a second time on a value $y \le 150.0$ will re-convert $y$ (e.g. $x = 0.5 \to 110.0 \to 2300.0$).
+- Similarly, in `ParseRanksJSON`, any stored MMR $\le 150.0$ is treated as a legacy raw decimal and re-converted.
+- **Impact Assessment**: In Rocket League, calibrated competitive players have raw TrueSkill ratings $\mu \ge 5.0$ (MMR $\ge 200$), and uncalibrated / casual players report $0.0$. The interval $(0.0, 2.5]$ represents sub-Bronze 1 fringe values. This behavior strictly complies with the Feature 27 contract (`> 150 -> unchanged`), but downstream teams should be aware of this single-float classification boundary.
 
 ---
 
 ## 4. Conclusion
 
-The work product for Milestone M1 is verified as **CLEAN**. There are zero integrity violations, no facade methods, no fabricated test outputs, and no regressions across any of the project's subsystems.
+The work product for **Milestone 1: True In-Game MMR Conversion (R1)** satisfies all forensic integrity criteria under Development Mode:
+- **No hardcoded test values or cheating branches**: Conversion dynamically executes for arbitrary float inputs.
+- **No facade implementations**: Production routines perform authentic rounding, clamping, and deserialization migration.
+- **No fabricated verification artifacts**: All test outcomes verified by fresh empirical execution.
+- **No unauthorized delegation**: Standard library algorithms used throughout.
+
+**Verdict**: **CLEAN**
 
 ---
 
 ## 5. Verification Method
 
-To independently re-verify:
-```powershell
-go test -v -count=1 -run TestTracker_MidGameDisconnect ./internal/playertrack/...
-go test -v -count=1 -run "TestSessionTracker_MidGameDisconnect|TestSessionTracker_DeepClone_PreservesDisconnect" ./internal/session/...
-go test -count=1 ./...
-go vet ./...
-go build ./cmd/rl-sync
-npm --prefix web test
-npm --prefix web run build
-```
-Invalidation condition: Any failure in retention tests or missing `is_disconnected` fields in API responses.
+To independently verify this verdict:
+
+1. **Run Static Verification**:
+   ```powershell
+   go vet ./...
+   go build ./cmd/rl-sync
+   ```
+2. **Execute Playertrack MMR Unit Tests**:
+   ```powershell
+   go test -v -count=1 ./internal/playertrack -run "TestConvertSkillRatingToMMR|TestFromSkill|TestParseRanksJSON|TestBuildRanksSnapshot"
+   ```
+3. **Execute Session Tracker MMR Tests**:
+   ```powershell
+   go test -v -count=1 ./internal/session -run "TestSessionTracker_TrueInGameMMR"
+   ```
+4. **Execute Daemon API & SSE Serialization Tests**:
+   ```powershell
+   go test -v -count=1 ./internal/daemon -run "TestDaemonAPI.*InGameMMR"
+   ```
+
+### Invalidation Conditions
+- If `ConvertSkillRatingToMMR(47.5)` produces any value other than `1050.0`.
+- If `ConvertSkillRatingToMMR(0.0)` or negative ratings produce any value other than `0.0`.
+- If `ConvertSkillRatingToMMR(1050.0)` does not return `1050.0` (idempotency failure for pre-scaled inputs).
+- If any production file in `internal/playertrack`, `internal/session`, or `internal/daemon` contains hardcoded test conditionals.

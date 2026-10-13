@@ -1,384 +1,282 @@
-# Handoff Report: Milestone M1 (Requirement R2) — internal/session & Downstream Consumers
-
-**Agent**: `m1_explorer_2`  
-**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2`  
-**Date**: 2026-10-06T08:58:00Z  
-**Type**: Hard Handoff  
-**Scope**: `internal/session`, `internal/daemon`, downstream REST/SSE exposure, models, and deep-clone propagation for Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect).
-
----
+# Handoff Report: Milestone 1 Downstream Session Tracking & JSON API Handling (R1)
 
 ## 1. Observation
 
-### 1.1 Ingestion Flow in `SessionTracker` (`internal/session/session.go`)
-- **Observer Wiring**:
-  In `internal/daemon/daemon.go:156-158`:
+### 1.1 Ingestion & Rank Propagation Entry Point
+- In `internal/playertrack/rank_client.go:640-652`, `FromSkill(s rlapi.Skill)` translates PsyNet skill telemetry (`rlapi.Skill`) into `PlayerPlaylistRank`.
+  With Milestone 1 conversion:
   ```go
-  156: 	if d.playerTracker != nil && d.sessionTracker != nil {
-  157: 		d.playerTracker.SetMatchStateListener(d.sessionTracker)
-  158: 	}
+  func FromSkill(s rlapi.Skill) PlayerPlaylistRank {
+      return PlayerPlaylistRank{
+          PlaylistID:    s.Playlist,
+          PlaylistName:  FormatPlaylist(s.Playlist),
+          Tier:          s.Tier,
+          Division:      s.Division,
+          RankName:      FormatRank(s.Tier, s.Division),
+          MMR:           ConvertSkillRatingToMMR(s.MMR), // Converts raw 47.5 -> 1050.0
+          MatchesPlayed: s.MatchesPlayed,
+      }
+  }
   ```
-  `SessionTracker` implements `playertrack.MatchStateListener`.
-- **`OnActiveMatchUpdated` Implementation**:
-  In `internal/session/session.go:447-450`:
-  ```go
-  447: // OnActiveMatchUpdated implements playertrack.MatchStateListener.
-  448: func (s *SessionTracker) OnActiveMatchUpdated(match *playertrack.CurrentMatchResponse) {
-  449: 	s.RecordActiveMatch(match)
-  450: }
-  ```
-- **`RecordActiveMatch` State & Concurrency Semantics**:
-  In `internal/session/session.go:127-143, 204-209`:
-  ```go
-  127: func (s *SessionTracker) RecordActiveMatch(match *playertrack.CurrentMatchResponse) {
-  128: 	if match == nil || strings.TrimSpace(match.MatchGUID) == "" || match.MatchEnded {
-  129: 		return
-  130: 	}
-  131: 
-  132: 	s.mu.Lock()
-  ...
-  142: 	s.currentMatch = match.DeepClone()
-  ...
-  204: 	matchClone := s.currentMatch.DeepClone()
-  205: 	s.mu.Unlock()
-  206: 
-  207: 	if s.broadcaster != nil && matchClone != nil {
-  208: 		s.broadcaster.Broadcast(SessionEvent{Event: EventMatchUpdate, Data: matchClone})
-  209: 	}
-  210: }
-  ```
-  - `s.currentMatch` is updated with `match.DeepClone()`.
-  - An isolated clone `matchClone` is broadcast via `s.broadcaster.Broadcast(SessionEvent{Event: EventMatchUpdate, Data: matchClone})` outside the mutex lock.
-  - If a player leaves mid-game and `playertrack.Tracker` retains them in `match.Teammates` or `match.Opponents` with `IsDisconnected = true`, `SessionTracker` clones this representation into `s.currentMatch` and broadcasts it to all SSE subscribers.
+- In `internal/playertrack/tracker.go:946-1034`, `fetchRanksBatch` calls `BuildRanksSnapshot(skills)` (which calls `FromSkill(s)`), updates `t.rankCache`, attaches ranks to lobby players via `t.updateLobbyPlayerRanksLocked`, writes `SerializeRanksJSON(skills)` to `StateStore`, and notifies `listener.OnActiveMatchUpdated(rankSnapshot)` (which forwards to `SessionTracker.RecordActiveMatch`).
 
-### 1.2 DeepClone Propagation of `IsDisconnected`
-- In `internal/playertrack/tracker.go:62-80` (`LobbyPlayer.DeepClone`):
-  ```go
-  62: func (p LobbyPlayer) DeepClone() LobbyPlayer {
-  63: 	clone := p
-  64: 	if p.CurrentRank != nil {
-  65: 		cr := *p.CurrentRank
-  66: 		clone.CurrentRank = &cr
-  67: 	}
-  ...
-  79: 	return clone
-  80: }
-  ```
-  `clone := p` copies all struct fields by value. Because `IsDisconnected` is a boolean scalar field, adding `IsDisconnected bool` to `LobbyPlayer` causes `LobbyPlayer.DeepClone()` to copy it automatically.
-- In `internal/playertrack/tracker.go:109-154` (`CurrentMatchResponse.DeepClone`):
-  ```go
-  133: 	if s.LocalPlayer != nil {
-  134: 		lp := s.LocalPlayer.DeepClone()
-  135: 		clone.LocalPlayer = &lp
-  136: 	}
-  137: 
-  138: 	clone.Teammates = make([]LobbyPlayer, len(s.Teammates))
-  139: 	for i := range s.Teammates {
-  140: 		clone.Teammates[i] = s.Teammates[i].DeepClone()
-  141: 	}
-  142: 
-  143: 	clone.Opponents = make([]LobbyPlayer, len(s.Opponents))
-  144: 	for i := range s.Opponents {
-  145: 		clone.Opponents[i] = s.Opponents[i].DeepClone()
-  146: 	}
-  ```
-  `CurrentMatchResponse.DeepClone()` clones every `LobbyPlayer` in `LocalPlayer`, `Teammates`, `Opponents`, and `Spectators`.
-  Therefore, calling `match.DeepClone()` in `SessionTracker.RecordActiveMatch` (line 142) and `s.currentMatch.DeepClone()` (line 204 & line 425) preserves `IsDisconnected` on all participants.
-- In `internal/session/models.go:161-183` (`SessionResponse.DeepClone`):
-  ```go
-  179: 	if r.ActiveMatch != nil {
-  180: 		clone.ActiveMatch = r.ActiveMatch.DeepClone()
-  181: 	}
-  ```
-  Calling `s.GetSessionSummary()` returns a deep clone whose `ActiveMatch` maintains `IsDisconnected` on all players.
+### 1.2 Session Tracking Data Structures (`internal/session/models.go`)
+- `PlaylistSessionStats` (`models.go:50-60`):
+  - `InitialMMR float64 json:"initial_mmr"`: Baseline MMR recorded on the first encounter in the session.
+  - `CurrentMMR float64 json:"current_mmr"`: Latest known MMR.
+  - `MMRDelta float64 json:"mmr_delta"`: Net change (`CurrentMMR - InitialMMR`), rounded to 2 decimal places.
+- `SessionMatchPlayer` (`models.go:72-87`):
+  - `MMR float64 json:"mmr"`: Individual participant's MMR in the match roster.
+- `SessionMatchDetail` (`models.go:104-120`):
+  - `StartingMMR float64 json:"starting_mmr"`: Local player's MMR at match start.
+  - `EndingMMR float64 json:"ending_mmr"`: Local player's MMR at match conclusion.
+  - `MMRChange float64 json:"mmr_change"`: Net change (`EndingMMR - StartingMMR`).
+  - `Players []SessionMatchPlayer json:"players"`: Box score and MMR snapshots for all players.
+- `SessionResponse` (`models.go:154-165`):
+  - `Playlists map[string]*PlaylistSessionStats json:"playlists"`
+  - `Matches []*SessionMatchDetail json:"matches"`
+  - `ActiveMatch *playertrack.CurrentMatchResponse json:"active_match,omitempty"`
 
-### 1.3 Disconnect Retention Gap in `SessionMatchPlayer` & `ConcludeMatch`
-- In `internal/session/models.go:71-85`:
-  ```go
-  71: // SessionMatchPlayer captures an individual player's performance and credentials in a completed match.
-  72: type SessionMatchPlayer struct {
-  73: 	PlayerID      string                         `json:"player_id"`
-  74: 	Platform      string                         `json:"platform"`
-  75: 	Name          string                         `json:"name"`
-  76: 	TeamNum       int                            `json:"team_num"` // 0 = Blue, 1 = Orange, 255 = Spectator
-  77: 	IsLocal       bool                           `json:"is_local"`
-  78: 	IsBot         bool                           `json:"is_bot"`
-  79: 	Stats         playertrack.PlayerStatsSummary `json:"stats"`
-  80: 	RankName      string                         `json:"rank_name"`
-  81: 	Tier          int                            `json:"tier"`
-  82: 	Division      int                            `json:"division"`
-  83: 	MMR           float64                        `json:"mmr"`
-  84: 	MatchupRecord *storage.PlayerMatchup         `json:"matchup_record,omitempty"`
-  85: }
-  ```
-  `SessionMatchPlayer` is currently **missing** `IsDisconnected bool json:"is_disconnected,omitempty"` and `Won *bool json:"won,omitempty"`.
-- In `internal/session/session.go:282-296` (`ConcludeMatch`):
-  ```go
-  282: 		matchPlayers = append(matchPlayers, SessionMatchPlayer{
-  283: 			PlayerID:      lp.PlayerID,
-  284: 			Platform:      lp.Platform,
-  285: 			Name:          lp.Name,
-  286: 			TeamNum:       lp.TeamNum,
-  287: 			IsLocal:       lp.IsLocal,
-  288: 			IsBot:         lp.IsBot,
-  289: 			Stats:         lp.Stats,
-  290: 			RankName:      rankName,
-  291: 			Tier:          tier,
-  292: 			Division:      div,
-  293: 			MMR:           mmr,
-  294: 			MatchupRecord: lp.MatchupRecord,
-  295: 		})
-  ```
-  `ConcludeMatch` does not map `IsDisconnected: lp.IsDisconnected` or compute `Won`.
-- Goal aggregation in `ConcludeMatch` (lines 246-270):
-  ```go
-  246: 	allPlayers := make([]playertrack.LobbyPlayer, 0, len(match.Teammates)+len(match.Opponents)+len(match.Spectators)+1)
-  247: 	if match.LocalPlayer != nil {
-  248: 		allPlayers = append(allPlayers, *match.LocalPlayer)
-  249: 	}
-  250: 	allPlayers = append(allPlayers, match.Teammates...)
-  251: 	allPlayers = append(allPlayers, match.Opponents...)
-  252: 	allPlayers = append(allPlayers, match.Spectators...)
-  ...
-  266: 		if lp.TeamNum == 0 {
-  267: 			blueScore += lp.Stats.Goals
-  268: 		} else if lp.TeamNum == 1 {
-  269: 			orangeScore += lp.Stats.Goals
-  270: 		}
-  ```
-  Because `allPlayers` includes `match.Teammates` and `match.Opponents`, retaining disconnected players in those slices ensures their goals are correctly summed into `blueScore` or `orangeScore`.
+### 1.3 Session Tracking Lifecycle & MMR Driving Paths (`internal/session/session.go`)
+- **Active Match Recording & Baseline Anchoring (`session.go:128-202`)**:
+  - Initial active match frame:
+    ```go
+    var startingMMR float64
+    if match.LocalPlayer != nil && match.LocalPlayer.CurrentRank != nil {
+        startingMMR = match.LocalPlayer.CurrentRank.MMR
+    }
+    s.activeMatch = &ActiveMatchRecord{
+        MatchGUID:   guid,
+        PlaylistID:  match.PlaylistID,
+        StartedAt:   time.Now().UTC(),
+        StartingMMR: startingMMR,
+    }
+    ```
+  - Playlist initialization / update:
+    - If playlist entry does not exist: creates `PlaylistSessionStats` with `InitialMMR = startingMMR` and `CurrentMMR = startingMMR`.
+    - If playlist entry exists but `InitialMMR == 0 && startingMMR > 0`: sets `InitialMMR = startingMMR` and `CurrentMMR = startingMMR`.
+    - If playlist entry exists and `startingMMR > 0`: sets `CurrentMMR = startingMMR`, and if `InitialMMR > 0`, updates `MMRDelta = roundFloat(stats.CurrentMMR - stats.InitialMMR, 2)`.
+  - Asynchronous late rank arrival (`session.go:184-201`):
+    - When ranks resolve mid-game (`match.LocalPlayer.CurrentRank.MMR > 0`):
+      - If `s.activeMatch.StartingMMR == 0`, backfills `s.activeMatch.StartingMMR = currMMR`.
+      - If `stats.InitialMMR == 0`, initializes `stats.InitialMMR = currMMR`.
+      - Updates `stats.CurrentMMR = currMMR` and `stats.MMRDelta = roundFloat(stats.CurrentMMR - stats.InitialMMR, 2)`.
+- **Match Conclusion & Delta Computation (`session.go:213-399`)**:
+  - Retrieves `startingMMR = s.activeMatch.StartingMMR`.
+  - Extracts ending MMR directly from `match.LocalPlayer.CurrentRank.MMR`:
+    ```go
+    var endingMMR float64
+    if match.LocalPlayer != nil && match.LocalPlayer.CurrentRank != nil {
+        endingMMR = match.LocalPlayer.CurrentRank.MMR
+    }
+    var mmrChange float64
+    if startingMMR > 0 && endingMMR > 0 {
+        mmrChange = roundFloat(endingMMR-startingMMR, 2)
+    }
+    ```
+  - Populates each participant's MMR in `matchPlayers` (`SessionMatchPlayer`):
+    ```go
+    if lp.CurrentRank != nil {
+        mmr = lp.CurrentRank.MMR
+    }
+    ```
+  - Updates cumulative playlist stats:
+    ```go
+    if endingMMR > 0 {
+        stats.CurrentMMR = endingMMR
+        if stats.InitialMMR == 0 {
+            stats.InitialMMR = endingMMR
+        }
+    }
+    if stats.InitialMMR > 0 && stats.CurrentMMR > 0 {
+        stats.MMRDelta = roundFloat(stats.CurrentMMR-stats.InitialMMR, 2)
+    }
+    ```
+  - Stores `detail := &SessionMatchDetail{ StartingMMR: startingMMR, EndingMMR: endingMMR, MMRChange: mmrChange, Players: matchPlayers, ... }`.
+  - Broadcasts `EventMatchEnded` (with `detail.DeepClone()`) and `EventSessionUpdate` (with `s.GetSessionSummary()`).
+- **Session Reset Re-Anchoring (`session.go:95-125`)**:
+  - If a match is currently in progress during `Reset()`:
+    ```go
+    if s.activeMatch != nil && s.currentMatch != nil && s.currentMatch.LocalPlayer != nil {
+        if cr := s.currentMatch.LocalPlayer.CurrentRank; cr != nil && cr.MMR > 0 {
+            s.activeMatch.StartingMMR = cr.MMR
+            s.playlists[s.activeMatch.PlaylistID] = &PlaylistSessionStats{
+                PlaylistID:   s.activeMatch.PlaylistID,
+                PlaylistName: playertrack.FormatPlaylist(s.activeMatch.PlaylistID),
+                InitialMMR:   cr.MMR,
+                CurrentMMR:   cr.MMR,
+                MMRDelta:     0.0,
+            }
+        }
+    }
+    ```
+    This re-anchors the active match baseline and active playlist `InitialMMR` to the player's current in-game MMR, preventing sudden artificial delta spikes after reset.
 
-### 1.4 Downstream Consumers: SSE and REST Exposure
-- **Server-Sent Events (`internal/daemon/sse.go:46-80, 101-115`)**:
-  ```go
-  48: 		sessionEv := session.SessionEvent{
-  49: 			Event: session.EventSessionUpdate,
-  50: 			Data:  summary,
-  51: 		}
-  ...
-  70: 		matchEv := session.SessionEvent{
-  71: 			Event: session.EventMatchUpdate,
-  72: 			Data:  currentMatch,
-  73: 		}
-  ...
-  106: 			wireBytes, err := ev.FormatSSE()
-  ```
-  `SessionEvent.FormatSSE()` executes `json.Marshal(e.Data)`. Because Go's `json.Marshal` serializes struct fields using their `json:"..."` tags:
-  - Any player with `IsDisconnected: true` in `EventMatchUpdate` (`*CurrentMatchResponse`) will produce `"is_disconnected": true`.
-  - In `EventMatchEnded` (`*SessionMatchDetail`), `Players` will serialize each player with `"is_disconnected": true`.
-  - In `EventSessionUpdate` (`*SessionResponse`), both `active_match` and `matches` will serialize `"is_disconnected": true`.
-  - **No modifications are required in `internal/daemon/sse.go`** — serialization is completely data-driven.
-- **REST Endpoints (`internal/daemon/handlers_players.go:25-58` & `internal/daemon/handlers_session.go:10-26`)**:
-  - `GET /current-match` and `GET /api/current-match`: Encodes `d.playerTracker.GetCurrentMatch()`. Automatically serializes `"is_disconnected": true` on retained players.
-  - `GET /api/session`: Encodes `d.sessionTracker.GetSessionSummary()`. Automatically serializes `"is_disconnected": true` on both `active_match` and completed `matches`.
-  - **No modifications are required in `handlers_players.go` or `handlers_session.go`**.
+### 1.4 Daemon REST & SSE JSON Serialization (`internal/daemon`)
+- **`GET /api/current-match` and legacy `GET /current-match` (`handlers_players.go:26-58`)**:
+  - Handler calls `d.playerTracker.GetCurrentMatch()` and encodes `CurrentMatchResponse` directly via `json.NewEncoder(w).Encode(resp)`.
+  - Emits `LocalPlayer.CurrentRank.MMR`, `LocalPlayer.Ranks[pid].MMR`, and all teammates'/opponents' `CurrentRank.MMR` values as numbers on the in-game scale.
+- **`GET /api/session` (`handlers_session.go:12-26`)**:
+  - Handler calls `d.sessionTracker.GetSessionSummary()` and encodes `SessionResponse` directly via `json.NewEncoder(w).Encode(summary)`.
+  - Emits `playlists[pid].initial_mmr`, `current_mmr`, `mmr_delta`, `matches[i].starting_mmr`, `ending_mmr`, `mmr_change`, and all roster players' `mmr`.
+- **`GET /api/players` and `GET /api/players/{id}` (`handlers_players.go:61-212`)**:
+  - Handlers retrieve `storage.PlayerSummary` / `storage.PlayerRecord` from `StateStore`.
+  - Serializes `ranks_json`, which was produced by `SerializeRanksJSON` using `FromSkill` (and deserialized via `ParseRanksJSON` for legacy records).
+  - Emits string field `ranks_json` containing `"mmr": 1050` or `"mmr": 1050.0`.
+- **`GET /api/events` (SSE) (`sse.go:13-100`)**:
+  - Handler streams SSE frames using `SessionEvent.FormatSSE()` which executes `json.Marshal(e.Data)`.
+  - Initial snapshots (`session_update`, `match_update`) and live broadcasts (`match_update`, `match_ended`, `session_update`) contain in-game MMR numbers across the wire.
 
-### 1.5 TypeScript Definitions (`web/src/types/api.ts`)
-- In `web/src/types/api.ts:37-50` (`SessionMatchPlayer`) and lines 82-93 (`LobbyPlayer`):
-  Neither interface includes `is_disconnected?: boolean;`.
-  `SessionMatchPlayer` is also missing `won?: boolean;`.
-
-### 1.6 Verification of Existing Tests
-- Running `go test -v ./internal/session/...`: 100% pass rate across 27 tests (5.05s runtime).
-- Running `go test -v ./internal/daemon/...`: 100% pass rate across all REST, SSE, and security tests (13.29s runtime).
+### 1.5 Verification Suite Execution
+- Running uncached Go tests across both packages:
+  `go test -count=1 ./internal/session/... ./internal/daemon/...`
+  - `internal/session`: 100% PASS (5.344s)
+  - `internal/daemon`: 100% PASS (13.213s)
 
 ---
 
 ## 2. Logic Chain
 
-1. **Premise**: When a player disconnects mid-game, `playertrack.Tracker` retains their identity and accumulated stats in `t.currentMatch.Teammates` or `t.currentMatch.Opponents` with `IsDisconnected = true` (Observation 1.1, 1.2).
-2. **Mechanism in Session Ingestion**: When `Tracker.OnUpdateState` notifies `listener.OnActiveMatchUpdated(matchClone)`, `SessionTracker` receives the match snapshot in `RecordActiveMatch` (Observation 1.1).
-3. **Deep-Clone Isolation**: `SessionTracker` performs `s.currentMatch = match.DeepClone()`. Because `LobbyPlayer.DeepClone()` copies value fields, `IsDisconnected = true` is preserved in `s.currentMatch` without data races under concurrent reads (Observation 1.2).
-4. **SSE Distribution**: `RecordActiveMatch` broadcasts `SessionEvent{Event: EventMatchUpdate, Data: matchClone}`. `SessionEvent.FormatSSE()` marshals `CurrentMatchResponse` into JSON, delivering `"is_disconnected": true` to connected frontend and streaming clients (Observation 1.4).
-5. **REST API Queries**: When a client calls `GET /api/session` or `GET /current-match`, `GetSessionSummary()` and `GetCurrentMatch()` return deep clones containing the retained players with `"is_disconnected": true` (Observation 1.4).
-6. **Match Conclusion & Historical Snapshot**: When the match finishes, `ConcludeMatch(concludedSnapshot)` compiles `SessionMatchDetail`. Because `allPlayers` includes `match.Teammates` and `match.Opponents`, the disconnected player is included. By mapping `lp.IsDisconnected` to `SessionMatchPlayer.IsDisconnected`, the completed match history permanently preserves the player's disconnect state and their box score stats (Observation 1.3).
-7. **Score Integrity**: Goal aggregation in `ConcludeMatch` sums `lp.Stats.Goals` across `allPlayers`. Retaining disconnected players guarantees that goals scored prior to disconnection are counted in `blueScore` or `orangeScore` (Observation 1.3).
-8. **Memory Safety & Race Immunity**: `SessionMatchPlayer.DeepClone()` must clone any pointer fields (such as `Won *bool` for M2) to maintain thread safety across concurrent readers of `SessionResponse.Matches` (Observation 1.3).
+1. **Source Driving Single Chokepoint**:
+   - Observation 1.1 establishes that `FromSkill` converts raw PsyNet skill ratings (e.g. `47.5`) to in-game MMR (`1050.0`) via `ConvertSkillRatingToMMR(s.MMR)`.
+   - The converted value is assigned to `PlayerPlaylistRank.MMR`.
+   - When `fetchRanksBatch` processes skills, it attaches this `PlayerPlaylistRank` to `LobbyPlayer.CurrentRank` and `LobbyPlayer.Ranks`.
+2. **Session Engine Scale Agnosticism**:
+   - Observation 1.3 reveals that `internal/session/session.go` extracts MMR solely via `match.LocalPlayer.CurrentRank.MMR` and `lp.CurrentRank.MMR`.
+   - The session tracking engine never performs rating-to-MMR math or applies scaling factors. It simply treats `MMR` as a `float64` scalar:
+     $$\text{StartingMMR} = \text{LocalPlayer.CurrentRank.MMR}$$
+     $$\text{EndingMMR} = \text{LocalPlayer.CurrentRank.MMR}$$
+     $$\text{MMRChange} = \text{round}(\text{EndingMMR} - \text{StartingMMR}, 2)$$
+     $$\text{MMRDelta} = \text{round}(\text{CurrentMMR} - \text{InitialMMR}, 2)$$
+   - Therefore, when `LocalPlayer.CurrentRank.MMR` provides `1050.0` at start and `1059.0` at conclusion, `MMRChange` calculates to `+9.0` and `MMRDelta` calculates to `+9.0`. All arithmetic works seamlessly and natively on the in-game scale.
+3. **Asynchronous Resilience**:
+   - In live gameplay, PsyNet rank fetching is asynchronous; the match may start before ranks return (`CurrentRank == nil` or `MMR == 0.0`).
+   - Observation 1.3 shows that lines 184-201 of `session.go` catch late-arriving rank updates and backfill `s.activeMatch.StartingMMR` and `stats.InitialMMR` when `currMMR > 0`. This guarantees that in-game MMR deltas remain accurate regardless of network fetch latency.
+4. **Complete Roster MMR Preservation**:
+   - Observation 1.3 lines 272-280 show that `ConcludeMatch` iterates over all players (LocalPlayer, Teammates, Opponents, Spectators) and writes `lp.CurrentRank.MMR` into `SessionMatchPlayer.MMR`.
+   - Early leavers (`IsDisconnected = true`) retain their `CurrentRank.MMR` as well.
+   - Consequently, session history snapshots accurately reflect in-game MMR for all participants across the entire match lobby.
+5. **JSON API Wire Serialization Cleanliness**:
+   - Observation 1.4 confirms that `handleCurrentMatch`, `handleGetSession`, `handleListPlayers`, `handleGetPlayer`, and `handleEvents` marshal their corresponding domain structs (`CurrentMatchResponse`, `SessionResponse`, `PlayerSummary`, `PlayerRecord`, `SessionMatchDetail`) using standard Go `json.Marshal` or `json.NewEncoder`.
+   - No truncation, transformation, or scaling is applied at the HTTP handler layer.
+   - All REST endpoints and SSE streams output true in-game MMR numbers (e.g. `1050`, `1059`, `9.0`) and never emit raw PsyNet decimals (`47.5`).
+6. **No Production Code Changes Required in Session or Daemon**:
+   - Because both `internal/session` and `internal/daemon` are scale-agnostic and consume the domain models directly, **zero modifications to production source code in `internal/session` or `internal/daemon` are required**.
+   - However, to guarantee regression immunity and enforce Requirement R1 contracts, comprehensive automated unit and integration tests must be added to both packages.
 
 ---
 
 ## 3. Caveats
 
-1. **Bot Substitutions in Casual Matches**: When a player disconnects in casual playlists, Rocket League may backfill an AI bot (`Unknown|0|0`). Retaining the disconnected human player means the roster will hold both the human (`IsDisconnected: true, IsBot: false`) and the bot (`IsDisconnected: false, IsBot: true`). In `ConcludeMatch`, both the human's goals and the bot's goals contribute to the team score, which accurately reflects game reality.
-2. **Reconnection Deduplication**: If a player leaves and reconnects within the same match, `ConcludeMatch`'s `seenPlayerIDs` map deduplicates entries, ensuring that `SessionMatchDetail.Players` contains exactly one record for that player with their final stats.
-3. **Local Player Disconnect Scenario**: If the local player disconnects, `SessionTracker` relies on `match.LocalPlayer != nil` being preserved by `playertrack.Tracker`. If `LocalPlayer` is retained with `IsDisconnected = true`, baseline MMR calculations in `RecordActiveMatch` and `Reset` continue to work without nil dereferences.
-4. **Scope Separation (M1 vs M2)**: Milestone M1 focuses on participant state retention during the active match and propagating `IsDisconnected`. Milestone M2 focuses on storage outcome logging (`player_matchups`) and `Won` outcome mapping in concluded matches. Adding `IsDisconnected` and `Won` to `SessionMatchPlayer` now ensures complete interface parity with `PROJECT.md:61-73` and smooth transition to M2.
+1. **Casual / Unranked Playlists (`MMR == 0.0`)**:
+   - For casual playlists (e.g. Playlist 2), PsyNet does not report competitive skill ratings (`MMR == 0.0`).
+   - `ConvertSkillRatingToMMR(0.0)` returns `0.0`.
+   - In `session.go:326`, the condition `if startingMMR > 0 && endingMMR > 0` ensures `MMRChange` remains `0.0`.
+   - In frontend formatters (`formatMMR`), `0.0` or `null` displays as `"---"`, avoiding misleading MMR numbers.
+2. **Placement / Provisional Matches**:
+   - During seasonal placement matches, `Tier == 0` and `Division == 0`, but PsyNet tracks raw rating $\mu$ (e.g. `25.0`).
+   - Formula `round((25.0 * 20) + 100) = 600.0` accurately computes hidden provisional MMR.
+3. **Legacy Database Records**:
+   - In existing installations where `players.ranks_json` contains raw floats (e.g. `47.5`), `ParseRanksJSON` dynamically converts values with `0.0 < MMR <= 150.0` upon unmarshaling.
+   - Direct database queries (e.g. `store.GetPlayer`) returning raw `ranks_json` strings will be updated once new rank polling cycles run (`SerializeRanksJSON`).
+4. **Idempotency Guard Threshold**:
+   - In `ConvertSkillRatingToMMR`, ratings $> 150.0$ are treated as already converted in-game MMR.
+   - This ensures existing test fixtures using numbers like `1050.0` are not double-converted ($1050 \times 20 + 100 = 21,100$).
 
 ---
 
-## 4. Conclusion & Recommended Code Changes
+## 4. Conclusion
 
-### 4.1 Changes in `internal/session/models.go`
+### 4.1 Architectural Assessment
+- `LocalPlayer.CurrentRank.MMR` drives `StartingMMR`, `EndingMMR`, and `MMRDelta` in `internal/session` cleanly and accurately without requiring any changes to `session.go` or `models.go`.
+- `internal/daemon` REST handlers (`/api/current-match`, `/api/session`, `/api/players`, `/api/players/{id}`) and SSE streaming (`/api/events`) serialize in-game MMR numbers cleanly without requiring any handler changes.
+- The conversion is fully encapsulated at `FromSkill`, `ConvertSkillRatingToMMR`, and `ParseRanksJSON` in `internal/playertrack/rank_client.go`.
 
-Update `SessionMatchPlayer` and `SessionMatchPlayer.DeepClone()`:
+### 4.2 Formulated Test Suites
 
-```go
-// SessionMatchPlayer captures an individual player's performance and credentials in a completed match.
-type SessionMatchPlayer struct {
-	PlayerID       string                         `json:"player_id"`
-	Platform       string                         `json:"platform"`
-	Name           string                         `json:"name"`
-	TeamNum        int                            `json:"team_num"` // 0 = Blue, 1 = Orange, 255 = Spectator
-	IsLocal        bool                           `json:"is_local"`
-	IsBot          bool                           `json:"is_bot"`
-	IsDisconnected bool                           `json:"is_disconnected,omitempty"`
-	Won            *bool                          `json:"won,omitempty"`
-	Stats          playertrack.PlayerStatsSummary `json:"stats"`
-	RankName       string                         `json:"rank_name"`
-	Tier           int                            `json:"tier"`
-	Division       int                            `json:"division"`
-	MMR            float64                        `json:"mmr"`
-	MatchupRecord  *storage.PlayerMatchup         `json:"matchup_record,omitempty"`
-}
+Two dedicated test suites have been formulated and written to `.agents/teamwork/m1_explorer_2/`:
 
-// DeepClone returns an isolated copy of SessionMatchPlayer.
-func (p SessionMatchPlayer) DeepClone() SessionMatchPlayer {
-	clone := p
-	if p.Won != nil {
-		won := *p.Won
-		clone.Won = &won
-	}
-	if p.MatchupRecord != nil {
-		rec := *p.MatchupRecord
-		clone.MatchupRecord = &rec
-	}
-	return clone
-}
-```
+#### A. Session MMR Test Suite (`proposed_session_mmr_test.go`)
+Path: `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_session_mmr_test.go`
+Contains 4 targeted test functions:
+1. `TestSessionTracker_TrueInGameMMR_ScaleAndDelta`:
+   - Validates Match 1: Start 1050.0, End 1059.0 (victory) -> `StartingMMR=1050.0`, `EndingMMR=1059.0`, `MMRChange=+9.0`, `MMRDelta=+9.0`.
+   - Validates Match 2: Start 1059.0, End 1049.5 (defeat) -> `StartingMMR=1059.0`, `EndingMMR=1049.5`, `MMRChange=-9.5`, `MMRDelta=-0.5`.
+   - Validates Match 3: Start 1120.0, End 1129.2 (Playlist 13) -> multi-playlist isolation and delta independence.
+2. `TestSessionTracker_TrueInGameMMR_LateRankArrival`:
+   - Simulates asynchronous rank retrieval: match starts with `CurrentRank == nil` (`StartingMMR=0.0`).
+   - Mid-match update provides `MMR=1050.0`: asserts `StartingMMR` and `InitialMMR` backfill to `1050.0`.
+   - Concludes match at `1059.0`: asserts `MMRChange=9.0` and `MMRDelta=9.0`.
+3. `TestSessionTracker_TrueInGameMMR_RosterAndDisconnectedSnapshots`:
+   - Verifies that all players in the match roster (local player 1050.0, active teammate 1045.0, early leaver teammate 1038.0 with `IsDisconnected=true`, and opponents 1062.5) have their in-game MMR preserved in `SessionMatchDetail.Players`.
+4. `TestSessionTracker_TrueInGameMMR_CasualZeroGuard`:
+   - Verifies that casual playlists with `0.0` MMR maintain `0.0` across start, end, match change, and playlist deltas without producing `100.0`.
 
-### 4.2 Changes in `internal/session/session.go`
+#### B. Daemon API MMR Test Suite (`proposed_daemon_mmr_test.go`)
+Path: `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_daemon_mmr_test.go`
+Contains 4 targeted integration test functions:
+1. `TestDaemonAPI_CurrentMatch_InGameMMRSerialization`:
+   - Tests `GET /api/current-match` and legacy `GET /current-match`.
+   - Asserts `local_player.current_rank.mmr == 1050.0`, teammates' and opponents' in-game MMRs.
+   - Asserts raw PsyNet string `47.5` is absent from the JSON response body.
+2. `TestDaemonAPI_Session_InGameMMRSerialization`:
+   - Tests `GET /api/session`.
+   - Verifies `playlists["11"]` has `initial_mmr=1050.0`, `current_mmr=1059.0`, `mmr_delta=9.0`.
+   - Verifies `matches[0]` has `starting_mmr=1050.0`, `ending_mmr=1059.0`, `mmr_change=9.0`.
+   - Asserts raw PsyNet decimals `47.5` and `47.95` are absent from the JSON response.
+3. `TestDaemonAPI_Players_InGameMMRSerialization`:
+   - Tests `GET /api/players` and `GET /api/players/{id}`.
+   - Verifies `ranks_json` contains `"mmr":1050`.
+4. `TestDaemonAPI_SSE_InGameMMREvents`:
+   - Connects to `GET /api/events` and verifies that live `match_ended` and `session_update` SSE frames emit in-game MMR numbers (e.g. `1059.0`) across the wire.
 
-In `ConcludeMatch`:
-
-```go
-		var rankName string
-		var tier, div int
-		var mmr float64
-		if lp.CurrentRank != nil {
-			rankName = lp.CurrentRank.RankName
-			tier = lp.CurrentRank.Tier
-			div = lp.CurrentRank.Division
-			mmr = lp.CurrentRank.MMR
-		}
-
-		var won *bool
-		if match.WinnerTeam != nil && (lp.TeamNum == 0 || lp.TeamNum == 1) {
-			w := (lp.TeamNum == *match.WinnerTeam)
-			won = &w
-		}
-
-		matchPlayers = append(matchPlayers, SessionMatchPlayer{
-			PlayerID:       lp.PlayerID,
-			Platform:       lp.Platform,
-			Name:           lp.Name,
-			TeamNum:        lp.TeamNum,
-			IsLocal:        lp.IsLocal,
-			IsBot:          lp.IsBot,
-			IsDisconnected: lp.IsDisconnected,
-			Won:            won,
-			Stats:          lp.Stats,
-			RankName:       rankName,
-			Tier:           tier,
-			Division:       div,
-			MMR:            mmr,
-			MatchupRecord:  lp.MatchupRecord,
-		})
-```
-
-### 4.3 Changes in `web/src/types/api.ts`
-
-```typescript
-export interface LobbyPlayer {
-  player_id: string;
-  platform: string;
-  name: string;
-  team_num: number;
-  is_local: boolean;
-  is_bot: boolean;
-  is_disconnected?: boolean;
-  stats: PlayerStatsSummary;
-  current_rank?: PlayerPlaylistRank;
-  ranks?: PlayerRanksSnapshot;
-  matchup_record?: PlayerMatchup;
-}
-
-export interface SessionMatchPlayer {
-  player_id: string;
-  platform: string;
-  name: string;
-  team_num: number; // 0 = Blue, 1 = Orange, 255 = Spectator
-  is_local: boolean;
-  is_bot: boolean;
-  is_disconnected?: boolean;
-  won?: boolean;
-  stats: PlayerStatsSummary;
-  rank_name: string;
-  tier: number;
-  division: number;
-  mmr: number;
-  matchup_record?: PlayerMatchup;
-}
-```
-
-### 4.4 Proposed Unit Tests for `internal/session/session_test.go`
-
-Add three targeted tests to `internal/session/session_test.go`:
-
-1. **`TestSessionTracker_ActiveMatch_PlayerDisconnect`**:
-   - Frame 1: Record active match with teammate `Steam|tm_1|0` (`IsDisconnected: false`, `Goals: 2`, `Score: 250`).
-   - Frame 2: Record active match where `Steam|tm_1|0` is marked `IsDisconnected: true`.
-   - Assert `s.GetSessionSummary().ActiveMatch.Teammates[0].IsDisconnected == true`.
-   - Assert teammate's stats (`Goals: 2`, `Score: 250`) remain completely intact.
-   - Assert SSE subscriber receives `EventMatchUpdate` containing `is_disconnected: true`.
-
-2. **`TestSessionTracker_ConcludeMatch_DisconnectedPlayerRetained`**:
-   - Construct concluding `CurrentMatchResponse` where teammate `Steam|tm_1|0` disconnected (`IsDisconnected: true`, `Goals: 2`) and opponent `Steam|opp_1|0` (`Goals: 1`).
-   - Winner is Blue (Team 0, `winnerTeam = 0`).
-   - Call `s.ConcludeMatch(match)`.
-   - Assert `detail.BlueScore == 2` (includes disconnected player's goals).
-   - Assert `detail.Players` contains `Steam|tm_1|0` with `IsDisconnected == true` and `Won != nil && *Won == true`.
-   - Assert `detail.Players` contains opponent with `IsDisconnected == false` and `Won != nil && *Won == false`.
-
-3. **`TestSessionTracker_DeepClone_PreservesDisconnect`**:
-   - Construct `SessionMatchPlayer` and `SessionMatchDetail` with disconnected player.
-   - Deep clone the detail and session response.
-   - Mutate original struct; assert clone retains `IsDisconnected: true` and `Won` pointer is isolated.
+### 4.3 Concrete Integration Recommendation for Implementer
+1. The implementer should place:
+   - `proposed_session_mmr_test.go` into `internal/session/session_mmr_test.go`
+   - `proposed_daemon_mmr_test.go` into `internal/daemon/daemon_mmr_test.go`
+2. Run `go test -v ./internal/session -run TestSessionTracker_TrueInGameMMR`
+3. Run `go test -v ./internal/daemon -run TestDaemonAPI`
 
 ---
 
 ## 5. Verification Method
 
-### 5.1 Independent Verification Commands
-1. Run target unit tests in `internal/session`:
+### 5.1 Independent Test Verification Commands
+1. **Targeted Session Tracker MMR Tests**:
    ```powershell
-   go test -v -run "TestSessionTracker_ActiveMatch_PlayerDisconnect|TestSessionTracker_ConcludeMatch_DisconnectedPlayerRetained|TestSessionTracker_DeepClone_PreservesDisconnect" ./internal/session/...
+   go test -v -count=1 ./internal/session -run TestSessionTracker_TrueInGameMMR
    ```
-2. Run full session package test suite:
+   *Expected*: Passes with 100% success; confirms start/end MMR, deltas (+9.0, -9.5), late rank arrival, roster retention, and casual zero guard.
+
+2. **Targeted Daemon API In-Game MMR Tests**:
    ```powershell
-   go test -v ./internal/session/...
+   go test -v -count=1 ./internal/daemon -run TestDaemonAPI
    ```
-3. Run daemon package test suite (verifying SSE and REST serialization):
+   *Expected*: Passes with 100% success; confirms HTTP 200, valid JSON payloads, presence of ~1050 MMR values, absence of raw PsyNet decimals (`47.5`), and SSE delivery.
+
+3. **Full Package Regression Check**:
    ```powershell
-   go test -v ./internal/daemon/...
+   go test -v -count=1 ./internal/session/... ./internal/daemon/...
    ```
-4. Run full repository regression test suite:
+   *Expected*: Zero regressions across all existing tests.
+
+4. **Standalone Binary Compilation**:
    ```powershell
-   go test ./...
+   go build ./cmd/rl-sync
    ```
-5. Run Vitest frontend test suite:
-   ```powershell
-   npm --prefix web test
-   ```
+   *Expected*: Compiles cleanly with exit code 0.
 
 ### 5.2 Files to Inspect
-- `internal/session/models.go` (lines 72-96, `SessionMatchPlayer` definition and `DeepClone`)
-- `internal/session/session.go` (lines 142-209, `RecordActiveMatch`; lines 246-296, `ConcludeMatch`)
-- `internal/daemon/sse.go` (lines 46-80, initial SSE snapshots)
-- `internal/daemon/handlers_players.go` (lines 25-58, `handleCurrentMatch`)
-- `internal/daemon/handlers_session.go` (lines 10-26, `handleGetSession`)
-- `web/src/types/api.ts` (lines 37-50, 82-93)
-- `internal/session/session_test.go`
+- `internal/session/session.go:146-202` (StartingMMR & baseline initialization)
+- `internal/session/session.go:320-328` (EndingMMR & MMRChange)
+- `internal/session/session.go:363-372` (MMRDelta)
+- `internal/daemon/handlers_players.go:26-58` (/api/current-match serialization)
+- `internal/daemon/handlers_session.go:12-26` (/api/session serialization)
+- `internal/daemon/sse.go:46-80` (SSE stream serialization)
 
 ### 5.3 Invalidation Conditions
-- If `LobbyPlayer.DeepClone()` is refactored to perform shallow pointer sharing rather than value copy of struct primitives, `IsDisconnected` could experience data races during concurrent read/write cycles.
-- If `SessionTracker.ConcludeMatch` were modified to filter out disconnected players from `allPlayers`, team goal calculation (`blueScore`/`orangeScore`) and session match history roster retention would fail.
+- If `StartingMMR` or `EndingMMR` records `47.5` or `47.95` instead of `1050.0` and `1059.0`.
+- If `MMRDelta` records `0.45` instead of `9.0`.
+- If casual playlists report `100.0` MMR instead of `0.0`.
+- If `/api/current-match`, `/api/session`, or `/api/players` emits raw rating decimals in JSON.
+- If `/api/events` drops MMR fields or fails to stream in-game MMR in Server-Sent Events.

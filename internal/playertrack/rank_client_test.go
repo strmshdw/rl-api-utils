@@ -1222,3 +1222,257 @@ func (m *mockAuthProvider) Refresh(ctx context.Context, refreshToken string) (*a
 }
 func (m *mockAuthProvider) TokenInfo() *auth.TokenInfo { return m.tokenInfo }
 func (m *mockAuthProvider) Validate() error           { return nil }
+
+// ============================================================================
+// Category 10: Milestone 1 True In-Game MMR Conversion (R1) Tests
+// ============================================================================
+
+func TestConvertSkillRatingToMMR_StandardValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      float64
+		expected float64
+	}{
+		{"Champion I standard", 47.5, 1050.0},
+		{"Diamond III boundary", 47.0, 1040.0},
+		{"Gold III fractional", 30.4646, 709.0},
+		{"Grand Champion pro", 81.8645, 1737.0},
+		{"Exact half step", 41.25, 925.0},
+		{"Rounding down", 41.24, 925.0},
+		{"Rounding up", 41.26, 925.0},
+		{"Bronze I minimal positive", 5.0, 200.0},
+		{"Bronze I very low", 2.5, 150.0},
+		{"Pro raw rating (Zen/Vatira)", 125.0, 2600.0},
+		{"Boundary raw rating 150.0", 150.0, 3100.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ConvertSkillRatingToMMR(tt.raw)
+			if got != tt.expected {
+				t.Errorf("ConvertSkillRatingToMMR(%v) = %v; want %v", tt.raw, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConvertSkillRatingToMMR_CasualAndNegative(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    float64
+		expected float64
+	}{
+		{"Zero casual rating", 0.0, 0.0},
+		{"Negative float small", -0.01, 0.0},
+		{"Negative float large", -5.0, 0.0},
+		{"Extreme loss streak", -50.0, 0.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ConvertSkillRatingToMMR(tt.input)
+			if got != tt.expected {
+				t.Errorf("ConvertSkillRatingToMMR(%v) = %v; want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConvertSkillRatingToMMR_HighMMRAndIdempotency(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    float64
+		expected float64
+	}{
+		{"Already converted boundary", 150.1, 150.1},
+		{"Standard in-game fixture 1040", 1040.0, 1040.0},
+		{"Standard in-game fixture 1050", 1050.0, 1050.0},
+		{"Standard in-game fixture 1150.5", 1150.5, 1150.5},
+		{"High in-game fixture 1900", 1900.0, 1900.0},
+		{"SSL in-game fixture 2600", 2600.0, 2600.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ConvertSkillRatingToMMR(tt.input)
+			if got != tt.expected {
+				t.Errorf("ConvertSkillRatingToMMR(%v) = %v; want %v", tt.input, got, tt.expected)
+			}
+			// Test idempotency: Convert(Convert(v)) == Convert(v)
+			second := ConvertSkillRatingToMMR(got)
+			if second != got {
+				t.Errorf("Idempotency violation for %v: second conversion returned %v", tt.input, second)
+			}
+		})
+	}
+}
+
+func TestFromSkill_TrueInGameMMR(t *testing.T) {
+	t.Run("Standard raw skill rating conversion", func(t *testing.T) {
+		skill := rlapi.Skill{
+			Playlist:      11,
+			Tier:          16,
+			Division:      2,
+			MMR:           47.5,
+			MatchesPlayed: 50,
+		}
+		rank := FromSkill(skill)
+		if rank.MMR != 1050.0 {
+			t.Fatalf("FromSkill MMR = %v; want 1050.0", rank.MMR)
+		}
+		if rank.RankName != "Champion I Division III" {
+			t.Errorf("FromSkill RankName = %q; want 'Champion I Division III'", rank.RankName)
+		}
+		if rank.PlaylistName != "Ranked Doubles (2v2)" {
+			t.Errorf("FromSkill PlaylistName = %q; want 'Ranked Doubles (2v2)'", rank.PlaylistName)
+		}
+	})
+
+	t.Run("Casual playlist zero rating guard", func(t *testing.T) {
+		skill := rlapi.Skill{
+			Playlist:      2,
+			Tier:          0,
+			Division:      0,
+			MMR:           0.0,
+			MatchesPlayed: 10,
+		}
+		rank := FromSkill(skill)
+		if rank.MMR != 0.0 {
+			t.Fatalf("FromSkill casual MMR = %v; want 0.0", rank.MMR)
+		}
+	})
+
+	t.Run("Pre-scaled MMR passthrough", func(t *testing.T) {
+		skill := rlapi.Skill{
+			Playlist:      13,
+			Tier:          17,
+			Division:      1,
+			MMR:           1120.0,
+			MatchesPlayed: 75,
+		}
+		rank := FromSkill(skill)
+		if rank.MMR != 1120.0 {
+			t.Fatalf("FromSkill pre-scaled MMR = %v; want 1120.0", rank.MMR)
+		}
+	})
+}
+
+func TestParseRanksJSON_LegacyRawRatingMigration(t *testing.T) {
+	legacyJSON := `{"11":{"tier":16,"division":2,"mmr":47.5}}`
+	snapshot, err := ParseRanksJSON(legacyJSON)
+	if err != nil {
+		t.Fatalf("ParseRanksJSON failed: %v", err)
+	}
+
+	rank, ok := snapshot.GetRank(11)
+	if !ok {
+		t.Fatalf("failed to retrieve playlist 11")
+	}
+	if rank.MMR != 1050.0 {
+		t.Errorf("rank.MMR = %v; want 1050.0", rank.MMR)
+	}
+	if rank.PlaylistName != "Ranked Doubles (2v2)" {
+		t.Errorf("rank.PlaylistName = %q; want 'Ranked Doubles (2v2)'", rank.PlaylistName)
+	}
+	if rank.RankName != "Champion I Division III" {
+		t.Errorf("rank.RankName = %q; want 'Champion I Division III'", rank.RankName)
+	}
+}
+
+func TestParseRanksJSON_MultiPlaylistMixedPayload(t *testing.T) {
+	mixedJSON := `{
+		"10": {"tier": 0, "division": 0, "mmr": 0.0},
+		"11": {"tier": 16, "division": 2, "mmr": 47.5},
+		"13": {"tier": 19, "division": 0, "mmr": 62.5},
+		"27": {"tier": 22, "division": 0, "mmr": 1400.0},
+		"99": {"tier": 0, "division": 0, "mmr": -5.0}
+	}`
+
+	snapshot, err := ParseRanksJSON(mixedJSON)
+	if err != nil {
+		t.Fatalf("ParseRanksJSON failed: %v", err)
+	}
+
+	// 1. Casual / unranked (0.0 -> 0.0)
+	r10, ok := snapshot.GetRank(10)
+	if !ok || r10.MMR != 0.0 {
+		t.Errorf("playlist 10 MMR = %v; want 0.0", r10.MMR)
+	}
+
+	// 2. Legacy raw rating (47.5 -> 1050.0)
+	r11, ok := snapshot.GetRank(11)
+	if !ok || r11.MMR != 1050.0 {
+		t.Errorf("playlist 11 MMR = %v; want 1050.0", r11.MMR)
+	}
+
+	// 3. Legacy raw rating (62.5 -> 1350.0)
+	r13, ok := snapshot.GetRank(13)
+	if !ok || r13.MMR != 1350.0 {
+		t.Errorf("playlist 13 MMR = %v; want 1350.0", r13.MMR)
+	}
+
+	// 4. Already scaled fixture (1400.0 -> 1400.0)
+	r27, ok := snapshot.GetRank(27)
+	if !ok || r27.MMR != 1400.0 {
+		t.Errorf("playlist 27 MMR = %v; want 1400.0", r27.MMR)
+	}
+
+	// 5. Negative rating clamped (-5.0 -> 0.0)
+	r99, ok := snapshot.GetRank(99)
+	if !ok || r99.MMR != 0.0 {
+		t.Errorf("playlist 99 MMR = %v; want 0.0", r99.MMR)
+	}
+}
+
+func TestBuildRanksSnapshot_And_SerializeRanksJSON_TrueInGameMMR(t *testing.T) {
+	skills := []rlapi.Skill{
+		{
+			Playlist:      11,
+			Tier:          16,
+			Division:      2,
+			MMR:           47.5,
+			MatchesPlayed: 60,
+		},
+		{
+			Playlist:      2,
+			Tier:          0,
+			Division:      0,
+			MMR:           0.0,
+			MatchesPlayed: 15,
+		},
+	}
+
+	// Test BuildRanksSnapshot converts raw to in-game MMR
+	snapshot := BuildRanksSnapshot(skills)
+	r11, ok := snapshot.GetRank(11)
+	if !ok || r11.MMR != 1050.0 {
+		t.Errorf("BuildRanksSnapshot playlist 11 MMR = %v; want 1050.0", r11.MMR)
+	}
+	r2, ok := snapshot.GetRank(2)
+	if !ok || r2.MMR != 0.0 {
+		t.Errorf("BuildRanksSnapshot casual playlist 2 MMR = %v; want 0.0", r2.MMR)
+	}
+
+	// Test SerializeRanksJSON serializes in-game MMR
+	jsonStr, err := SerializeRanksJSON(skills)
+	if err != nil {
+		t.Fatalf("SerializeRanksJSON failed: %v", err)
+	}
+
+	if !strings.Contains(jsonStr, `"mmr":1050`) {
+		t.Errorf("serialized JSON missing '\"mmr\":1050': %s", jsonStr)
+	}
+	if strings.Contains(jsonStr, "47.5") {
+		t.Errorf("serialized JSON unexpectedly contained raw '47.5': %s", jsonStr)
+	}
+
+	// Test ParseRanksJSON deserializes serialized JSON correctly
+	parsed, err := ParseRanksJSON(jsonStr)
+	if err != nil {
+		t.Fatalf("ParseRanksJSON failed on serialized output: %v", err)
+	}
+	pr11, ok := parsed.GetRank(11)
+	if !ok || pr11.MMR != 1050.0 {
+		t.Errorf("Parsed snapshot playlist 11 MMR = %v; want 1050.0", pr11.MMR)
+	}
+}

@@ -151,6 +151,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		webHost               string
 		webPort               int
 		webEnabled            bool
+		syncBallchasingHistory bool
 		showVersion           bool
 		showVersionV          bool
 		showHelp              bool
@@ -179,6 +180,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	fs.StringVar(&webHost, "web-host", "", "HTTP host binding for web dashboard (default '0.0.0.0')")
 	fs.IntVar(&webPort, "web-port", 0, "HTTP port binding for web dashboard (default 49125)")
 	fs.BoolVar(&webEnabled, "web-enabled", true, "Enable embedded web dashboard and API server")
+	fs.BoolVar(&syncBallchasingHistory, "sync-ballchasing-history", false, "Synchronize all historical replays and player stats from Ballchasing.com and exit")
 	fs.BoolVar(&showVersion, "version", false, "Display application version and exit")
 	fs.BoolVar(&showVersionV, "v", false, "Display application version (shorthand)")
 	fs.BoolVar(&showHelp, "help", false, "Display usage help and exit")
@@ -389,6 +391,34 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	}
 	logger.Info("ballchasing api key verified successfully")
 
+	// Standalone Ballchasing historical sync execution
+	if syncBallchasingHistory {
+		logger.Info("running standalone Ballchasing historical synchronization")
+		concreteBC, ok := bcClient.(*ballchasing.Client)
+		if !ok || concreteBC == nil {
+			logger.Error("ballchasing client does not support historical synchronization")
+			return 1
+		}
+		hs := syncer.NewBallchasingHistorySyncer(
+			concreteBC,
+			store,
+			cfg.PlayerTracking.LocalPlayerID,
+			cfg.PlayerTracking.LocalPlayerName,
+			logger,
+		)
+		prog, err := hs.Sync(ctx)
+		if err != nil {
+			logger.Error("historical ballchasing synchronization failed", slog.Any("error", err))
+			return 1
+		}
+		logger.Info("historical ballchasing synchronization completed successfully",
+			slog.Int("total_replays", prog.TotalReplays),
+			slog.Int("synced_matches", prog.SyncedMatches),
+			slog.Int("synced_players", prog.SyncedPlayers),
+		)
+		return 0
+	}
+
 	// 9. Initialize Syncer Domain Engine
 	syncerConfig := syncer.Config{
 		ReplayDir:      cfg.Sync.ReplayDir,
@@ -488,14 +518,28 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	}
 
 	// 11. Initialize Daemon Engine
+	var historySyncer *syncer.BallchasingHistorySyncer
+	if concreteBC, ok := bcClient.(*ballchasing.Client); ok && concreteBC != nil {
+		historySyncer = syncer.NewBallchasingHistorySyncer(
+			concreteBC,
+			store,
+			cfg.PlayerTracking.LocalPlayerID,
+			cfg.PlayerTracking.LocalPlayerName,
+			logger,
+		)
+	}
+
 	var daemonOpts []daemon.Option
 	daemonOpts = append(daemonOpts, daemon.WithLogger(logger))
 
+	if store != nil {
+		daemonOpts = append(daemonOpts, daemon.WithStateStore(store))
+	}
+	if historySyncer != nil {
+		daemonOpts = append(daemonOpts, daemon.WithHistorySyncer(historySyncer))
+	}
 	if playerTracker != nil {
-		daemonOpts = append(daemonOpts,
-			daemon.WithPlayerTracker(playerTracker),
-			daemon.WithStateStore(store),
-		)
+		daemonOpts = append(daemonOpts, daemon.WithPlayerTracker(playerTracker))
 	}
 
 	if cfg.StatsAPI.Enabled && !cfg.Sync.Once {

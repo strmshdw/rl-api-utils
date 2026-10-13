@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-25T03:57:00Z
+# BRIEFING — 2026-10-06T12:22:00Z
 
 ## Mission
-Review and adversarially stress-test Milestone 2 (Auth & PsyNet Integration) implementation by m2_worker_1.
+Review and adversarially stress-test Milestone 2 (Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment) frontend changes by m2_worker_1.
 
 ## 🔒 My Identity
 - Archetype: reviewer_critic
@@ -10,35 +10,35 @@ Review and adversarially stress-test Milestone 2 (Auth & PsyNet Integration) imp
 - Original parent: 6e6c9567-59d2-415e-8d6e-41314a903548
 - Milestone: M2 - Auth & PsyNet Integration
 - Instance: 1 of 1
+- Current Parent: 18e4e66b-5835-4b6b-bd1e-a34092f47346
+- Current Milestone: M2 - Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment (R2 & R3)
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
 - Report failures as findings — do not fix them yourself
 - Actively check for integrity violations: hardcoded results, dummy/facade implementations, shortcuts, fabricated verification, self-certifying work. If detected, verdict MUST be REQUEST_CHANGES with Critical finding tagged as INTEGRITY VIOLATION.
+- State verdict clearly as APPROVE or REQUEST_CHANGES in handoff.md
 
 ## Current Parent
-- Conversation ID: 6e6c9567-59d2-415e-8d6e-41314a903548
-- Updated: not yet
+- Conversation ID: 18e4e66b-5835-4b6b-bd1e-a34092f47346
+- Updated: 2026-10-06T12:18:37Z
 
 ## Review Scope
 - **Files to review**:
-  - `internal/auth/provider.go`
-  - `internal/auth/epic.go`
-  - `internal/auth/steam.go`
-  - `internal/auth/auth_test.go`
-  - `internal/psynet/client.go`
-  - `internal/psynet/client_test.go`
-  - `internal/psynet/downloader.go`
-  - `internal/psynet/downloader_test.go`
-  - `internal/testutil/mock_psynet.go`
+  - `web/src/components/live/RosterTable.tsx`
+  - `web/src/components/live/PlayerRow.tsx`
+  - `web/src/components/session/MatchDetailModal.tsx`
+  - `web/src/components/live/LiveGameView.layout.test.tsx`
 - **Interface contracts**: PROJECT.md, ORIGINAL_REQUEST.md
-- **Review criteria**: correctness, interface conformance, Windows file safety, error propagation/cancellation, adversarial stress-testing
+- **Review criteria**: correctness, styling fidelity, integrity violations check, test suite & build pass, adversarial stress testing
 
 ## Key Decisions Made
-- Confirmed zero integrity violations: implementations contain genuine dynamic logic and real network/file system protocols.
-- Independently executed build, unit test suites, static analysis (`go vet`), and adversarial stress suites across workspace.
-- Evaluated Windows atomic rename and concurrency semantics under adversarial load.
-- Formulated verdict: APPROVE with minor advisory findings for M4 integration.
+- Confirmed zero integrity violations: implementations contain genuine dynamic React logic, semantic markup, and proper state handling.
+- Independently ran Vitest test suite (`npm test -- --run` in `web/`): 150/150 passed.
+- Independently verified frontend production build (`npm run build` in `web/`): clean bundle into `internal/web/dist`.
+- Independently ran Go workspace test suite (`go test -count=1 ./...`): all 14 packages passed.
+- Independently compiled standalone binary (`go build ./cmd/rl-sync`): compiled cleanly.
+- Formulated verdict: APPROVE with 2 minor advisory findings.
 
 ## Artifact Index
 - `BRIEFING.md` — persistent working memory
@@ -48,24 +48,22 @@ Review and adversarially stress-test Milestone 2 (Auth & PsyNet Integration) imp
 
 ## Review Checklist
 - **Items reviewed**:
-  - `internal/auth/provider.go`, `epic.go`, `steam.go`, `auth_test.go`, `auth_adversarial_test.go`
-  - `internal/psynet/client.go`, `client_test.go`, `downloader.go`, `downloader_test.go`, `adversarial_test.go`
-  - `internal/testutil/mock_psynet.go`
+  - `web/src/components/live/RosterTable.tsx`
+  - `web/src/components/live/PlayerRow.tsx`
+  - `web/src/components/session/MatchDetailModal.tsx`
+  - `web/src/components/live/LiveGameView.layout.test.tsx`
 - **Verdict**: APPROVE
-- **Unverified claims**: none; all worker and challenger claims independently verified.
+- **Unverified claims**: none
 
 ## Attack Surface
 - **Hypotheses tested**:
-  - Token refresh concurrency under 40 readers / 10 writers: PASS (thread-safe, RWMutex protected)
-  - SteamID64 malformed boundary values (21 test cases): PASS (strict 17-digit numeric validation starting with 7656119)
-  - Replay payload boundaries (<1024 bytes rejected, exactly 1024 accepted): PASS
-  - Path traversal injection in matchGUID (`../`, `..\`, special chars, slashes): PASS (safely rejected)
-  - Windows file descriptor release before `os.Rename`: PASS (handle closed, atomic rename retry loop)
-  - Concurrent downloads to same directory: PASS (distinct GUIDs 100% pass; identical GUID stampede invariant held)
-  - PsyNet connection drop & transparent reconnect: PASS (re-established socket and re-polled)
-  - Context cancellation during HTTP download and auth: PASS (immediate termination, temp files unlinked)
+  - 4v4 Chaos match rosters (8 players) and spectator isolation: PASS
+  - Extreme stat numbers (99999 score, 99 goals) and text overflow: PASS
+  - Undefined/null stats object handling: PASS
+  - XSS injection in player names: PASS
+  - Custom column toggles (from 0 to 10 columns): PASS (1:1 header-cell parity)
+  - Zero-scroll height budget (< 500px stack height): PASS (~378px 3v3, ~416px 4v4)
 - **Vulnerabilities found**:
-  - Minor: `SteamAuthProvider.Refresh` masks underlying network errors when refreshing EOS token.
-  - Minor: `SteamAuthProvider.Authenticate` does not re-check `ctx.Err()` immediately after `ExchangeEOSTokenFromSteam`.
-  - Minor: `atomicRename` 50ms default retry window can encounter transient contention during 20-goroutine stampedes on identical target file.
-- **Untested angles**: none within M2 scope.
+  - Advisory: `getPlatformIcon` parameter coercion `(platform || '').toLowerCase()`.
+  - Advisory: `MatchDetailModal.tsx` team header displays overall score only (not goals).
+- **Untested angles**: none within M2 scope

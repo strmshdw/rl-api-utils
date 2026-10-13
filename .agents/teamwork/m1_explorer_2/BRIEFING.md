@@ -1,7 +1,7 @@
-# BRIEFING — 2026-10-06T08:56:00Z
+# BRIEFING — 2026-10-06T11:28:45Z
 
 ## Mission
-Investigate Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) focusing on internal/session and downstream consumers (SessionTracker.OnActiveMatchUpdated, DeepClone propagation of IsDisconnected, models.go, SSE/REST exposure).
+Investigate Milestone 1 (R1: True In-Game MMR Conversion) focusing on downstream session tracking in internal/session and JSON API handling in internal/daemon. Detail how LocalPlayer.CurrentRank.MMR drives StartingMMR, EndingMMR, MMRDelta, and JSON API responses (/api/current-match, /api/session, /api/players), and formulate the exact test plan.
 
 ## 🔒 My Identity
 - Archetype: teamwork_preview_explorer
@@ -11,6 +11,8 @@ Investigate Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Di
 - Milestone: Milestone 1 - Storage & Configuration
 - Current identity (2026-10-06): m1_explorer_2 (Milestone M1 - Requirement R2: Persistent Player State on Disconnect)
 - Current parent: f26416a7-29be-4b99-8406-d28bf983644d (orchestrator_6)
+- Current identity (2026-10-06T11:20:19Z): m1_explorer_2 (Milestone 1 - True In-Game MMR Conversion: Session Tracking & JSON API Handling)
+- Current parent: 18e4e66b-5835-4b6b-bd1e-a34092f47346 (parent)
 
 ## 🔒 Key Constraints
 - Read-only investigation — do NOT implement production source code directly
@@ -22,42 +24,43 @@ Investigate Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Di
 - Unit test strategy (jsonstore_test.go)
 - Read-only investigation for Milestone M1 (Requirement R2)
 - Focus on internal/session, SessionTracker.OnActiveMatchUpdated, DeepClone propagation of IsDisconnected, models.go, and SSE/REST exposure
+- Read-only investigation for Milestone 1: downstream session tracking in internal/session and JSON API handling in internal/daemon
+- Detail how LocalPlayer.CurrentRank.MMR drives starting/ending MMR, MMRDelta, and JSON API responses (/api/current-match, /api/session, /api/players)
+- Formulate exact test plan for session tracker MMR delta tests and daemon API tests on in-game MMR scale
 
 ## Current Parent
-- Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
-- Updated: 2026-10-06T08:48:03Z
+- Conversation ID: 18e4e66b-5835-4b6b-bd1e-a34092f47346
+- Updated: 2026-10-06T11:28:45Z
 
 ## Investigation State
 - **Explored paths**:
-  - `d:\code\rl-api-utils\PROJECT.md:44-105` (Interface contracts for LobbyPlayer, SessionMatchPlayer, API contracts)
-  - `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md:231-257` (Requirement R2 and R3 specifications)
-  - `d:\code\rl-api-utils\.agents\teamwork\survey_explorer_state_1\handoff.md` (State architecture, root causes)
-  - `d:\code\rl-api-utils\internal\session\session.go` (SessionTracker, RecordActiveMatch, ConcludeMatch, Reset)
-  - `d:\code\rl-api-utils\internal\session\models.go` (SessionMatchPlayer, SessionMatchDetail, SessionResponse, DeepClone)
-  - `d:\code\rl-api-utils\internal\session\broadcaster.go` (EventBroadcaster, Subscribe, Broadcast)
-  - `d:\code\rl-api-utils\internal\daemon\sse.go` (handleEvents, initial snapshots, keepalive)
-  - `d:\code\rl-api-utils\internal\daemon\handlers_players.go` (handleCurrentMatch)
-  - `d:\code\rl-api-utils\internal\daemon\handlers_session.go` (handleGetSession, handleResetSession)
-  - `d:\code\rl-api-utils\web\src\types\api.ts` (TypeScript API types)
-  - `d:\code\rl-api-utils\web\src\components\live\PlayerRow.tsx` & `web\src\components\session\MatchDetailModal.tsx`
+  - `ORIGINAL_REQUEST.md:259-288` (Requirement R1: True In-Game MMR Conversion)
+  - `orchestrator_8\PROJECT.md:1-75` (Milestone 1 scope, architecture, contracts)
+  - `survey_explorer_backend\handoff.md:1-388` (Backend survey, rank client, conversion formula, data flow)
+  - `internal/session/models.go:1-190` (PlaylistSessionStats, SessionMatchPlayer, SessionMatchDetail, SessionResponse)
+  - `internal/session/session.go:1-469` (RecordActiveMatch, ConcludeMatch, Reset, GetSessionSummary, roundFloat)
+  - `internal/session/session_test.go:1-1154` (Existing test suite)
+  - `internal/daemon/handlers_players.go:1-213` (handleCurrentMatch, handleListPlayers, handleGetPlayer)
+  - `internal/daemon/handlers_session.go:1-49` (handleGetSession, handleResetSession)
+  - `internal/daemon/sse.go:1-118` (handleEvents, FormatSSE)
+  - `internal/daemon/web_test.go:1-380` & `daemon_test.go:1-200`
 - **Key findings**:
-  - `SessionTracker.OnActiveMatchUpdated` delegates directly to `RecordActiveMatch(match)`. It accepts `*playertrack.CurrentMatchResponse` and sets `s.currentMatch = match.DeepClone()`.
-  - `LobbyPlayer.DeepClone()` uses value copying (`clone := p`). Adding `IsDisconnected bool` to `LobbyPlayer` ensures that `CurrentMatchResponse.DeepClone()` automatically preserves `IsDisconnected` across `LocalPlayer`, `Teammates`, `Opponents`, and `Spectators`.
-  - `internal/session/models.go` currently lacks `IsDisconnected bool json:"is_disconnected,omitempty"` on `SessionMatchPlayer`.
-  - In `session.go:ConcludeMatch`, `SessionMatchPlayer` is instantiated without copying `IsDisconnected` from `playertrack.LobbyPlayer`. Adding `IsDisconnected: lp.IsDisconnected` ensures match history accurately retains disconnect status.
-  - In `SessionMatchPlayer.DeepClone()`, pointer fields such as `Won *bool` (for M2) must be deep-copied if present, while `IsDisconnected` is copied by value.
-  - SSE serialization (`EventMatchUpdate`, `EventMatchEnded`, `EventSessionUpdate`) in `internal/daemon/sse.go` marshals `ev.Data` directly using `json.Marshal`. No code changes are required in `sse.go` or handlers; updating the data models in `session` and `playertrack` propagates seamlessly to SSE and REST.
-  - In `ConcludeMatch`, `blueScore` and `orangeScore` are computed by summing `lp.Stats.Goals` from `allPlayers`. Retaining disconnected players in `allPlayers` guarantees their goals are counted in final team scores.
-- **Unexplored areas**: None for `internal/session` M1 scope.
+  - `internal/session` and `internal/daemon` are scale-agnostic and consume `LocalPlayer.CurrentRank.MMR` directly.
+  - Zero modifications to production source code in `internal/session` or `internal/daemon` are required.
+  - In `session.go`, `startingMMR`, `endingMMR`, `mmrChange`, and `MMRDelta` seamlessly evaluate to in-game numbers (`1050`, `1059`, `+9.0`).
+  - Asynchronous late-arriving ranks are automatically handled by lines 184-201 of `session.go`.
+  - Casual playlist 0.0 MMR is preserved by the `startingMMR > 0 && endingMMR > 0` condition.
+  - Formulated and authored `proposed_session_mmr_test.go` and `proposed_daemon_mmr_test.go` with full coverage.
+- **Unexplored areas**: None for M1 session tracking & daemon APIs.
 
 ## Key Decisions Made
-- Confirmed that `CurrentMatchResponse.DeepClone()` and `SessionResponse.DeepClone()` propagate `IsDisconnected` cleanly without risk of data races.
-- Defined model additions in `internal/session/models.go`: add `IsDisconnected bool json:"is_disconnected,omitempty"` and `Won *bool json:"won,omitempty"` to `SessionMatchPlayer`.
-- Defined logic updates in `internal/session/session.go:ConcludeMatch`: map `lp.IsDisconnected` to `SessionMatchPlayer.IsDisconnected` and calculate `Won`.
-- Designed comprehensive test scenarios for `internal/session/session_test.go` verifying active match disconnect retention, SSE event delivery, match conclusion goal aggregation, and deep-clone isolation.
+- Confirmed that no production code modifications are required in `internal/session` or `internal/daemon`.
+- Authored 2 comprehensive test suites (`proposed_session_mmr_test.go` and `proposed_daemon_mmr_test.go`) for the implementer to incorporate into `internal/session` and `internal/daemon`.
 
 ## Artifact Index
 - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\BRIEFING.md` — Persistent working memory
 - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\progress.md` — Liveness heartbeat
 - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\DISPATCH.md` — Received instructions and mission log
-- `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md` — Comprehensive exploration report for M1
+- `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_session_mmr_test.go` — Proposed session MMR unit tests
+- `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_daemon_mmr_test.go` — Proposed daemon API integration tests
+- `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md` — Complete handoff report for M1 session tracking & daemon APIs

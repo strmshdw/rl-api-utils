@@ -1,36 +1,35 @@
 # Dispatch: m2_reviewer_2
 
-**Milestone**: M2 - Auth & PsyNet Integration
-**Role**: Reviewer 2 (Independent Architecture & Robustness Review)
+## Mission & Role
+You are `m2_reviewer_2`, an independent reviewer for Milestone 2: Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment (R2 & R3).
+Working directory: `d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2`
 
-## Scope
-Independently review the Milestone 2 implementation delivered by `m2_worker_1`:
-- Examine `internal/auth` and `internal/psynet` for architectural cleanliness, error handling, thread safety, and edge case resilience.
-- Verify repository-wide compatibility and non-regression:
-  ```powershell
-  $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-  cd d:\code\rl-api-utils
-  go test -v -count=1 ./internal/auth/...
-  go test -v -count=1 ./internal/psynet/...
-  go test -count=1 ./...
-  go vet ./internal/auth/... ./internal/psynet/...
-  ```
-- Check Clean Architecture boundaries: no circular dependencies, proper interface usage.
-- Provide verdict (APPROVE or REQUEST_CHANGES) in `d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2\handoff.md` and notify parent via `send_message`.
+## Scope & Verification Tasks
+Review the frontend UX overhaul and acceptance criteria compliance:
+1. Verify visual hierarchy, high-contrast team groupings (Blue vs Orange), and broadcast-style styling.
+2. Verify zero vertical scrolling on standard 1080p viewports (stack height <= 416px, leaving > 500px headroom).
+3. Verify disconnected player treatment preserves all stats, team placement, and outcome logging.
+4. Verify parity between live game view and `MatchDetailModal.tsx` for concluded match box scores.
+5. Run tests and builds:
+   - `cd web; npm test -- --run`
+   - `npm run build`
+   - `cd ..; go build ./cmd/rl-sync`
+6. State your verdict clearly as `APPROVE` or `REQUEST_CHANGES` in your handoff report.
 
-## 2026-09-25T03:51:30Z
+## Inputs
+- `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T11:02:53Z`)
+- `d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md`
+- `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md`
+
+## Output
+Write your handoff report to `d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2\handoff.md`.
+
+## 2026-10-06T12:18:38Z
 You are m2_reviewer_2.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md.
-
-Independently review Milestone 2:
-1. Examine internal/auth and internal/psynet for code quality, error handling, Windows atomic rename safety, and Clean Architecture conformance.
-2. Run tests across the repository:
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/auth/...
-   go test -v -count=1 ./internal/psynet/...
-   go test -count=1 ./...
-   go vet ./internal/auth/... ./internal/psynet/...
-3. Provide your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2\handoff.md and notify parent via send_message.
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2
+Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md, and d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2\DISPATCH.md.
+Review Milestone 2 UX overhaul, 1080p zero-scroll compliance, and disconnected player treatment.
+Run tests and build (npm test -- --run, npm run build, and go build ./cmd/rl-sync).
+State your verdict clearly as APPROVE or REQUEST_CHANGES in:
+d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_2\handoff.md
+Send message to parent when done.

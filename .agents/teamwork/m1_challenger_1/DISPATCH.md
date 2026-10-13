@@ -1,31 +1,33 @@
-# DISPATCH: m1_challenger_1
+# Dispatch: m1_challenger_1
 
-## Objective
-Empirically verify the correctness of Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) using stress testing and edge-case execution.
+## Mission & Role
+You are `m1_challenger_1`, an adversarial challenger for Milestone 1: True In-Game MMR Conversion (R1).
+Working directory: `d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1`
 
-## Verification Focus
-1. **Adversarial Scenarios**:
-   - Reconnections: rapid connect-disconnect-reconnect cycles.
-   - Splitscreen players: ensure `Steam|id|0` and `Steam|id|1` are tracked independently if one leaves early.
-   - Simultaneous drops: multiple players dropping at once across both teams.
-   - Casual bot backfills: verify that departed AI bots are never retained as disconnected ghosts.
-   - Local player disconnect: confirm local team context is preserved for the entire match.
-2. **Execute Tests**:
-   - Run tests directly: `go test -v ./internal/playertrack/...`, `go test -v ./internal/session/...`.
-   - Write or execute an adversarial test or benchmark if needed.
+## Scope & Objective
+Empirically stress-test the `ConvertSkillRatingToMMR` formula and `ParseRanksJSON` migration:
+1. Floating-point precision, half-integer rounding (`.25` vs `.24` vs `.26`), exact integers.
+2. Boundary testing around `0.0`, `150.0`, `150.000001`, `149.999999`.
+3. Negative values (`-0.0001`, `-10.0`, `-100.0`), extreme high ratings (`125.0`, `140.0`, `2500.0`).
+4. Idempotency property: `Convert(Convert(x)) == Convert(x)` across all inputs.
+5. Legacy JSON serialization/deserialization fuzzing.
 
-Deliver verdict (`APPROVE` or `REJECT`) with empirical test logs in `d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\handoff.md` and send message back to orchestrator_6.
+Write and execute adversarial tests, report results, and state verdict (`APPROVE` or `REJECT`) in `handoff.md`.
 
+## Inputs
+- `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T11:02:53Z`)
+- `d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md`
+- `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md`
 
-## 2026-10-06T09:11:18Z
-You are m1_challenger_1, an adversarial verifier for Milestone M1 (Requirement R2: Persistent Player State on Disconnect).
+## Output
+Write your handoff report to `d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\handoff.md`.
+
+## 2026-10-06T11:37:22Z
+You are m1_challenger_1.
 Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1
-
-You MUST read:
-1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
-2. Project specification: d:\code\rl-api-utils\PROJECT.md
-3. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\DISPATCH.md
-4. Worker handoff report: d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md
-
-Empirically verify edge cases: reconnections without duplicates, casual bot backfill exclusion, local player disconnect fallback, simultaneous drops. Run target and full tests.
-Deliver your verdict (APPROVE or REJECT) in d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\handoff.md and notify orchestrator_6.
+Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md, and d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\DISPATCH.md.
+Stress test ConvertSkillRatingToMMR for floating-point precision, rounding boundaries, casual 0.0, idempotency > 150.0, and legacy ParseRanksJSON migration.
+Write and run adversarial test harnesses.
+State your verdict clearly (APPROVE or REJECT) in:
+d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1\handoff.md
+Send a message to parent when done.

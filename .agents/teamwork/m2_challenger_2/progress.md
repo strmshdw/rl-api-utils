@@ -1,29 +1,24 @@
 # Progress: m2_challenger_2
 
-- Last visited: 2026-09-24T20:56:55-07:00
+- Last visited: 2026-10-06T12:26:30Z
 - Status: Complete (Verdict: APPROVE)
-- Current Step: Handoff and parent notification
+- Current Step: Handoff report compilation and parent notification
 
 ## Steps
-1. [x] Read ORIGINAL_REQUEST.md, PROJECT.md, DISPATCH.md, and m2_worker_1/handoff.md
-2. [x] Analyze internal/psynet implementation (downloader.go, client.go) and tests
-3. [x] Run baseline test suite (`go test ./internal/psynet/...`)
-4. [x] Construct adversarial stress tests for ReplayDownloader:
-   - [x] 0-byte, 1-byte, 500-byte, 1023-byte payloads rejected with ErrReplayTooSmall
-   - [x] 1024-byte boundary, 1025-byte, 64KB, 1MB, 5MB valid TAGAME replays accepted
-   - [x] 400, 401, 403, 404, 410, 429, 500, 502, 503, 504 HTTP status errors return HTTPStatusError and leave zero disk footprint
-   - [x] Mid-stream connection truncation (64B and 4KB) and server hanging timeouts
-   - [x] Temp file cleanup on Windows (handle closed before file deletion)
-   - [x] Comprehensive path traversal matrix (`../`, `..\`, absolute paths, volume separators, illegal Windows characters, whitespace)
-   - [x] Windows file contention (30 distinct workers, 5-worker controlled contention, 20-worker stampede invariants)
-   - [x] Failed re-download preserves original valid replay on disk
-   - [x] CleanupStaleTempFiles edge cases (50 stale files, valid replays preserved, unrelated files preserved)
-5. [x] Construct adversarial stress tests for MatchHistoryProvider:
-   - [x] Empty ReplayURL multi-cycle progression
-   - [x] Malformed/empty match GUIDs skipped, zero timestamp default applied
-   - [x] Connection drop mid-query transparent reconnect (EOF, ErrConnectionClosed, consecutive drops)
-   - [x] Context cancellation and deadline exceeded without hanging
-   - [x] Concurrency and idempotent Close
-   - [x] Invalid credentials handling (unsupported platform, missing SteamID)
-6. [x] Execute adversarial test suite via `go test` (31 tests pass across 5 iterations; 0 go vet warnings; 82.4% statement coverage)
-7. [x] Document findings, create handoff.md, and notify parent
+1. [x] Read ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), PROJECT.md, m2_worker_1/handoff.md, and DISPATCH.md.
+2. [x] Analyzed PlayerRow.tsx, RosterTable.tsx, MatchDetailModal.tsx, and LiveGameView.tsx for disconnected player UX, stat retention, and team score aggregation.
+3. [x] Authored comprehensive empirical adversarial test suite in `web/src/components/live/DisconnectedPlayer.adversarial.test.tsx` (24 stress tests):
+   - [x] Suite 1: Disconnected visual styling (`opacity-65 saturate-60 hover:opacity-85`) and badge specification (`data-testid="badge-disconnected"` with `WifiOff` icon, text, title, local player 'YOU'+'DISCONNECTED', bot 'BOT'+'DISCONNECTED', all platforms).
+   - [x] Suite 2: Active connected player isolation & negation (active players omit styling/badge, strict 1:1 row isolation in mixed rosters).
+   - [x] Suite 3: Stat retention & leaderboard sorting invariants (all stat columns preserved verbatim, score-descending sort invariant puts high-score disconnected player top of roster).
+   - [x] Suite 4: Team goals & score aggregation stress engine (mixed rosters, 100% disconnected teams, empty rosters, 30-player randomized stress harness matching arithmetic sum).
+   - [x] Suite 5: Concluded match parity in `MatchDetailModal.tsx` (Blue & Orange disconnected player handling, active negation, null match safety).
+   - [x] Suite 6: Dynamic reconnection lifecycle & state transitions (6-frame live match lifecycle: active -> score -> disconnect -> reconnect -> final outcome, 10-cycle flapping connection stress test).
+   - [x] Suite 7: LiveGameView component tree & column configuration mutation resiliency.
+   - [x] Suite 8: Extreme boundary & resiliency stress harness (Unicode/HTML entities, 100k score, undefined rank/matchup).
+4. [x] Executed Vitest test suite: 13/13 test files passed, 197/197 tests passed cleanly (100% pass rate).
+5. [x] Executed frontend production build: `npm run build` completed cleanly, bundling into `internal/web/dist`.
+6. [x] Full Go test suite execution (`go test -count=1 ./...`): 14/14 packages passed (100% pass rate).
+7. [x] Standalone executable compilation (`go build ./cmd/rl-sync`): compiled cleanly with exit code 0.
+8. [x] Updated BRIEFING.md with complete situational awareness.
+9. [x] Compile handoff.md with verdict APPROVE and notify parent.

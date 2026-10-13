@@ -1,829 +1,431 @@
-# Handoff Report: Milestone M1 (Requirement R2: Persistent Player State on Disconnect)
-
-**Agent**: `m1_explorer_1`  
-**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1`  
-**Date**: 2026-10-06T08:55:00Z  
-**Type**: Hard Handoff  
-**Target Milestone**: M1 (Persistent Player State on Mid-Game Disconnect)  
-
----
+# Handoff Report: Milestone 1 - True In-Game MMR Conversion (R1)
 
 ## 1. Observation
 
-### 1.1 Ingestion Dynamics of `MatchStatsExporter_TA`
-Rocket League's local Stats API exporter (`MatchStatsExporter_TA`) communicates over WebSocket/TCP and emits two primary match lifecycle events received by `internal/statsapi/listener.go`:
-1. `UpdateState` (`internal/statsapi/listener.go:292-329`):
-   ```go
-   292: 	case "UpdateState":
-   293: 		guid := msg.Data.MatchGUID
-   ...
-   302: 		players := msg.Data.Players
-   ...
-   328: 		if err := h.OnUpdateState(ctx, guid, playlistID, players); err != nil {
-   ```
-   **Critical Behavioral Fact**: In `UpdateState`, `msg.Data.Players` (`[]statsapi.StatsPlayer`) contains **only the players currently connected to the server in that frame**. When a player quits to main menu, leaves the lobby, or loses connection, Rocket League does not emit a dedicated "PlayerDisconnected" event; instead, that player is silently absent from `msg.Data.Players` in all subsequent frames.
+### 1.1 Ingestion Layer & Single Conversion Chokepoint
+- **File: `internal/playertrack/rank_client.go` (Lines 1–19, 616–675)**:
+  `internal/playertrack/rank_client.go` currently imports:
+  ```go
+  package playertrack
 
-2. `MatchEnded` (`internal/statsapi/listener.go:331-355`):
-   ```go
-   331: 	case "MatchEnded":
-   ...
-   339: 		winner := msg.Data.WinnerTeamNum
-   340: 		if err := h.OnMatchEnded(ctx, guid, winner); err != nil {
-   ```
-   **Critical Behavioral Fact**: The `MatchEnded` event carries **only** `WinnerTeamNum` (0 for Blue, 1 for Orange). It contains **no player rosters or box score statistics**. `Tracker.OnMatchEnded` depends 100% on the cached state stored in `t.currentMatch` compiled during preceding `UpdateState` events.
+  import (
+  	"context"
+  	"encoding/json"
+  	"errors"
+  	"fmt"
+  	"log/slog"
+  	"net"
+  	"strconv"
+  	"strings"
+  	"sync"
 
----
+  	"github.com/dank/rl-api-utils/internal/auth"
+  	"github.com/dank/rl-api-utils/internal/config"
+  	"github.com/dank/rl-api-utils/internal/psynet"
+  	"github.com/dank/rlapi"
+  )
+  ```
+  Note: `"math"` is **not** currently imported.
 
-### 1.2 The Root Cause of Active Player & Stats Loss in `Tracker.OnUpdateState`
-In `internal/playertrack/tracker.go:368-483`:
-```go
-368: 	var teammates []LobbyPlayer
-369: 	var opponents []LobbyPlayer
-370: 	var spectators []LobbyPlayer
-371: 	var localPlayerLobby *LobbyPlayer
-...
-448: 		lp := LobbyPlayer{
-449: 			PlayerID: p.PrimaryId,
-450: 			Platform: platform,
-451: 			Name:     p.Name,
-452: 			TeamNum:  p.TeamNum,
-453: 			IsLocal:  isLocal,
-454: 			IsBot:    isBot,
-455: 			Stats: PlayerStatsSummary{
-456: 				Score:   p.Score,
-457: 				Goals:   p.Goals,
-458: 				Assists: p.Assists,
-459: 				Saves:   p.Saves,
-460: 				Shots:   p.Shots,
-461: 				Demos:   p.Demos,
-462: 			},
-463: 			CurrentRank:   currentRank,
-464: 			Ranks:         ranksSnapshot,
-465: 			MatchupRecord: matchupRecord,
-466: 		}
-...
-479: 	t.currentMatch.LocalPlayer = localPlayerLobby
-480: 	t.currentMatch.Teammates = teammates
-481: 	t.currentMatch.Opponents = opponents
-482: 	t.currentMatch.Spectators = spectators
+  Lines 616–675 define `PlayerPlaylistRank`, `FromSkill`, `BuildRanksSnapshot`, and `SerializeRanksJSON`:
+  ```go
+  type PlayerPlaylistRank struct {
+  	PlaylistID    int     `json:"playlist_id"`
+  	PlaylistName  string  `json:"playlist_name"`
+  	Tier          int     `json:"tier"`
+  	Division      int     `json:"division"`
+  	RankName      string  `json:"rank_name"`
+  	MMR           float64 `json:"mmr"`
+  	MatchesPlayed int     `json:"matches_played"`
+  }
+
+  type PlayerRanksSnapshot map[string]PlayerPlaylistRank
+
+  func (s PlayerRanksSnapshot) GetRank(playlistID int) (PlayerPlaylistRank, bool) {
+  	if s == nil {
+  		return PlayerPlaylistRank{}, false
+  	}
+  	rank, ok := s[strconv.Itoa(playlistID)]
+  	return rank, ok
+  }
+
+  func FromSkill(s rlapi.Skill) PlayerPlaylistRank {
+  	return PlayerPlaylistRank{
+  		PlaylistID:    s.Playlist,
+  		PlaylistName:  FormatPlaylist(s.Playlist),
+  		Tier:          s.Tier,
+  		Division:      s.Division,
+  		RankName:      FormatRank(s.Tier, s.Division),
+  		MMR:           s.MMR, // Line 647: raw s.MMR copied directly
+  		MatchesPlayed: s.MatchesPlayed,
+  	}
+  }
+
+  func BuildRanksSnapshot(skills []rlapi.Skill) PlayerRanksSnapshot {
+  	snapshot := make(PlayerRanksSnapshot, len(skills))
+  	for _, s := range skills {
+  		key := strconv.Itoa(s.Playlist)
+  		snapshot[key] = FromSkill(s)
+  	}
+  	return snapshot
+  }
+
+  func SerializeRanksJSON(skills []rlapi.Skill) (string, error) {
+  	if len(skills) == 0 {
+  		return "{}", nil
+  	}
+  	snapshot := BuildRanksSnapshot(skills)
+  	data, err := json.Marshal(snapshot)
+  	if err != nil {
+  		return "{}", fmt.Errorf("failed to serialize ranks to JSON: %w", err)
+  	}
+  	return string(data), nil
+  }
+  ```
+
+- **File: `internal/playertrack/tracker.go` (Lines 984–1034)**:
+  In `fetchRanksBatch`, rank telemetry received from PsyNet (`rlapi.Skill`) is processed exclusively through `BuildRanksSnapshot` and `SerializeRanksJSON`:
+  ```go
+  snapshot := BuildRanksSnapshot(skills)
+  t.rankCache[idStr] = cachedRankEntry{
+  	snapshot:  snapshot,
+  	fetchedAt: now,
+  }
+
+  if t.currentMatch != nil {
+  	t.updateLobbyPlayerRanksLocked(idStr, snapshot)
+  }
+
+  ranksJSON, serErr := SerializeRanksJSON(skills)
+  if serErr == nil {
+  	toPersist = append(toPersist, struct {
+  		playerID  string
+  		ranksJSON string
+  	}{playerID: idStr, ranksJSON: ranksJSON})
+  }
+  ...
+  listener := t.listener
+  t.mu.Unlock()
+
+  if listener != nil && rankSnapshot != nil {
+  	listener.OnActiveMatchUpdated(rankSnapshot)
+  }
+  ```
+  `FromSkill` is therefore the solitary chokepoint through which incoming PsyNet skill telemetry enters the application runtime.
+
+### 1.2 Legacy Deserialization Layer
+- **File: `internal/playertrack/rank_client.go` (Lines 679–713)**:
+  ```go
+  func ParseRanksJSON(raw string) (PlayerRanksSnapshot, error) {
+  	trimmed := strings.TrimSpace(raw)
+  	if trimmed == "" || trimmed == "{}" {
+  		return make(PlayerRanksSnapshot), nil
+  	}
+
+  	var snapshot PlayerRanksSnapshot
+  	if err := json.Unmarshal([]byte(trimmed), &snapshot); err != nil {
+  		return nil, fmt.Errorf("failed to unmarshal ranks_json: %w", err)
+  	}
+
+  	// Normalization & backfill pass for legacy or partial data
+  	for key, rank := range snapshot {
+  		changed := false
+  		if rank.PlaylistID == 0 {
+  			if pid, err := strconv.Atoi(key); err == nil {
+  				rank.PlaylistID = pid
+  				changed = true
+  			}
+  		}
+  		if rank.PlaylistName == "" && rank.PlaylistID != 0 {
+  			rank.PlaylistName = FormatPlaylist(rank.PlaylistID)
+  			changed = true
+  		}
+  		if rank.RankName == "" {
+  			rank.RankName = FormatRank(rank.Tier, rank.Division)
+  			changed = true
+  		}
+  		if changed {
+  			snapshot[key] = rank
+  		}
+  	}
+
+  	return snapshot, nil
+  }
+  ```
+  `ParseRanksJSON` contains an existing backfill normalization pass, which currently checks `rank.PlaylistID == 0`, `rank.PlaylistName == ""`, and `rank.RankName == ""`.
+
+### 1.3 Downstream Session Tracking & MMR Delta Computations
+- **File: `internal/session/models.go` (Lines 50–60, 85, 116–118)**:
+  ```go
+  type PlaylistSessionStats struct {
+  	InitialMMR    float64 `json:"initial_mmr"`
+  	CurrentMMR    float64 `json:"current_mmr"`
+  	MMRDelta      float64 `json:"mmr_delta"`
+  }
+  type SessionMatchPlayer struct {
+  	MMR float64 `json:"mmr"`
+  }
+  type SessionMatchDetail struct {
+  	StartingMMR float64 `json:"starting_mmr"`
+  	EndingMMR   float64 `json:"ending_mmr"`
+  	MMRChange   float64 `json:"mmr_change"`
+  }
+  ```
+- **File: `internal/session/session.go` (Lines 146–179, 320–328)**:
+  `RecordActiveMatch` reads `match.LocalPlayer.CurrentRank.MMR` directly into `startingMMR` and `InitialMMR`/`CurrentMMR`.
+  `ConcludeMatch` reads `match.LocalPlayer.CurrentRank.MMR` into `endingMMR` and computes `mmrChange = roundFloat(endingMMR-startingMMR, 2)`.
+  When `CurrentRank.MMR` holds true in-game MMR, all session metrics immediately compute deltas on the true in-game MMR scale without needing code modifications in `internal/session`.
+
+### 1.4 Database Storage (SQLite & JSONStore)
+- **File: `internal/storage/sqlite.go` (Lines 48–56, 1015–1042)** and **`internal/storage/jsonstore.go` (Lines 17–25)**:
+  The `players` table defines `ranks_json TEXT NOT NULL DEFAULT '{}'`. Neither engine inspects or validates the contents of `ranks_json`; it is stored and retrieved as an opaque string. No database schema migration (`ALTER TABLE`) is needed.
+
+### 1.5 Existing Test Fixtures with Pre-Scaled MMR (> 150.0)
+- Multiple test suites across the repository initialize mock `rlapi.Skill` payloads with already-scaled in-game MMR values:
+  - `internal/playertrack/tracker_test.go:881`: `MMR: 1150.5`
+  - `internal/playertrack/tracker_test.go:979`: `MMR: 1200.0`
+  - `internal/playertrack/rank_client_test.go:321`: `MMR: 1150.5`, Line 328: `MMR: 1080.2`
+  - `internal/playertrack/tracker_stress_test.go:90`: `MMR: 1150.0`, Line 91: `MMR: 1080.0`
+  - `test/e2e/playertrack_e2e_test.go:230`: `1040.0`, `1055.0`, `1120.0`, `1005.0`
+  - `test/e2e/tier5_pt_adversarial_test.go:410-413`: `1040.0`, `1055.0`, `1120.0`, `1005.0`
+  - `test/e2e/tier5_dashboard_adversarial_test.go:60-63`: `1040.0`, `1055.0`, `1120.0`, `1005.0`
+  - Casual playlist tests across `internal/session/session_test.go:284` and `stress_challenger_test.go:242`: `MMR: 0.0`.
+
+All existing Go tests currently pass cleanly:
+```powershell
+go test ./internal/playertrack -> ok (cached)
+go test ./internal/session -> ok (cached)
+go test ./internal/storage ./internal/daemon -> ok (cached)
+go test ./test/e2e -> ok (cached)
 ```
-- **Direct Observation**: At line 368, `teammates`, `opponents`, and `spectators` are allocated as empty slices. The loop at lines 379-478 iterates strictly over the incoming `players` slice.
-- At lines 479-482, `t.currentMatch.Teammates`, `t.currentMatch.Opponents`, and `t.currentMatch.Spectators` are overwritten directly by these newly populated slices.
-- If a player was present in frame $N$ with 3 goals and 450 score, but leaves before frame $N+1$, frame $N+1$ allocates fresh empty slices, processes only the remaining players, and completely discards the departing player and all accumulated box score stats.
-- Downstream propagation: `t.listener.OnActiveMatchUpdated(matchClone)` informs `SessionTracker.RecordActiveMatch` (`internal/session/session.go:142`), which clones the purged roster and broadcasts an SSE `EventMatchUpdate`. Web clients and `GET /current-match` instantly lose the player.
-
----
-
-### 1.3 Missing Disconnect Flag in Models
-In `internal/playertrack/tracker.go:49-60`:
-```go
-49: type LobbyPlayer struct {
-50: 	PlayerID      string                 `json:"player_id"`                // PrimaryId (e.g. "Steam|76561198...|0")
-51: 	Platform      string                 `json:"platform"`                 // "Steam", "Epic", "Unknown"
-52: 	Name          string                 `json:"name"`                     // In-game display name
-53: 	TeamNum       int                    `json:"team_num"`                 // 0 = Blue, 1 = Orange, 255 = Spectator
-54: 	IsLocal       bool                   `json:"is_local"`                 // True if this is the authenticated user
-55: 	IsBot         bool                   `json:"is_bot"`                   // True if AI bot ("Unknown|0|0")
-56: 	Stats         PlayerStatsSummary     `json:"stats"`                    // Real-time in-game box score
-57: 	CurrentRank   *PlayerPlaylistRank    `json:"current_rank,omitempty"`   // Rank for active match playlist
-58: 	Ranks         PlayerRanksSnapshot    `json:"ranks,omitempty"`          // Full snapshot across all playlists
-59: 	MatchupRecord *storage.PlayerMatchup `json:"matchup_record,omitempty"` // H2H record in this playlist
-60: }
-```
-- **Direct Observation**: `LobbyPlayer` currently lacks any boolean indicator to signal whether a participant is actively connected or disconnected.
-- Similarly, `internal/session/models.go:72-85` (`SessionMatchPlayer`) and `web/src/types/api.ts:82-93` lack `is_disconnected`.
-
----
-
-### 1.4 Cascading Failure on Local Player Disconnect
-In `internal/playertrack/tracker.go:321, 361-366, 608-619`:
-```go
-321: 	resolvedLocal, myTeamNum := t.resolveLocalPlayer(ctx, players)
-...
-361: 	if myTeamNum == 0 || myTeamNum == 1 {
-362: 		val := myTeamNum
-363: 		t.currentMatch.LocalTeam = &val
-364: 	} else {
-365: 		t.currentMatch.LocalTeam = nil
-366: 	}
-```
-And in `OnMatchEnded`:
-```go
-608: 	if localPlayer == nil || localTeam == nil || (*localTeam != 0 && *localTeam != 1) {
-609: 		matchClone := matchState.DeepClone()
-610: 		listener := t.listener
-611: 		t.mu.Unlock()
-612: 		t.logger.Warn("match ended but local player not playing on a valid team; skipping matchup outcomes",
-613: 			slog.String("match_guid", trimmedGUID),
-614: 		)
-...
-618: 		return nil
-619: 	}
-```
-- If the local player disconnects mid-game (or is omitted from a frame):
-  1. `t.resolveLocalPlayer` returns `nil, -1`.
-  2. Line 365 sets `t.currentMatch.LocalTeam = nil`.
-  3. Lines 470-476 categorize ALL remaining players into `spectators` because `(myTeamNum == 0 || myTeamNum == 1)` evaluates to `false`!
-  4. Line 479 sets `t.currentMatch.LocalPlayer = nil`.
-  5. When `OnMatchEnded` fires, lines 608-619 hit `localPlayer == nil` and completely abort matchup outcome compilation for all players.
-
----
-
-### 1.5 Verification of Existing Test Suite
-- Executed `go test ./internal/playertrack/...`: 100% pass rate.
-- Executed `go test ./...`: 100% pass rate across all 14 project packages.
-- Grep search confirms zero existing unit tests simulate a mid-game player disconnect.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Premise**: `MatchStatsExporter_TA` sends only connected players in each `UpdateState` event. Disconnecting players are simply omitted (Observation 1.1).
-2. **Root Cause 1**: `Tracker.OnUpdateState` operates as a stateless overwrite, wiping previous participant slices without retaining participants from earlier frames of the same match (Observation 1.2).
-3. **Root Cause 2**: `resolveLocalPlayer` failure wipes `LocalTeam` and categorizes all remaining players as spectators, then aborts match outcome recording on match end (Observation 1.4).
-4. **Differential Retention Formulation**:
-   - Within the active `matchGUID`, `t.currentMatch` holds the accumulated roster state from preceding frames.
-   - For an ongoing match (`t.currentMatch != nil && t.currentMatch.MatchGUID == trimmedGUID`), all previously recorded participants must be preserved across frames.
-   - Any player absent from the incoming `players` slice must NOT be deleted. Instead, their previous record must be retained, flagged with `IsDisconnected = true`, and their accumulated box scores (`Score`, `Goals`, `Assists`, `Saves`, `Shots`, `Demos`) preserved at their last known values.
-   - When a disconnected player reconnects, they reappear in `players`. The algorithm processes them as active (`IsDisconnected = false`), updates their stats to the latest values, and marks them in `seenThisFrame`. When inspecting the previous snapshot, the matching key in `seenThisFrame` prevents appending a duplicate row.
-   - For the local player: if absent in a subsequent frame, `myTeamNum` and `LocalPlayer` must fall back to the previously resolved team and player (`retainedLocal.IsDisconnected = true`). This prevents the whole-match outcome compilation abortion (Observation 1.4).
-   - Match GUID boundary: When a new match GUID arrives (`t.currentMatch.MatchGUID != trimmedGUID`), differential retention is bypassed and a fresh match state is initialized. Previous match participants are never retained into a new match.
-   - AI bot exclusion: AI bots (`Unknown|0|0`) are temporary backfills in casual matches. To prevent bot churn from cluttering the roster with phantom disconnected bots, departed bots (`oldP.IsBot`) are excluded from retention.
+1. **PsyNet Telemetry Semantics**:
+   - In PsyNet RPC `Skills/GetPlayersSkills v1`, the property named `"MMR"` in the response payload (unmarshaled into `rlapi.Skill.MMR`) represents TrueSkill raw skill rating $\mu$, typically a decimal between $20.0$ and $85.0$ (e.g., $47.5$).
+   - The user requirement (R1) specifies converting raw skill ratings to true in-game display MMR using the canonical formula:
+     $$\text{MMR} = \text{round}((\text{SkillRating} \times 20.0) + 100.0)$$
+   - For a raw rating of $47.5$:
+     $$\text{round}((47.5 \times 20.0) + 100.0) = \text{round}(950.0 + 100.0) = 1050.0$$
+
+2. **Single Chokepoint Conversion Architecture**:
+   - As observed in Observation 1.1, `FromSkill(s rlapi.Skill)` is the singular function that instantiates `PlayerPlaylistRank` from `rlapi.Skill`.
+   - `BuildRanksSnapshot` iterates over `[]rlapi.Skill` and invokes `FromSkill(s)` for each playlist.
+   - `SerializeRanksJSON` calls `BuildRanksSnapshot(skills)` and serializes the result.
+   - `Tracker.fetchRanksBatch` calls `BuildRanksSnapshot` for runtime caching and active match updates, and calls `SerializeRanksJSON` for database persistence.
+   - Therefore, converting `s.MMR` inside `FromSkill` propagates in-game MMR simultaneously to:
+     - Active match state (`LobbyPlayer.CurrentRank` and `LobbyPlayer.Ranks`)
+     - Persistent storage (`players.ranks_json` in SQLite and JSONStore)
+     - Session tracker notifications (`OnActiveMatchUpdated`)
+     - REST and SSE API responses (`/api/current-match`, `/api/session`, `/api/players`)
+
+3. **Guards & Precision Analysis for `ConvertSkillRatingToMMR`**:
+   - **Guard 1: Casual & Unranked Ratings (`skillRating <= 0.0 -> 0.0`)**:
+     - Casual playlists and unranked accounts provide `0.0` (or theoretically negative $\mu$ under extreme loss streaks on new accounts).
+     - Without this guard, `0.0` would evaluate to $(0.0 \times 20.0) + 100.0 = 100.0$ MMR.
+     - In Rocket League, 100 MMR corresponds to Bronze I Division I. Displaying 100 MMR for casual playlists would corrupt casual match tracking, break casual session delta suppression in `session.go` (which guards on `startingMMR > 0 && endingMMR > 0`), and prevent the web UI from displaying `"---"` via `formatMMR`.
+     - Clamping `skillRating <= 0.0` to `0.0` guarantees casual and unranked ratings remain `0.0`.
+   - **Guard 2: Pre-Scaled Ratings & Idempotency (`skillRating > 150.0 -> skillRating`)**:
+     - In Rocket League TrueSkill mechanics, a raw skill rating $\mu = 125.0$ yields $(125.0 \times 20.0) + 100.0 = 2600.0$ MMR, which is the highest competitive MMR ever achieved in Rocket League history (top 10 world professional players).
+     - Even an impossible 3000 MMR rating corresponds to $\mu = (3000 - 100) / 20 = 145.0$.
+     - Therefore, a genuine raw PsyNet skill rating will never exceed $150.0$.
+     - Conversely, true in-game display MMR numbers are virtually always $\ge 100.0$ (typically $600 - 2000$).
+     - Observation 1.5 identified that existing test fixtures across `playertrack`, `daemon`, `session`, and `test/e2e` populate `rlapi.Skill.MMR` with pre-scaled values such as `1040.0`, `1150.5`, `1055.0`.
+     - Without the `> 150.0` guard, `1150.5` would be re-converted to $(1150.5 \times 20.0) + 100.0 = 23,110.0$, causing widespread test failures and regressions.
+     - With `if skillRating > 150.0 { return skillRating }`, pre-scaled numbers pass through completely untouched, and the conversion is strictly idempotent:
+       $$\text{ConvertSkillRatingToMMR}(\text{ConvertSkillRatingToMMR}(x)) = \text{ConvertSkillRatingToMMR}(x)$$
+   - **Precision**:
+     - `math.Round((skillRating * 20.0) + 100.0)` returns `float64` rounded to the nearest integer.
+     - Exact test values:
+       - $47.5 \to 1050.0$
+       - $47.0 \to 1040.0$
+       - $30.4646 \to 709.0$
+       - $81.8645 \to 1737.0$
+       - $0.0 \to 0.0$
+       - $1050.0 \to 1050.0$
+
+4. **Transparent Legacy Data Migration in `ParseRanksJSON`**:
+   - In production databases populated prior to Milestone 1, `ranks_json` may contain raw ratings (e.g. `{"11": {"playlist_id": 11, "tier": 16, "division": 2, "mmr": 47.5}}`).
+   - By updating the normalization loop in `ParseRanksJSON`:
+     ```go
+     if rank.MMR > 0.0 && rank.MMR <= 150.0 {
+         rank.MMR = ConvertSkillRatingToMMR(rank.MMR)
+         changed = true
+     }
+     ```
+     any legacy record loaded from SQLite or JSONStore is dynamically migrated to true in-game MMR upon deserialization.
+   - Already-migrated records (`rank.MMR > 150.0`) and casual records (`rank.MMR == 0.0`) are not modified.
+   - This provides seamless zero-downtime backward compatibility without database schema migrations.
 
 ---
 
 ## 3. Caveats
 
-1. **Casual Match Bot Churn**: In casual matches, human players who disconnect are often replaced by AI bots (`Unknown|0|0`). When a bot leaves (e.g. because another human connects), retaining the departed bot would clutter the scoreboard with useless rows. Therefore, only human participants (`!oldP.IsBot`) are retained upon disconnect. Active bots currently in `players` are shown normally (`IsBot = true`, `IsDisconnected = false`).
-2. **Casual Match Player Replacement / Team Size Expansion**: In casual playlists, new human players can join after a player leaves. The active roster may temporarily have more than the playlist's standard team limit (e.g., 3 players on a 2v2 team: 1 disconnected + 2 active). This is expected and mirrors official Rocket League replay files and ballchasing.com match records. The UI layout in Milestone M3 will format these cleanly.
-3. **Splitscreen Player Identity**: Splitscreen players share account IDs but have distinct composite identifiers (e.g., `Steam|76561198000000001|0` vs `Steam|76561198000000001|1`). Case-normalized full `PrimaryId` must be used as the map key so splitscreen players are tracked and retained independently without collision.
-4. **Mid-Game Team Swapping**: In private/casual matches, players may switch teams. The differential retention algorithm registers the player in their current frame's team first (`seenThisFrame[normID] = true`), causing the previous frame's opposing team check to skip them, preventing duplicate rows across teams.
+1. **Unranked / Casual Playlists**:
+   - PsyNet returns `0.0` (or omits skill telemetry) for unranked and casual playlists. The guard `skillRating <= 0.0 -> 0.0` is essential to prevent casual ratings from becoming `100.0` MMR.
+2. **Ratings in Range (100.0, 150.0]**:
+   - In theory, an in-game MMR between 100 and 150 (extremely low Bronze I) falls within $(0.0, 150.0]$. However, in practice, Bronze I Division I players have raw ratings $\mu \approx 2.5$ (which converts to 150 MMR). PsyNet raw ratings in the range $100.0 - 150.0$ correspond to Grand Champion 3 and Supersonic Legend ratings ($2100 - 3100$ MMR). The threshold of $150.0$ provides the ideal discrimination boundary between raw TrueSkill ratings ($\le 125.0$) and pre-scaled display MMR ($\ge 600.0$).
+3. **Importing `"math"`**:
+   - `internal/playertrack/rank_client.go` does not currently import `"math"`. The implementer must add `"math"` to the import block.
 
 ---
 
-## 4. Conclusion & Concrete Implementation Design
+## 4. Conclusion
 
-### 4.1 Data Model Updates
+Milestone 1 (R1) is cleanly achievable by editing a single file: `internal/playertrack/rank_client.go`, supported by comprehensive unit tests in `internal/playertrack/rank_client_test.go`.
 
-#### 1. `internal/playertrack/tracker.go:49-60`
-Add `IsDisconnected bool json:"is_disconnected,omitempty"` to `LobbyPlayer`:
+### 4.1 Implementation Specification
+
+#### 1. Import Block (`internal/playertrack/rank_client.go`)
+Add `"math"` to standard imports:
 ```go
-// LobbyPlayer encapsulates identity, real-time match stats, skill ratings, and historical matchup records.
-type LobbyPlayer struct {
-	PlayerID       string                 `json:"player_id"`                // PrimaryId (e.g. "Steam|76561198...|0")
-	Platform       string                 `json:"platform"`                 // "Steam", "Epic", "Unknown"
-	Name           string                 `json:"name"`                     // In-game display name
-	TeamNum        int                    `json:"team_num"`                 // 0 = Blue, 1 = Orange, 255 = Spectator
-	IsLocal        bool                   `json:"is_local"`                 // True if this is the authenticated user
-	IsBot          bool                   `json:"is_bot"`                   // True if AI bot ("Unknown|0|0")
-	IsDisconnected bool                   `json:"is_disconnected,omitempty"`// True if player left the active game early
-	Stats          PlayerStatsSummary     `json:"stats"`                    // Real-time in-game box score
-	CurrentRank    *PlayerPlaylistRank    `json:"current_rank,omitempty"`   // Rank for active match playlist
-	Ranks          PlayerRanksSnapshot    `json:"ranks,omitempty"`          // Full snapshot across all playlists
-	MatchupRecord  *storage.PlayerMatchup `json:"matchup_record,omitempty"` // H2H record in this playlist
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+...
+)
+```
+
+#### 2. `ConvertSkillRatingToMMR` (`internal/playertrack/rank_client.go`)
+Place immediately before `FromSkill`:
+```go
+// ConvertSkillRatingToMMR converts a raw PsyNet skill rating decimal (e.g. 47.5)
+// to true in-game MMR using the standard Rocket League formula: round((SkillRating * 20) + 100).
+//
+// Special Rules:
+// - Ratings <= 0.0 (casual, unranked, or uncalibrated) return 0.0.
+// - Ratings > 150.0 are treated as already converted in-game MMR and returned unchanged.
+func ConvertSkillRatingToMMR(skillRating float64) float64 {
+	if skillRating <= 0.0 {
+		return 0.0
+	}
+	if skillRating > 150.0 {
+		return skillRating
+	}
+	return math.Round((skillRating * 20.0) + 100.0)
 }
 ```
 
-#### 2. `internal/session/models.go:72-85`
-Add `IsDisconnected bool json:"is_disconnected,omitempty"` to `SessionMatchPlayer`:
+#### 3. `FromSkill` (`internal/playertrack/rank_client.go`)
+Update Line 647:
 ```go
-// SessionMatchPlayer captures an individual player's performance and credentials in a completed match.
-type SessionMatchPlayer struct {
-	PlayerID       string                         `json:"player_id"`
-	Platform       string                         `json:"platform"`
-	Name           string                         `json:"name"`
-	TeamNum        int                            `json:"team_num"` // 0 = Blue, 1 = Orange, 255 = Spectator
-	IsLocal        bool                           `json:"is_local"`
-	IsBot          bool                           `json:"is_bot"`
-	IsDisconnected bool                           `json:"is_disconnected,omitempty"`
-	Stats          playertrack.PlayerStatsSummary `json:"stats"`
-	RankName       string                         `json:"rank_name"`
-	Tier           int                            `json:"tier"`
-	Division       int                            `json:"division"`
-	MMR            float64                        `json:"mmr"`
-	MatchupRecord  *storage.PlayerMatchup         `json:"matchup_record,omitempty"`
+// FromSkill constructs a PlayerPlaylistRank from an rlapi.Skill telemetry entry.
+func FromSkill(s rlapi.Skill) PlayerPlaylistRank {
+	return PlayerPlaylistRank{
+		PlaylistID:    s.Playlist,
+		PlaylistName:  FormatPlaylist(s.Playlist),
+		Tier:          s.Tier,
+		Division:      s.Division,
+		RankName:      FormatRank(s.Tier, s.Division),
+		MMR:           ConvertSkillRatingToMMR(s.MMR),
+		MatchesPlayed: s.MatchesPlayed,
+	}
 }
 ```
 
-#### 3. `internal/session/session.go:282-296`
-In `ConcludeMatch`, map `lp.IsDisconnected` into `SessionMatchPlayer`:
+#### 4. `ParseRanksJSON` (`internal/playertrack/rank_client.go`)
+Update the normalization loop in `ParseRanksJSON`:
 ```go
-		matchPlayers = append(matchPlayers, SessionMatchPlayer{
-			PlayerID:       lp.PlayerID,
-			Platform:       lp.Platform,
-			Name:           lp.Name,
-			TeamNum:        lp.TeamNum,
-			IsLocal:        lp.IsLocal,
-			IsBot:          lp.IsBot,
-			IsDisconnected: lp.IsDisconnected,
-			Stats:          lp.Stats,
-			RankName:       rankName,
-			Tier:           tier,
-			Division:       div,
-			MMR:            mmr,
-			MatchupRecord:  lp.MatchupRecord,
-		})
+	// Normalization & backfill pass for legacy or partial data
+	for key, rank := range snapshot {
+		changed := false
+		if rank.PlaylistID == 0 {
+			if pid, err := strconv.Atoi(key); err == nil {
+				rank.PlaylistID = pid
+				changed = true
+			}
+		}
+		if rank.PlaylistName == "" && rank.PlaylistID != 0 {
+			rank.PlaylistName = FormatPlaylist(rank.PlaylistID)
+			changed = true
+		}
+		if rank.RankName == "" {
+			rank.RankName = FormatRank(rank.Tier, rank.Division)
+			changed = true
+		}
+		if rank.MMR > 0.0 && rank.MMR <= 150.0 {
+			rank.MMR = ConvertSkillRatingToMMR(rank.MMR)
+			changed = true
+		}
+		if changed {
+			snapshot[key] = rank
+		}
+	}
 ```
 
-#### 4. `web/src/types/api.ts`
-Add `is_disconnected?: boolean;` to both `LobbyPlayer` (line 88) and `SessionMatchPlayer` (line 44):
-```typescript
-export interface LobbyPlayer {
-  player_id: string;
-  platform: string;
-  name: string;
-  team_num: number;
-  is_local: boolean;
-  is_bot: boolean;
-  is_disconnected?: boolean;
-  stats: PlayerStatsSummary;
-  current_rank?: PlayerPlaylistRank;
-  ranks?: PlayerRanksSnapshot;
-  matchup_record?: PlayerMatchup;
-}
-
-export interface SessionMatchPlayer {
-  player_id: string;
-  platform: string;
-  name: string;
-  team_num: number; // 0 = Blue, 1 = Orange, 255 = Spectator
-  is_local: boolean;
-  is_bot: boolean;
-  is_disconnected?: boolean;
-  stats: PlayerStatsSummary;
-  rank_name: string;
-  tier: number;
-  division: number;
-  mmr: number;
-  matchup_record?: PlayerMatchup;
-}
-```
-
----
-
-### 4.2 Exact Differential Retention Algorithm for `Tracker.OnUpdateState`
-In `internal/playertrack/tracker.go`, replace lines 324-483 with the following drop-in block:
-
-```go
-	// 2. Prepare state update under lock
-	t.mu.Lock()
-	if t.closed {
-		t.mu.Unlock()
-		return errors.New("tracker is closed")
-	}
-
-	now := time.Now().UTC()
-
-	isSameMatch := (t.currentMatch != nil && t.currentMatch.MatchGUID == trimmedGUID)
-
-	// Capture previous participant snapshot if within the same match
-	var prevLocalPlayer *LobbyPlayer
-	var prevTeammates []LobbyPlayer
-	var prevOpponents []LobbyPlayer
-	var prevSpectators []LobbyPlayer
-
-	if !isSameMatch {
-		// New match detected: initialize new snapshot
-		t.currentMatch = &CurrentMatchResponse{
-			ActiveMatch:  true,
-			MatchEnded:   false,
-			MatchGUID:    trimmedGUID,
-			PlaylistID:   playlistID,
-			PlaylistName: FormatPlaylist(playlistID),
-			Teammates:    make([]LobbyPlayer, 0),
-			Opponents:    make([]LobbyPlayer, 0),
-			Spectators:   make([]LobbyPlayer, 0),
-			UpdatedAt:    now,
-		}
-		// Reset frame upsert cache and in-flight matchup queries for new match
-		t.upsertedProfiles = make(map[string]string)
-		t.matchupInFlight = make(map[string]time.Time)
-	} else {
-		// Existing match: capture previous rosters for differential retention
-		prevLocalPlayer = t.currentMatch.LocalPlayer
-		prevTeammates = t.currentMatch.Teammates
-		prevOpponents = t.currentMatch.Opponents
-		prevSpectators = t.currentMatch.Spectators
-
-		// Fallback: if local player left/omitted in this frame, retain previously resolved local team
-		if resolvedLocal == nil && t.currentMatch.LocalTeam != nil && (*t.currentMatch.LocalTeam == 0 || *t.currentMatch.LocalTeam == 1) {
-			myTeamNum = *t.currentMatch.LocalTeam
-		}
-
-		// Update existing match metadata
-		if playlistID != 0 {
-			t.currentMatch.PlaylistID = playlistID
-			t.currentMatch.PlaylistName = FormatPlaylist(playlistID)
-		}
-		t.currentMatch.UpdatedAt = now
-		// If match was already marked ended, keep ActiveMatch=false and MatchEnded=true
-		if !t.currentMatch.MatchEnded {
-			t.currentMatch.ActiveMatch = true
-		}
-	}
-
-	if myTeamNum == 0 || myTeamNum == 1 {
-		val := myTeamNum
-		t.currentMatch.LocalTeam = &val
-	} else if !isSameMatch {
-		t.currentMatch.LocalTeam = nil
-	}
-
-	var teammates []LobbyPlayer
-	var opponents []LobbyPlayer
-	var spectators []LobbyPlayer
-	var localPlayerLobby *LobbyPlayer
-
-	// Track observed player IDs in current frame to detect departures and deduplicate
-	seenThisFrame := make(map[string]bool, len(players))
-
-	var playersToUpsert []statsapi.StatsPlayer
-	var playersToFetchRank []rlapi.PlayerID
-	var playersToQueryMatchup []statsapi.StatsPlayer
-
-	activePlaylistID := t.currentMatch.PlaylistID
-
-	for _, p := range players {
-		isBot := p.IsBot()
-		normID := strings.ToLower(strings.TrimSpace(p.PrimaryId))
-
-		// Deduplicate human players within the same frame
-		if !isBot && normID != "" {
-			if seenThisFrame[normID] {
-				continue
-			}
-			seenThisFrame[normID] = true
-		}
-
-		isLocal := resolvedLocal != nil && strings.EqualFold(strings.TrimSpace(p.PrimaryId), strings.TrimSpace(resolvedLocal.PrimaryID))
-
-		// Profile upsert check for non-bot human players
-		if !isBot && strings.TrimSpace(p.PrimaryId) != "" {
-			if lastSeenName, exists := t.upsertedProfiles[p.PrimaryId]; !exists || lastSeenName != p.Name {
-				playersToUpsert = append(playersToUpsert, p)
-				t.upsertedProfiles[p.PrimaryId] = p.Name
-			}
-		}
-
-		// Asynchronous rank query check
-		if !isBot && strings.TrimSpace(p.PrimaryId) != "" && t.cfg.AutoFetchRanks && t.rankClient != nil && t.rankClient.IsEnabled() {
-			pid := p.PrimaryId
-			shouldFetch := true
-
-			// Tier 1: Cache check
-			if entry, ok := t.rankCache[pid]; ok {
-				if time.Since(entry.fetchedAt) < t.rankCacheTTL {
-					shouldFetch = false
-				}
-			}
-			// Tier 2: In-flight check
-			if _, inFlight := t.inFlight[pid]; inFlight {
-				shouldFetch = false
-			}
-			// Tier 3: Failure backoff check
-			if failTime, failed := t.failBackoff[pid]; failed {
-				if time.Since(failTime) < t.backoffTTL {
-					shouldFetch = false
-				}
-			}
-
-			if shouldFetch {
-				t.inFlight[pid] = now
-				playersToFetchRank = append(playersToFetchRank, rlapi.PlayerID(pid))
-			}
-		}
-
-		// Parse platform
-		parsed, _ := p.ParseID()
-		platform := parsed.Platform
-
-		// Extract cached ranks if available
-		var ranksSnapshot PlayerRanksSnapshot
-		var currentRank *PlayerPlaylistRank
-		if entry, ok := t.rankCache[p.PrimaryId]; ok {
-			ranksSnapshot = entry.snapshot
-			if r, found := ranksSnapshot.GetRank(activePlaylistID); found {
-				currentRank = &r
-			}
-		}
-
-		// Extract cached matchup record if available
-		var matchupRecord *storage.PlayerMatchup
-		if activePlaylistID != 0 && !isBot {
-			mKey := fmt.Sprintf("%s:%d", p.PrimaryId, activePlaylistID)
-			if m, ok := t.matchupCache[mKey]; ok {
-				matchupRecord = m
-			} else if !isLocal {
-				// Queue for matchup history lookup if not already in-flight
-				if _, inFlight := t.matchupInFlight[mKey]; !inFlight {
-					t.matchupInFlight[mKey] = now
-					playersToQueryMatchup = append(playersToQueryMatchup, p)
-				}
-			}
-		}
-
-		lp := LobbyPlayer{
-			PlayerID:       p.PrimaryId,
-			Platform:       platform,
-			Name:           p.Name,
-			TeamNum:        p.TeamNum,
-			IsLocal:        isLocal,
-			IsBot:          isBot,
-			IsDisconnected: false,
-			Stats: PlayerStatsSummary{
-				Score:   p.Score,
-				Goals:   p.Goals,
-				Assists: p.Assists,
-				Saves:   p.Saves,
-				Shots:   p.Shots,
-				Demos:   p.Demos,
-			},
-			CurrentRank:   currentRank,
-			Ranks:         ranksSnapshot,
-			MatchupRecord: matchupRecord,
-		}
-
-		if isLocal {
-			localPlayerLobby = &lp
-		} else if (myTeamNum == 0 || myTeamNum == 1) && p.TeamNum == myTeamNum {
-			teammates = append(teammates, lp)
-		} else if (myTeamNum == 0 || myTeamNum == 1) && (p.TeamNum == 0 || p.TeamNum == 1) {
-			opponents = append(opponents, lp)
-		} else {
-			spectators = append(spectators, lp)
-		}
-	}
-
-	// Differential Retention: Retain human participants from previous frame who departed mid-game
-	if isSameMatch {
-		// Retain disconnected local player
-		if localPlayerLobby == nil && prevLocalPlayer != nil {
-			retainedLocal := prevLocalPlayer.DeepClone()
-			retainedLocal.IsDisconnected = true
-			localPlayerLobby = &retainedLocal
-			if normID := strings.ToLower(strings.TrimSpace(retainedLocal.PlayerID)); normID != "" {
-				seenThisFrame[normID] = true
-			}
-		}
-
-		// Retain disconnected teammates
-		for _, oldP := range prevTeammates {
-			if oldP.IsBot {
-				continue // Do not retain departed AI bots
-			}
-			normID := strings.ToLower(strings.TrimSpace(oldP.PlayerID))
-			if normID != "" && !seenThisFrame[normID] {
-				retained := oldP.DeepClone()
-				retained.IsDisconnected = true
-				teammates = append(teammates, retained)
-				seenThisFrame[normID] = true
-			}
-		}
-
-		// Retain disconnected opponents
-		for _, oldP := range prevOpponents {
-			if oldP.IsBot {
-				continue // Do not retain departed AI bots
-			}
-			normID := strings.ToLower(strings.TrimSpace(oldP.PlayerID))
-			if normID != "" && !seenThisFrame[normID] {
-				retained := oldP.DeepClone()
-				retained.IsDisconnected = true
-				opponents = append(opponents, retained)
-				seenThisFrame[normID] = true
-			}
-		}
-
-		// Retain disconnected spectators
-		for _, oldP := range prevSpectators {
-			if oldP.IsBot {
-				continue
-			}
-			normID := strings.ToLower(strings.TrimSpace(oldP.PlayerID))
-			if normID != "" && !seenThisFrame[normID] {
-				retained := oldP.DeepClone()
-				retained.IsDisconnected = true
-				spectators = append(spectators, retained)
-				seenThisFrame[normID] = true
-			}
-		}
-	}
-
-	t.currentMatch.LocalPlayer = localPlayerLobby
-	t.currentMatch.Teammates = teammates
-	t.currentMatch.Opponents = opponents
-	t.currentMatch.Spectators = spectators
-```
-
----
-
-### 4.3 Programmatic Unit Tests Design for Implementer
-
-Add a dedicated test suite `TestTracker_MidGameDisconnect` in `internal/playertrack/tracker_test.go`:
-
-```go
-func TestTracker_MidGameDisconnect(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("Teammate Disconnect Retains Stats and Logs Win", func(t *testing.T) {
-		store := newTestStore(t)
-		fetcher := newTestSkillFetcher()
-		cfg := config.PlayerTrackingConfig{
-			Enabled:       true,
-			LocalPlayerID: "Steam|local|0",
-		}
-		tracker, err := playertrack.NewTracker(store, fetcher, cfg, config.AuthConfig{})
-		if err != nil {
-			t.Fatalf("NewTracker failed: %v", err)
-		}
-		defer tracker.Close()
-
-		guid := "match-dc-teammate"
-		playlistID := 11
-
-		// Frame 1: All participants connected
-		playersF1 := []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0, Score: 100, Goals: 1},
-			{Name: "Teammate1", PrimaryId: "Steam|tm1|0", TeamNum: 0, Score: 250, Goals: 2, Assists: 1, Saves: 1, Shots: 4, Demos: 1},
-			{Name: "Opponent1", PrimaryId: "Epic|opp1|0", TeamNum: 1, Score: 120, Goals: 0},
-		}
-		if err := tracker.OnUpdateState(ctx, guid, playlistID, playersF1); err != nil {
-			t.Fatalf("Frame 1 OnUpdateState failed: %v", err)
-		}
-
-		// Assert Frame 1
-		m1 := tracker.GetCurrentMatch()
-		if len(m1.Teammates) != 1 || m1.Teammates[0].IsDisconnected {
-			t.Fatalf("Frame 1: expected 1 active teammate, got %+v", m1.Teammates)
-		}
-
-		// Frame 2: Teammate1 leaves mid-game (omitted from players)
-		playersF2 := []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0, Score: 150, Goals: 1},
-			{Name: "Opponent1", PrimaryId: "Epic|opp1|0", TeamNum: 1, Score: 180, Goals: 1},
-		}
-		if err := tracker.OnUpdateState(ctx, guid, playlistID, playersF2); err != nil {
-			t.Fatalf("Frame 2 OnUpdateState failed: %v", err)
-		}
-
-		// Assert Frame 2: Teammate1 retained with stats preserved and IsDisconnected=true
-		m2 := tracker.GetCurrentMatch()
-		if len(m2.Teammates) != 1 {
-			t.Fatalf("Frame 2: expected 1 retained teammate, got %d", len(m2.Teammates))
-		}
-		tm := m2.Teammates[0]
-		if tm.PlayerID != "Steam|tm1|0" {
-			t.Errorf("expected retained player Steam|tm1|0, got %s", tm.PlayerID)
-		}
-		if !tm.IsDisconnected {
-			t.Errorf("expected IsDisconnected=true for departed teammate")
-		}
-		if tm.Stats.Score != 250 || tm.Stats.Goals != 2 || tm.Stats.Assists != 1 || tm.Stats.Saves != 1 || tm.Stats.Shots != 4 || tm.Stats.Demos != 1 {
-			t.Errorf("Stats not preserved: got %+v", tm.Stats)
-		}
-
-		// Conclude match: Local team won (WinnerTeamNum = 0)
-		win := 0
-		if err := tracker.OnMatchEnded(ctx, guid, &win); err != nil {
-			t.Fatalf("OnMatchEnded failed: %v", err)
-		}
-
-		// Verify store records WinAsTeammate for disconnected teammate
-		matchup, err := store.GetPlayerMatchup(ctx, "Steam|tm1|0", playlistID)
-		if err != nil {
-			t.Fatalf("GetPlayerMatchup failed: %v", err)
-		}
-		if matchup.WinsAsTeammate != 1 || matchup.LossesAsTeammate != 0 || matchup.TotalMatches != 1 {
-			t.Errorf("Matchup outcome incorrect for disconnected teammate: %+v", matchup)
-		}
-	})
-
-	t.Run("Reconnection Restores Active Status Without Duplicates", func(t *testing.T) {
-		store := newTestStore(t)
-		fetcher := newTestSkillFetcher()
-		cfg := config.PlayerTrackingConfig{
-			Enabled:       true,
-			LocalPlayerID: "Steam|local|0",
-		}
-		tracker, err := playertrack.NewTracker(store, fetcher, cfg, config.AuthConfig{})
-		if err != nil {
-			t.Fatalf("NewTracker failed: %v", err)
-		}
-		defer tracker.Close()
-
-		guid := "match-dc-reconnect"
-		playlistID := 11
-
-		// Frame 1: Connected
-		tracker.OnUpdateState(ctx, guid, playlistID, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0, Score: 50},
-			{Name: "Teammate1", PrimaryId: "Steam|tm1|0", TeamNum: 0, Score: 100, Goals: 1},
-		})
-
-		// Frame 2: Disconnected
-		tracker.OnUpdateState(ctx, guid, playlistID, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0, Score: 80},
-		})
-		m2 := tracker.GetCurrentMatch()
-		if len(m2.Teammates) != 1 || !m2.Teammates[0].IsDisconnected {
-			t.Fatalf("Frame 2: teammate should be retained as disconnected")
-		}
-
-		// Frame 3: Reconnected with increased stats
-		tracker.OnUpdateState(ctx, guid, playlistID, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0, Score: 120},
-			{Name: "Teammate1", PrimaryId: "Steam|tm1|0", TeamNum: 0, Score: 300, Goals: 2},
-		})
-
-		m3 := tracker.GetCurrentMatch()
-		if len(m3.Teammates) != 1 {
-			t.Fatalf("Frame 3: expected exactly 1 teammate (no duplicate rows), got %d", len(m3.Teammates))
-		}
-		if m3.Teammates[0].IsDisconnected {
-			t.Errorf("Frame 3: reconnected teammate should have IsDisconnected=false")
-		}
-		if m3.Teammates[0].Stats.Score != 300 || m3.Teammates[0].Stats.Goals != 2 {
-			t.Errorf("Frame 3: reconnected stats not updated: %+v", m3.Teammates[0].Stats)
-		}
-	})
-
-	t.Run("Local Player Disconnect Fallback Preserves Outcomes", func(t *testing.T) {
-		store := newTestStore(t)
-		fetcher := newTestSkillFetcher()
-		cfg := config.PlayerTrackingConfig{
-			Enabled:       true,
-			LocalPlayerID: "Steam|local|0",
-		}
-		tracker, err := playertrack.NewTracker(store, fetcher, cfg, config.AuthConfig{})
-		if err != nil {
-			t.Fatalf("NewTracker failed: %v", err)
-		}
-		defer tracker.Close()
-
-		guid := "match-dc-local"
-		playlistID := 11
-
-		// Frame 1: Local player on Team 0
-		tracker.OnUpdateState(ctx, guid, playlistID, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0, Score: 100},
-			{Name: "Teammate1", PrimaryId: "Steam|tm1|0", TeamNum: 0, Score: 100},
-			{Name: "Opponent1", PrimaryId: "Epic|opp1|0", TeamNum: 1, Score: 100},
-		})
-
-		// Frame 2: Local player disconnects (omitted from players)
-		tracker.OnUpdateState(ctx, guid, playlistID, []statsapi.StatsPlayer{
-			{Name: "Teammate1", PrimaryId: "Steam|tm1|0", TeamNum: 0, Score: 150},
-			{Name: "Opponent1", PrimaryId: "Epic|opp1|0", TeamNum: 1, Score: 150},
-		})
-
-		m2 := tracker.GetCurrentMatch()
-		if m2.LocalPlayer == nil || !m2.LocalPlayer.IsDisconnected {
-			t.Fatalf("Local player not retained as disconnected: %+v", m2.LocalPlayer)
-		}
-		if m2.LocalTeam == nil || *m2.LocalTeam != 0 {
-			t.Fatalf("LocalTeam not preserved: got %+v", m2.LocalTeam)
-		}
-		if len(m2.Teammates) != 1 || m2.Teammates[0].PlayerID != "Steam|tm1|0" {
-			t.Errorf("Teammate shifted out of teammates: %+v", m2.Teammates)
-		}
-		if len(m2.Opponents) != 1 || m2.Opponents[0].PlayerID != "Epic|opp1|0" {
-			t.Errorf("Opponent shifted out of opponents: %+v", m2.Opponents)
-		}
-
-		// Conclude match: Local team wins
-		win := 0
-		if err := tracker.OnMatchEnded(ctx, guid, &win); err != nil {
-			t.Fatalf("OnMatchEnded failed: %v", err)
-		}
-
-		// Matchup outcomes should still be successfully recorded!
-		tmMatchup, err := store.GetPlayerMatchup(ctx, "Steam|tm1|0", playlistID)
-		if err != nil || tmMatchup.WinsAsTeammate != 1 {
-			t.Errorf("Teammate outcome failed after local disconnect: err=%v, matchup=%+v", err, tmMatchup)
-		}
-		oppMatchup, err := store.GetPlayerMatchup(ctx, "Epic|opp1|0", playlistID)
-		if err != nil || oppMatchup.WinsAsOpponent != 1 {
-			t.Errorf("Opponent outcome failed after local disconnect: err=%v, matchup=%+v", err, oppMatchup)
-		}
-	})
-
-	t.Run("New Match GUID Resets Retention", func(t *testing.T) {
-		store := newTestStore(t)
-		fetcher := newTestSkillFetcher()
-		cfg := config.PlayerTrackingConfig{
-			Enabled:       true,
-			LocalPlayerID: "Steam|local|0",
-		}
-		tracker, err := playertrack.NewTracker(store, fetcher, cfg, config.AuthConfig{})
-		if err != nil {
-			t.Fatalf("NewTracker failed: %v", err)
-		}
-		defer tracker.Close()
-
-		// Match 1
-		tracker.OnUpdateState(ctx, "match-1", 11, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0},
-			{Name: "OldTeammate", PrimaryId: "Steam|old_tm|0", TeamNum: 0, Score: 200},
-		})
-		// OldTeammate disconnects in Match 1
-		tracker.OnUpdateState(ctx, "match-1", 11, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0},
-		})
-		if len(tracker.GetCurrentMatch().Teammates) != 1 {
-			t.Fatalf("Expected OldTeammate retained in match-1")
-		}
-
-		// Match 2 starts with new GUID
-		tracker.OnUpdateState(ctx, "match-2", 11, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0},
-			{Name: "NewTeammate", PrimaryId: "Steam|new_tm|0", TeamNum: 0, Score: 50},
-		})
-
-		m2 := tracker.GetCurrentMatch()
-		if len(m2.Teammates) != 1 || m2.Teammates[0].PlayerID != "Steam|new_tm|0" {
-			t.Fatalf("Match 2 leaked old teammate: %+v", m2.Teammates)
-		}
-	})
-
-	t.Run("Casual Departed Bot Excluded From Retention", func(t *testing.T) {
-		store := newTestStore(t)
-		fetcher := newTestSkillFetcher()
-		cfg := config.PlayerTrackingConfig{
-			Enabled:       true,
-			LocalPlayerID: "Steam|local|0",
-		}
-		tracker, err := playertrack.NewTracker(store, fetcher, cfg, config.AuthConfig{})
-		if err != nil {
-			t.Fatalf("NewTracker failed: %v", err)
-		}
-		defer tracker.Close()
-
-		guid := "match-casual-bots"
-		playlistID := 1 // Casual Duel/Doubles
-
-		// Frame 1: Human teammate + Bot
-		tracker.OnUpdateState(ctx, guid, playlistID, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0},
-			{Name: "HumanPlayer", PrimaryId: "Steam|human|0", TeamNum: 0, Score: 100},
-			{Name: "BotTex", PrimaryId: "Unknown|0|0", TeamNum: 0, Score: 20},
-		})
-
-		// Frame 2: Bot leaves (replaced by human newcomer), original human leaves
-		tracker.OnUpdateState(ctx, guid, playlistID, []statsapi.StatsPlayer{
-			{Name: "LocalUser", PrimaryId: "Steam|local|0", TeamNum: 0},
-			{Name: "NewHuman", PrimaryId: "Steam|new_human|0", TeamNum: 0, Score: 0},
-		})
-
-		m2 := tracker.GetCurrentMatch()
-		// Teammates should contain: NewHuman (active) and HumanPlayer (retained). BotTex must NOT be retained.
-		if len(m2.Teammates) != 2 {
-			t.Fatalf("Expected exactly 2 teammates (NewHuman + retained HumanPlayer), got %d: %+v", len(m2.Teammates), m2.Teammates)
-		}
-		for _, tm := range m2.Teammates {
-			if tm.IsBot {
-				t.Errorf("Departed bot was erroneously retained in active state: %+v", tm)
-			}
-		}
-	})
-}
-```
+### 4.2 Test Suite Specification (`internal/playertrack/rank_client_test.go`)
+Add the following test functions to `rank_client_test.go`:
+
+1. `TestConvertSkillRatingToMMR_Table`:
+   - Raw conversions: `47.5 -> 1050.0`, `47.0 -> 1040.0`, `30.4646 -> 709.0`, `81.8645 -> 1737.0`, `125.0 -> 2600.0`, `2.5 -> 150.0`.
+   - Casual / guards: `0.0 -> 0.0`, `-1.0 -> 0.0`, `-50.0 -> 0.0`.
+   - Pre-scaled passthrough: `1050.0 -> 1050.0`, `1150.5 -> 1150.5`, `150.0001 -> 150.0001`.
+   - Boundary: `150.0 -> 3100.0`.
+   - Idempotency: `ConvertSkillRatingToMMR(ConvertSkillRatingToMMR(v)) == ConvertSkillRatingToMMR(v)`.
+
+2. `TestFromSkill_TrueInGameMMR`:
+   - `rlapi.Skill{Playlist: 11, Tier: 16, Division: 2, MMR: 47.5}` yields `PlayerPlaylistRank.MMR == 1050.0`.
+   - Casual `rlapi.Skill{Playlist: 2, MMR: 0.0}` yields `MMR == 0.0`.
+   - Pre-scaled `rlapi.Skill{Playlist: 13, MMR: 1120.0}` yields `MMR == 1120.0`.
+
+3. `TestParseRanksJSON_LegacyMigration`:
+   - Legacy JSON string `{"11":{"playlist_id":11,"tier":16,"division":2,"mmr":47.5}}` parses to `MMR == 1050.0`.
+   - In-game scale JSON string `{"11":{"playlist_id":11,"tier":16,"division":2,"mmr":1050.0}}` parses to `MMR == 1050.0` (not 21,100.0).
+   - Casual JSON string `{"2":{"playlist_id":2,"tier":0,"division":0,"mmr":0.0}}` parses to `MMR == 0.0`.
+
+4. `TestBuildRanksSnapshot_And_SerializeRanksJSON_TrueInGameMMR`:
+   - Skills with `MMR: 47.5` produces snapshot with `1050.0` and serialized JSON containing `"mmr":1050`.
 
 ---
 
 ## 5. Verification Method
 
-### 5.1 Independent Verification Commands
-1. Run target unit tests in `internal/playertrack`:
+### 5.1 Independent Test Commands
+Execute the following verification commands from repository root (`d:\code\rl-api-utils`):
+
+1. **Targeted Unit Tests**:
    ```powershell
-   go test -v -run TestTracker_MidGameDisconnect ./internal/playertrack/...
+   go test -v -count=1 ./internal/playertrack -run "TestConvertSkillRatingToMMR|TestFromSkill_TrueInGameMMR|TestParseRanksJSON_LegacyMigration"
    ```
-2. Run session integration tests:
+
+2. **Full Playertrack Package Test Suite**:
    ```powershell
-   go test -v -run TestSessionTracker ./internal/session/...
+   go test -v -count=1 ./internal/playertrack
    ```
-3. Run complete Go test suite across all 14 packages:
+
+3. **Session & Daemon Verification**:
    ```powershell
-   go test ./...
+   go test -v -count=1 ./internal/session ./internal/daemon
    ```
-4. Build the standalone executable:
+
+4. **Full Repository Regression Test**:
+   ```powershell
+   go test -count=1 ./...
+   ```
+   *Expected Result*: 100% pass across all packages with zero regressions.
+
+5. **Executable Compilation**:
    ```powershell
    go build ./cmd/rl-sync
    ```
+   *Expected Result*: Clean compilation of `rl-sync.exe` without compiler or linker errors.
 
 ### 5.2 Files to Inspect
-- `internal/playertrack/tracker.go`:
-  - Lines 48-60 (`LobbyPlayer` struct definition, `IsDisconnected` field)
-  - Lines 62-80 (`LobbyPlayer.DeepClone()`)
-  - Lines 324-489 (`OnUpdateState` differential retention logic)
-- `internal/session/models.go`:
-  - Lines 72-85 (`SessionMatchPlayer` struct definition, `IsDisconnected` field)
-- `internal/session/session.go`:
-  - Lines 282-296 (`ConcludeMatch` mapping `lp.IsDisconnected`)
-- `web/src/types/api.ts`:
-  - Lines 40-50 (`SessionMatchPlayer`), Lines 82-93 (`LobbyPlayer`)
-- `internal/playertrack/tracker_test.go`:
-  - `TestTracker_MidGameDisconnect` suite verifying active stats preservation, disconnection flag, reconnection, local player fallback, and match outcomes.
+- `internal/playertrack/rank_client.go`: Verify imports, `ConvertSkillRatingToMMR`, `FromSkill`, and `ParseRanksJSON`.
+- `internal/playertrack/rank_client_test.go`: Verify newly added unit tests.
 
 ### 5.3 Invalidation Conditions
-- If `t.currentMatch` is reset or cleared by another goroutine during active gameplay without transitioning `matchGUID`, participant retention between frames will fail.
-- If Rocket League's `MatchStatsExporter_TA` begins reusing `PrimaryId` across distinct human players within the same match, key collisions could occur. (Protected against by standard platform-prefixed account ID format).
+- If `ConvertSkillRatingToMMR(47.5)` returns anything other than `1050.0`.
+- If `ConvertSkillRatingToMMR(0.0)` returns `100.0` instead of `0.0`.
+- If `ConvertSkillRatingToMMR(1150.5)` returns `23110.0` instead of `1150.5`.
+- If any existing tests in `internal/playertrack`, `internal/session`, `internal/daemon`, or `test/e2e` fail.

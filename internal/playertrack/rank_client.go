@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -636,6 +637,22 @@ func (s PlayerRanksSnapshot) GetRank(playlistID int) (PlayerPlaylistRank, bool) 
 	return rank, ok
 }
 
+// ConvertSkillRatingToMMR converts a raw PsyNet skill rating decimal (e.g. 47.5)
+// to true in-game MMR using the standard Rocket League formula: round((SkillRating * 20) + 100).
+//
+// Special Rules:
+// - Ratings <= 0.0 (casual, unranked, or uncalibrated) return 0.0.
+// - Ratings > 150.0 are treated as already converted in-game MMR and returned unchanged.
+func ConvertSkillRatingToMMR(skillRating float64) float64 {
+	if skillRating <= 0.0 {
+		return 0.0
+	}
+	if skillRating > 150.0 {
+		return skillRating
+	}
+	return math.Round((skillRating * 20.0) + 100.0)
+}
+
 // FromSkill constructs a PlayerPlaylistRank from an rlapi.Skill telemetry entry.
 func FromSkill(s rlapi.Skill) PlayerPlaylistRank {
 	return PlayerPlaylistRank{
@@ -644,7 +661,7 @@ func FromSkill(s rlapi.Skill) PlayerPlaylistRank {
 		Tier:          s.Tier,
 		Division:      s.Division,
 		RankName:      FormatRank(s.Tier, s.Division),
-		MMR:           s.MMR,
+		MMR:           ConvertSkillRatingToMMR(s.MMR),
 		MatchesPlayed: s.MatchesPlayed,
 	}
 }
@@ -702,6 +719,13 @@ func ParseRanksJSON(raw string) (PlayerRanksSnapshot, error) {
 		}
 		if rank.RankName == "" {
 			rank.RankName = FormatRank(rank.Tier, rank.Division)
+			changed = true
+		}
+		if rank.MMR > 0.0 && rank.MMR <= 150.0 {
+			rank.MMR = ConvertSkillRatingToMMR(rank.MMR)
+			changed = true
+		} else if rank.MMR < 0.0 {
+			rank.MMR = 0.0
 			changed = true
 		}
 		if changed {

@@ -3,7 +3,7 @@ import { LobbyPlayer } from '../../types/api';
 import { ColumnConfig } from '../../types/columns';
 import { RankBadge } from '../common/RankBadge';
 import { H2HBadge } from '../common/H2HBadge';
-import { Bot, Laptop, Gamepad2 } from 'lucide-react';
+import { Bot, Laptop, Gamepad2, WifiOff } from 'lucide-react';
 
 interface PlayerRowProps {
   player: LobbyPlayer;
@@ -11,6 +11,7 @@ interface PlayerRowProps {
   isTeammate: boolean;
   columnConfig: ColumnConfig;
   activePlaylistId: number;
+  teamNum?: number;
 }
 
 export const PlayerRow: React.FC<PlayerRowProps> = ({
@@ -31,17 +32,21 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
       case 'playstation':
         return <Gamepad2 className="w-4 h-4 text-blue-400" />;
       case 'xbox':
-        return <Gamepad2 className="w-4 h-4 text-emerald-400" />;
+        return <Gamepad2 className="w-4 h-4 text-emerald-500" />;
       default:
         return <Gamepad2 className="w-4 h-4 text-slate-400" />;
     }
   };
 
+  const disconnectedClasses = player.is_disconnected
+    ? 'opacity-65 saturate-60 hover:opacity-85'
+    : '';
+
   return (
     <tr
       className={`transition-colors hover:bg-slate-800/40 ${
         isLocal ? 'bg-cyan-500/10 font-medium' : ''
-      }`}
+      } ${disconnectedClasses}`}
     >
       {/* Player Identity Anchor */}
       <td data-testid="player-identity" className="py-2 px-4 flex items-center gap-2">
@@ -64,10 +69,20 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
             BOT
           </span>
         )}
+        {player.is_disconnected && (
+          <span
+            data-testid="badge-disconnected"
+            className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-rose-950/60 text-rose-300 border border-rose-800/60 inline-flex items-center gap-1 shadow-sm"
+            title="Player disconnected early; stats and match outcomes are preserved"
+          >
+            <WifiOff className="w-2.5 h-2.5 text-rose-400" />
+            DISCONNECTED
+          </span>
+        )}
       </td>
 
       {/* Prioritized Box Score Performance Stats */}
-      {/* 1. Score: 18px font-black white */}
+      {/* 1. Score */}
       {columnConfig.score && (
         <td
           data-testid="stat-score"
@@ -77,7 +92,7 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
         </td>
       )}
 
-      {/* 2. Goals: 18px font-black amber glow */}
+      {/* 2. Goals */}
       {columnConfig.goals && (
         <td
           data-testid="stat-goals"
@@ -91,7 +106,7 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
         </td>
       )}
 
-      {/* 3. Assists: 16px font-extrabold cyan */}
+      {/* 3. Assists */}
       {columnConfig.assists && (
         <td
           data-testid="stat-assists"
@@ -103,7 +118,7 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
         </td>
       )}
 
-      {/* 4. Saves: 16px font-extrabold emerald */}
+      {/* 4. Saves */}
       {columnConfig.saves && (
         <td
           data-testid="stat-saves"
@@ -115,7 +130,7 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
         </td>
       )}
 
-      {/* 5. Shots: 14px font-bold slate */}
+      {/* 5. Shots */}
       {columnConfig.shots && (
         <td
           data-testid="stat-shots"
@@ -127,7 +142,7 @@ export const PlayerRow: React.FC<PlayerRowProps> = ({
         </td>
       )}
 
-      {/* 6. Demos: 14px font-bold font-extrabold rose */}
+      {/* 6. Demos */}
       {columnConfig.demos && (
         <td
           data-testid="stat-demos"

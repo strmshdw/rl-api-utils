@@ -10,10 +10,11 @@ import { RosterTable } from './RosterTable';
 import { PlayerRow } from './PlayerRow';
 import { App } from '../../App';
 import { Header } from '../layout/Header';
+import { MatchDetailModal } from '../session/MatchDetailModal';
 import { useLiveMatch } from '../../hooks/useLiveMatch';
 import { useSession } from '../../hooks/useSession';
 import { ColumnConfig, PRESETS } from '../../types/columns';
-import { CurrentMatchResponse, SessionResponse, LobbyPlayer } from '../../types/api';
+import { CurrentMatchResponse, SessionResponse, LobbyPlayer, SessionMatchDetail } from '../../types/api';
 
 // Tell React 19 act is supported in happy-dom environment
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -431,6 +432,168 @@ describe('LiveGameView Programmatic DOM Layout & Structure Suite', () => {
       expect(scoreCell?.textContent?.trim()).toBe('210');
       expect(scoreCell?.className).toContain('text-lg');
       expect(scoreCell?.className).toContain('font-black');
+    });
+
+    it('renders distinct disconnected styling (opacity-65 saturate-60) and badge with WifiOff icon for disconnected players', () => {
+      act(() => {
+        root.render(
+          <RosterTable
+            teamNum={0}
+            teamName="Blue Team"
+            players={[mockDisconnectedPlayer]}
+            localPlayerId="Steam|local_hero|0"
+            localTeamNum={0}
+            columnConfig={fullConfig}
+            activePlaylistId={11}
+          />
+        );
+      });
+
+      // 1. Row styling classes: opacity-65, saturate-60, hover:opacity-85
+      const row = container.querySelector('tbody tr');
+      expect(row).not.toBeNull();
+      expect(row?.className).toContain('opacity-65');
+      expect(row?.className).toContain('saturate-60');
+      expect(row?.className).toContain('hover:opacity-85');
+
+      // 2. Disconnected badge with WifiOff icon
+      const badge = container.querySelector('[data-testid="badge-disconnected"]');
+      expect(badge).not.toBeNull();
+      expect(badge?.textContent).toContain('DISCONNECTED');
+      expect(badge?.querySelector('svg')).not.toBeNull();
+
+      // 3. Stats and identity data are fully retained
+      expect(container.querySelector('[data-testid="player-identity"]')?.textContent).toContain('DisconnectedBlue');
+      expect(container.querySelector('[data-testid="stat-score"]')?.textContent?.trim()).toBe('210');
+      expect(container.querySelector('[data-testid="stat-goals"]')?.textContent?.trim()).toBe('0');
+      expect(container.querySelector('[data-testid="stat-saves"]')?.textContent?.trim()).toBe('1');
+      expect(container.querySelector('[data-testid="stat-mmr"]')?.textContent?.trim()).toBe('995.0');
+    });
+
+    it('does NOT render disconnected styling or badge for active connected players', () => {
+      act(() => {
+        root.render(
+          <RosterTable
+            teamNum={0}
+            teamName="Blue Team"
+            players={[mockLocalPlayer]}
+            localPlayerId="Steam|local_hero|0"
+            localTeamNum={0}
+            columnConfig={fullConfig}
+            activePlaylistId={11}
+          />
+        );
+      });
+
+      const row = container.querySelector('tbody tr');
+      expect(row?.className).not.toContain('opacity-65');
+      expect(row?.className).not.toContain('saturate-60');
+      expect(container.querySelector('[data-testid="badge-disconnected"]')).toBeNull();
+    });
+
+    it('renders glowing team header with dedicated aggregated goals and score badges', () => {
+      act(() => {
+        root.render(
+          <RosterTable
+            teamNum={0}
+            teamName="Blue Team"
+            players={[mockLocalPlayer, mockTeammateBlue]}
+            localPlayerId="Steam|local_hero|0"
+            localTeamNum={0}
+            columnConfig={fullConfig}
+            activePlaylistId={11}
+          />
+        );
+      });
+
+      // Aggregated Goals badge (mockLocalPlayer 3 + mockTeammateBlue 1 = 4)
+      const goalsBadge = container.querySelector('[data-testid="team-goals"]');
+      expect(goalsBadge).not.toBeNull();
+      expect(goalsBadge?.textContent).toContain('Goals:');
+      expect(goalsBadge?.textContent).toContain('4');
+
+      // Aggregated Score badge (mockLocalPlayer 720 + mockTeammateBlue 450 = 1170)
+      const scoreBadge = container.querySelector('[data-testid="team-score"]');
+      expect(scoreBadge).not.toBeNull();
+      expect(scoreBadge?.textContent).toContain('Score:');
+      expect(scoreBadge?.textContent).toContain('1170');
+    });
+
+    it('aggregates disconnected player goals and score into team header totals', () => {
+      act(() => {
+        root.render(
+          <RosterTable
+            teamNum={0}
+            teamName="Blue Team"
+            players={[mockLocalPlayer, mockDisconnectedPlayer]}
+            localPlayerId="Steam|local_hero|0"
+            localTeamNum={0}
+            columnConfig={fullConfig}
+            activePlaylistId={11}
+          />
+        );
+      });
+
+      // mockLocalPlayer (720 score, 3 goals) + mockDisconnectedPlayer (210 score, 0 goals)
+      const goalsBadge = container.querySelector('[data-testid="team-goals"]');
+      expect(goalsBadge?.textContent).toContain('3');
+
+      const scoreBadge = container.querySelector('[data-testid="team-score"]');
+      expect(scoreBadge?.textContent).toContain('930');
+    });
+
+    it('renders disconnected player styling and badge in MatchDetailModal for concluded matches', () => {
+      const mockDetail: SessionMatchDetail = {
+        match_guid: 'guid-dc-test',
+        playlist_id: 11,
+        playlist_name: 'Ranked 3v3',
+        started_at: '2026-10-06T10:00:00Z',
+        ended_at: '2026-10-06T10:05:00Z',
+        duration_seconds: 300,
+        result: 'defeat',
+        local_team: 0,
+        winner_team: 1,
+        blue_score: 1,
+        orange_score: 3,
+        starting_mmr: 1000,
+        ending_mmr: 991,
+        mmr_change: -9,
+        players: [
+          {
+            player_id: 'Steam|local_hero|0',
+            name: 'LocalHero',
+            platform: 'Steam',
+            team_num: 0,
+            is_local: true,
+            is_bot: false,
+            stats: { score: 400, goals: 1, assists: 0, saves: 2, shots: 3, demos: 0 },
+            rank_name: 'Champion I Div I',
+            tier: 16,
+            division: 1,
+            mmr: 991,
+          },
+          {
+            player_id: 'Steam|blue_dc|0',
+            name: 'DisconnectedBlue',
+            platform: 'Steam',
+            team_num: 0,
+            is_local: false,
+            is_bot: false,
+            is_disconnected: true,
+            stats: { score: 100, goals: 0, assists: 0, saves: 1, shots: 0, demos: 0 },
+            rank_name: 'Diamond III Div IV',
+            tier: 15,
+            division: 4,
+            mmr: 980,
+          },
+        ],
+      };
+
+      const html = cleanHtml(renderToString(<MatchDetailModal match={mockDetail} onClose={() => {}} />));
+      expect(html).toContain('DisconnectedBlue');
+      expect(html).toContain('opacity-65 saturate-60 hover:opacity-85');
+      expect(html).toContain('data-testid="badge-disconnected"');
+      expect(html).toContain('DISCONNECTED');
     });
 
     it('renders all dedicated semantic data-testid attributes for layout automated verification', () => {

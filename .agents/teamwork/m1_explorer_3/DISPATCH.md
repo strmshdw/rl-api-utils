@@ -1,38 +1,29 @@
-# DISPATCH: m1_explorer_3
+# Dispatch: m1_explorer_3
 
-## Objective
-Investigate and design comprehensive automated programmatic tests for Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect).
+## Mission & Role
+You are `m1_explorer_3`, an Explorer investigating Milestone 1: True In-Game MMR Conversion (R1).
+Working directory: `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3`
 
-## Scope Boundaries
-- Read-only technical investigation. Do NOT edit source files.
-- Deliver `handoff.md` to `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\handoff.md`.
+## Scope & Tasks
+Analyze storage persistence and edge cases:
+1. Examine SQLite (`internal/storage/sqlite.go`) and JSONStore (`internal/storage/jsonstore.go`) to confirm `ranks_json` storage and retrieval behavior.
+2. Confirm that legacy database rows with raw PsyNet floats (e.g. 47.5) deserialize into in-game MMR (~1050) via `ParseRanksJSON`.
+3. Formulate edge-case tests: casual/unranked playlists (0.0 -> 0.0), negative ratings, high-MMR fixtures, and regression test strategy.
 
-## Context & Inputs
-- Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
-- Project Architecture & Milestones: `d:\code\rl-api-utils\PROJECT.md`
-- Survey report on player state: `d:\code\rl-api-utils\.agents\teamwork\survey_explorer_state_1\handoff.md`
-- Codebase: `internal/playertrack/tracker_test.go`, `internal/session/session_test.go`
+## Inputs
+- `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T11:02:53Z`)
+- `d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md`
+- `d:\code\rl-api-utils\.agents\teamwork\survey_explorer_backend\handoff.md`
 
-## Specific Tasks
-1. Analyze existing test patterns in `internal/playertrack/tracker_test.go` and `internal/session/session_test.go`.
-2. Design automated programmatic tests that simulate mid-game player disconnect:
-   - Frame 1: Full lobby with active players accumulating stats (Score, Goals, Assists, Saves, Shots, Demos).
-   - Frame 2: One or more players leave early (omitted from `UpdateState`).
-   - Assertion: Disconnected player(s) remain in the active match state (`GetCurrentMatch()`, `SessionTracker.GetSessionSummary().ActiveMatch`), stats are preserved, and `is_disconnected` is true.
-   - Frame 3: Disconnected player reconnects -> stats update, no duplicate entries.
-   - Frame 4: Local player leaves early -> local player and local team remain preserved.
-3. Provide complete, ready-to-run Go test code with zero regressions on existing tests.
+## Output
+Write your handoff report to `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\handoff.md`.
 
-## 2026-10-06T08:48:03Z
-You are m1_explorer_3, an exploration agent for Milestone M1 (Requirement R2: Persistent Player State on Disconnect).
+## 2026-10-06T11:20:20Z
+You are m1_explorer_3.
 Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3
-You MUST read:
-1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
-2. Project specification: d:\code\rl-api-utils\PROJECT.md
-3. Survey report: d:\code\rl-api-utils\.agents\teamwork\survey_explorer_state_1\handoff.md
-4. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\DISPATCH.md
-
-Investigate and design programmatic mid-game player disconnect tests:
-- Construct end-to-end unit tests in internal/playertrack/tracker_test.go and internal/session/session_test.go asserting that player stats remain in active match state when a player leaves early, reconnects, or when local player leaves early.
-Produce a comprehensive handoff report at: d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\handoff.md.
-When finished, send a completion message back to your caller (orchestrator_6).
+Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, d:\code\rl-api-utils\.agents\teamwork\survey_explorer_backend\handoff.md, and d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\DISPATCH.md.
+Investigate Milestone 1: storage persistence (SQLite & JSONStore) and MMR edge cases.
+Detail how ranks_json is stored/read, how legacy database records are migrated on read, and edge case handling (0.0 for casual/unranked, negative clamping, high MMR fixtures). Formulate required tests.
+Write your complete handoff report to:
+d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\handoff.md
+When finished, send a message to parent reporting completion and file path.

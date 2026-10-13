@@ -3,6 +3,7 @@ package ballchasing
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -77,6 +78,96 @@ type PingResponse struct {
 type ReplayUploader interface {
 	UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error)
 	Ping(ctx context.Context) error
+}
+
+// ReplayListResponse represents the paginated response from GET /api/replays.
+type ReplayListResponse struct {
+	Count int          `json:"count"`
+	List  []ReplayItem `json:"list"`
+	Next  string       `json:"next"`
+}
+
+// ReplayItem represents a single match/replay record returned by Ballchasing.com.
+type ReplayItem struct {
+	ID           string     `json:"id"`
+	Link         string     `json:"link"`
+	Created      string     `json:"created"`
+	Date         string     `json:"date"`
+	MatchGUID    string     `json:"match_guid"`
+	MapCode      string     `json:"map_code"`
+	MapName      string     `json:"map_name"`
+	PlaylistID   string     `json:"playlist_id"`
+	PlaylistName string     `json:"playlist_name"`
+	Duration     int        `json:"duration"`
+	Overtime     bool       `json:"overtime"`
+	Blue         ReplayTeam `json:"blue"`
+	Orange       ReplayTeam `json:"orange"`
+}
+
+// ReplayTeam represents a team in a Ballchasing replay.
+type ReplayTeam struct {
+	Color   string         `json:"color"`
+	Name    string         `json:"name"`
+	Goals   int            `json:"goals"`
+	Players []ReplayPlayer `json:"players"`
+}
+
+// ReplayPlayer represents a player in a Ballchasing replay team.
+type ReplayPlayer struct {
+	Name    string         `json:"name"`
+	ID      PlayerIdentity `json:"id"`
+	Score   int            `json:"score"`
+	Goals   int            `json:"goals"`
+	Assists int            `json:"assists"`
+	Saves   int            `json:"saves"`
+	Shots   int            `json:"shots"`
+	Demos   PlayerDemos    `json:"demos"`
+}
+
+// PlayerIdentity contains player platform and platform account ID.
+type PlayerIdentity struct {
+	Platform string `json:"platform"`
+	ID       string `json:"id"`
+}
+
+// PlayerDemos contains demolition statistics for a player.
+type PlayerDemos struct {
+	Inflicted int `json:"inflicted"`
+	Taken     int `json:"taken"`
+}
+
+// MapPlaylistSlugToID maps Ballchasing playlist slugs or string IDs to numeric Rocket League playlist IDs.
+func MapPlaylistSlugToID(slug string) int {
+	slug = strings.TrimSpace(strings.ToLower(slug))
+	switch slug {
+	case "ranked-duels", "ranked-duel", "1v1", "10":
+		return 10
+	case "ranked-doubles", "ranked-double", "2v2", "11":
+		return 11
+	case "ranked-standard", "3v3", "13":
+		return 13
+	case "ranked-hoops", "hoops", "27":
+		return 27
+	case "ranked-rumble", "rumble", "28":
+		return 28
+	case "ranked-dropshot", "dropshot", "29":
+		return 29
+	case "ranked-snowday", "snowday", "30":
+		return 30
+	case "tournament", "tournaments", "34":
+		return 34
+	case "casual-standard", "3":
+		return 3
+	case "casual-doubles", "2":
+		return 2
+	case "casual-duels", "casual-duel", "1":
+		return 1
+	case "casual-chaos", "4":
+		return 4
+	default:
+		// Attempt numeric parse if already an integer
+		return 0
+	}
 }
 
 // ClientConfig holds configuration settings for the Ballchasing client.

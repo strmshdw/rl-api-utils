@@ -29,18 +29,35 @@ export const ScoreboardBanner: React.FC<ScoreboardBannerProps> = ({
     });
   }, [match]);
 
-  // Derive scores from player goals
+  // Derive scores and momentum stats from player stats
+  const bluePlayers = useMemo(() => allPlayers.filter(p => p.team_num === 0), [allPlayers]);
+  const orangePlayers = useMemo(() => allPlayers.filter(p => p.team_num === 1), [allPlayers]);
+
   const blueScore = useMemo(() => {
-    return allPlayers
-      .filter(p => p.team_num === 0)
-      .reduce((sum, p) => sum + (p.stats?.goals || 0), 0);
-  }, [allPlayers]);
+    return bluePlayers.reduce((sum, p) => sum + (p.stats?.goals || 0), 0);
+  }, [bluePlayers]);
 
   const orangeScore = useMemo(() => {
-    return allPlayers
-      .filter(p => p.team_num === 1)
-      .reduce((sum, p) => sum + (p.stats?.goals || 0), 0);
-  }, [allPlayers]);
+    return orangePlayers.reduce((sum, p) => sum + (p.stats?.goals || 0), 0);
+  }, [orangePlayers]);
+
+  // Aggregate pressure & momentum metrics
+  const blueShots = useMemo(() => bluePlayers.reduce((sum, p) => sum + (p.stats?.shots || 0), 0), [bluePlayers]);
+  const orangeShots = useMemo(() => orangePlayers.reduce((sum, p) => sum + (p.stats?.shots || 0), 0), [orangePlayers]);
+  const blueSaves = useMemo(() => bluePlayers.reduce((sum, p) => sum + (p.stats?.saves || 0), 0), [bluePlayers]);
+  const orangeSaves = useMemo(() => orangePlayers.reduce((sum, p) => sum + (p.stats?.saves || 0), 0), [orangePlayers]);
+  const blueDemos = useMemo(() => bluePlayers.reduce((sum, p) => sum + (p.stats?.demos || 0), 0), [bluePlayers]);
+  const orangeDemos = useMemo(() => orangePlayers.reduce((sum, p) => sum + (p.stats?.demos || 0), 0), [orangePlayers]);
+
+  // Team Average MMR & differential calculation
+  const { blueAvgMmr, orangeAvgMmr, mmrAdvantage } = useMemo(() => {
+    const bMmrs = bluePlayers.map(p => p.current_rank?.mmr).filter((m): m is number => typeof m === 'number' && m > 0);
+    const oMmrs = orangePlayers.map(p => p.current_rank?.mmr).filter((m): m is number => typeof m === 'number' && m > 0);
+    const bAvg = bMmrs.length > 0 ? bMmrs.reduce((a, b) => a + b, 0) / bMmrs.length : null;
+    const oAvg = oMmrs.length > 0 ? oMmrs.reduce((a, b) => a + b, 0) / oMmrs.length : null;
+    const adv = bAvg !== null && oAvg !== null ? bAvg - oAvg : null;
+    return { blueAvgMmr: bAvg, orangeAvgMmr: oAvg, mmrAdvantage: adv };
+  }, [bluePlayers, orangePlayers]);
 
   const isLocalOnBlue = match.local_team === 0;
   const isLocalOnOrange = match.local_team === 1;
@@ -131,6 +148,54 @@ export const ScoreboardBanner: React.FC<ScoreboardBannerProps> = ({
               >
                 {playlistMmrDelta > 0 ? `+${playlistMmrDelta.toFixed(1)}` : playlistMmrDelta.toFixed(1)} MMR
               </span>
+            </div>
+          )}
+
+          {/* At-a-glance Team MMR Comparison */}
+          {blueAvgMmr !== null && orangeAvgMmr !== null && (
+            <div className="mt-1 flex items-center gap-2 text-[11px] font-mono">
+              <span className="text-[#00a2ff] font-bold">{blueAvgMmr.toFixed(0)}</span>
+              <span className="text-slate-500 font-sans text-[10px]">Avg MMR</span>
+              <span className="text-[#ff7b00] font-bold">{orangeAvgMmr.toFixed(0)}</span>
+              {mmrAdvantage !== null && (
+                <span
+                  className={`px-1.5 py-0.2 rounded text-[9px] font-sans font-bold uppercase ${
+                    Math.abs(mmrAdvantage) < 5
+                      ? 'bg-slate-800/80 text-slate-400 border border-slate-700/60'
+                      : mmrAdvantage > 0
+                      ? 'bg-[#00a2ff]/20 text-[#00a2ff] border border-[#00a2ff]/40'
+                      : 'bg-[#ff7b00]/20 text-[#ff7b00] border border-[#ff7b00]/40'
+                  }`}
+                  title={`MMR Advantage: ${Math.abs(mmrAdvantage).toFixed(1)}`}
+                >
+                  {Math.abs(mmrAdvantage) < 5
+                    ? 'Even Match'
+                    : mmrAdvantage > 0
+                    ? `+${mmrAdvantage.toFixed(0)} Blue`
+                    : `+${Math.abs(mmrAdvantage).toFixed(0)} Orange`}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* At-a-glance Live Match Momentum Stats */}
+          {(blueShots > 0 || orangeShots > 0 || blueSaves > 0 || orangeSaves > 0) && (
+            <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400">
+              <span title="Total Shots (Blue vs Orange)">
+                Shots: <strong className="text-[#00a2ff]">{blueShots}</strong> - <strong className="text-[#ff7b00]">{orangeShots}</strong>
+              </span>
+              <span className="text-slate-600">•</span>
+              <span title="Total Saves (Blue vs Orange)">
+                Saves: <strong className="text-[#00a2ff]">{blueSaves}</strong> - <strong className="text-[#ff7b00]">{orangeSaves}</strong>
+              </span>
+              {(blueDemos > 0 || orangeDemos > 0) && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span title="Demolitions (Blue vs Orange)">
+                    Demos: <strong className="text-[#00a2ff]">{blueDemos}</strong> - <strong className="text-[#ff7b00]">{orangeDemos}</strong>
+                  </span>
+                </>
+              )}
             </div>
           )}
 

@@ -254,3 +254,34 @@ Update the logging mechanism to correctly record win/loss outcomes for all parti
 ### State Tracking & Logging
 - [ ] An automated programmatic test simulating a mid-game player disconnect passes, asserting that the player's stats remain in the active match state.
 - [ ] An automated test confirms that the final match history records a win or loss for the disconnected player.
+
+
+## 2026-10-06T11:02:53Z
+
+Convert raw PsyNet rating numbers to true in-game MMR across backend ingestion, session tracking, database storage, and APIs, and execute a comprehensive UX overhaul of the live match view to deliver a sleek, high-contrast esports matchup interface.
+
+Working directory: d:\code\rl-api-utils
+Integrity mode: development
+
+## Requirements
+
+### R1. True In-Game MMR Conversion
+Convert raw PsyNet skill ratings to true in-game MMR using the standard formula `round((SkillRating * 20) + 100)` at the backend ingestion/rank client layer. Ensure that all downstream consumers—including database storage, active match states, session MMR deltas, and JSON API endpoints (`/api/current-match`, `/api/session`, `/api/players`)—report and persist true in-game MMR numbers (e.g. ~1050 MMR instead of 47.5).
+
+### R2. Sleek Esports Matchup UX Overhaul
+Redesign the live match user experience into a polished, broadcast-style esports matchup. The view must feature high-contrast horizontal team groupings (Blue vs Orange), glowing team headers with aggregated goals and score, and streamlined player rows/cards with prominent, readable stat badges (Score, Goals, Assists, Saves) without visual clutter, awkward proportions, or vertical scrolling.
+
+### R3. Disconnected Player UX Treatment
+Provide clean visual distinction for disconnected players (e.g. subtle desaturation, opacity/dimmed treatment, or clean "DISCONNECTED" badge) while preserving their stats, team placement, and outcome logging in the view.
+
+## Acceptance Criteria
+
+### MMR Conversion & Tracking
+- [ ] Programmatic backend tests verify that raw PsyNet skill ratings (e.g. 47.5) convert accurately to standard in-game MMR values (1050) across rank fetching, snapshot building, and SQLite storage.
+- [ ] Session tracker tests confirm that match start/end MMR calculations and session MMR deltas operate on in-game MMR scale.
+- [ ] API endpoints (`/api/current-match`, `/api/session`) output in-game MMR values rather than raw rating decimals.
+
+### UX & Layout Verification
+- [ ] Automated frontend tests (Vitest) confirm that live match components render with prominent stat badges, clear team color coding, and no layout overflow on standard 1080p viewports.
+- [ ] Automated tests verify that disconnected participants render with the designated distinct styling while retaining all match stats.
+- [ ] Full build verification succeeds: `npm run build` cleanly bundles into `internal/web/dist` and `go build ./cmd/rl-sync` compiles `rl-sync.exe` without errors.

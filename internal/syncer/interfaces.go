@@ -57,6 +57,7 @@ type StateStore interface {
 	MarkDuplicate(ctx context.Context, matchGUID, ballchasingID, ballchasingURL string) error
 	MarkUploadFailed(ctx context.Context, matchGUID, errMsg string) error
 	RecoverInFlight(ctx context.Context) error
+	SyncReplayStats(ctx context.Context, stats *storage.ReplayMatchStats) error
 }
 
 // MatchHistoryProvider defines the match query contract for PsyNet or mock providers.

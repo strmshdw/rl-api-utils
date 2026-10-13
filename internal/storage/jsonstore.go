@@ -225,6 +225,14 @@ func cloneMatchRecord(src *MatchRecord) *MatchRecord {
 		t := *src.UploadedAt
 		dst.UploadedAt = &t
 	}
+	if src.WinnerTeam != nil {
+		wt := *src.WinnerTeam
+		dst.WinnerTeam = &wt
+	}
+	if src.SyncedAt != nil {
+		t := *src.SyncedAt
+		dst.SyncedAt = &t
+	}
 	return &dst
 }
 
@@ -1242,5 +1250,203 @@ func (s *JSONStore) GetPlayerMatchups(ctx context.Context, playerID string) ([]*
 	})
 
 	return results, nil
+}
+
+// SyncReplayStats enriches or upserts a match record with end-of-game replay statistics.
+func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if stats == nil || strings.TrimSpace(stats.MatchGUID) == "" {
+		return ErrInvalidGUID
+	}
+
+	guid := strings.TrimSpace(stats.MatchGUID)
+	statsJSON, err := json.Marshal(stats)
+	if err != nil {
+		return fmt.Errorf("failed to marshal replay stats: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	now := time.Now().UTC()
+	startTS := now.Unix()
+	if stats.Date != "" {
+		if t, err := time.Parse(time.RFC3339, stats.Date); err == nil {
+			startTS = t.Unix()
+		}
+	}
+
+	rec, exists := s.matches[guid]
+	if !exists {
+		upStatus := UploadPending
+		if stats.BallchasingID != "" {
+			upStatus = UploadUploaded
+		}
+		rec = &MatchRecord{
+			MatchGUID:            guid,
+			RecordStartTimestamp: startTS,
+			MapName:              stats.MapName,
+			Playlist:             stats.Playlist,
+			DownloadStatus:       DownloadDownloaded,
+			UploadStatus:         upStatus,
+			BallchasingID:        stats.BallchasingID,
+			BallchasingURL:       stats.BallchasingURL,
+			BlueScore:            stats.BlueScore,
+			OrangeScore:          stats.OrangeScore,
+			WinnerTeam:           stats.WinnerTeam,
+			ReplayStatsJSON:      string(statsJSON),
+			SyncedAt:             &now,
+			CreatedAt:            now,
+			UpdatedAt:            now,
+		}
+		s.matches[guid] = rec
+	} else {
+		if stats.MapName != "" {
+			rec.MapName = stats.MapName
+		}
+		if stats.Playlist != 0 {
+			rec.Playlist = stats.Playlist
+		}
+		if stats.BallchasingID != "" {
+			rec.BallchasingID = stats.BallchasingID
+			rec.UploadStatus = UploadUploaded
+		}
+		if stats.BallchasingURL != "" {
+			rec.BallchasingURL = stats.BallchasingURL
+		}
+		rec.BlueScore = stats.BlueScore
+		rec.OrangeScore = stats.OrangeScore
+		rec.WinnerTeam = stats.WinnerTeam
+		rec.ReplayStatsJSON = string(statsJSON)
+		rec.SyncedAt = &now
+		rec.UpdatedAt = now
+		if rec.DownloadStatus == DownloadPending {
+			rec.DownloadStatus = DownloadDownloaded
+		}
+	}
+
+	// Upsert players
+	for _, p := range stats.Players {
+		pid := strings.TrimSpace(p.OnlineID)
+		if pid == "" {
+			continue
+		}
+		plat := strings.TrimSpace(p.Platform)
+		if plat == "" {
+			plat = "Unknown"
+		}
+		canonicalID := pid
+		if !strings.Contains(canonicalID, "|") {
+			canonicalID = fmt.Sprintf("%s|%s|0", plat, pid)
+		}
+
+		pRec, pExists := s.players[canonicalID]
+		if !pExists {
+			s.players[canonicalID] = &PlayerRecord{
+				PlayerID:    canonicalID,
+				Platform:    plat,
+				PlayerName:  strings.TrimSpace(p.Name),
+				FirstSeenAt: now,
+				LastSeenAt:  now,
+			}
+		} else {
+			pRec.Platform = plat
+			pRec.PlayerName = strings.TrimSpace(p.Name)
+			pRec.LastSeenAt = now
+		}
+	}
+
+	return s.saveLocked()
+}
+
+// ListHistoricalMatches returns paginated historical matches matching the filter.
+func (s *JSONStore) ListHistoricalMatches(ctx context.Context, filter MatchFilter) ([]*HistoricalMatchRecord, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, 0, ErrStoreClosed
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	var filtered []*MatchRecord
+	q := strings.ToLower(strings.TrimSpace(filter.Query))
+
+	for _, m := range s.matches {
+		if filter.Playlist > 0 && m.Playlist != filter.Playlist {
+			continue
+		}
+		if q != "" {
+			if !strings.Contains(strings.ToLower(m.MatchGUID), q) &&
+				!strings.Contains(strings.ToLower(m.MapName), q) &&
+				!strings.Contains(strings.ToLower(m.ReplayStatsJSON), q) {
+				continue
+			}
+		}
+		filtered = append(filtered, cloneMatchRecord(m))
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].RecordStartTimestamp != filtered[j].RecordStartTimestamp {
+			return filtered[i].RecordStartTimestamp > filtered[j].RecordStartTimestamp
+		}
+		return filtered[i].MatchGUID < filtered[j].MatchGUID
+	})
+
+	total := len(filtered)
+	if offset >= total {
+		return []*HistoricalMatchRecord{}, total, nil
+	}
+
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	sliced := filtered[offset:end]
+	results := make([]*HistoricalMatchRecord, len(sliced))
+	for i, m := range sliced {
+		hist := &HistoricalMatchRecord{
+			MatchRecord: *m,
+			Result:      "unknown",
+		}
+		if m.ReplayStatsJSON != "" {
+			var st ReplayMatchStats
+			if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err == nil {
+				hist.Stats = &st
+			}
+		}
+		if m.BlueScore > m.OrangeScore {
+			hist.Result = "victory"
+		} else if m.OrangeScore > m.BlueScore {
+			hist.Result = "defeat"
+		} else if m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0) {
+			hist.Result = "draw"
+		}
+		results[i] = hist
+	}
+
+	return results, total, nil
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -896,5 +897,45 @@ func TestCLI_Runner_PlayerTracking_Disabled_BackwardCompatibility(t *testing.T) 
 	}
 	if daemonWiredWithTracker {
 		t.Error("daemon should not have active player tracking wired")
+	}
+}
+
+func TestCLI_SyncBallchasingHistory_Flag(t *testing.T) {
+	bcSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/" {
+			_ = json.NewEncoder(w).Encode(ballchasing.PingResponse{
+				Name:    "HeroPlayer",
+				SteamID: "76561198000000001",
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(ballchasing.ReplayListResponse{
+			Count: 0,
+			List:  []ballchasing.ReplayItem{},
+		})
+	}))
+	defer bcSrv.Close()
+
+	runner := createTestRunner(io.Discard, io.Discard)
+	runner.NewBallchasing = func(cfg ballchasing.ClientConfig) (ballchasing.ReplayUploader, error) {
+		return ballchasing.NewClient(ballchasing.ClientConfig{
+			BaseURL: bcSrv.URL,
+			APIKey:  "dummy-key",
+		})
+	}
+
+	daemonStarted := false
+	runner.NewDaemon = func(s daemon.Syncer, cfg *config.Config, opts ...daemon.Option) (DaemonEngine, error) {
+		daemonStarted = true
+		return &mockDaemonEngine{}, nil
+	}
+
+	exitCode := runner.Run(context.Background(), []string{"--sync-ballchasing-history"})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+	if daemonStarted {
+		t.Error("expected daemon not to start when --sync-ballchasing-history flag is passed")
 	}
 }

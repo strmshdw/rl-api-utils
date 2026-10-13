@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/dank/rl-api-utils/internal/replay"
 	"github.com/dank/rl-api-utils/internal/storage"
 )
 
@@ -225,6 +226,12 @@ func (s *Syncer) RunCycle(ctx context.Context) (*SyncStats, error) {
 			continue
 		}
 
+		if latest, err := s.store.GetMatch(ctx, rec.MatchGUID); err == nil && latest != nil {
+			if latest.DownloadStatus == storage.DownloadDownloaded {
+				continue
+			}
+		}
+
 		if err := s.store.MarkDownloading(ctx, rec.MatchGUID); err != nil {
 			s.logger.Warn("failed to mark match downloading",
 				slog.String("guid", rec.MatchGUID),
@@ -262,6 +269,15 @@ func (s *Syncer) RunCycle(ctx context.Context) (*SyncStats, error) {
 			slog.String("guid", rec.MatchGUID),
 			slog.String("local_path", localPath),
 		)
+
+		// Live replay download hook: sync replay stats with captured telemetry keyed by match GUID
+		if syncErr := s.SyncDownloadedReplayStats(ctx, rec.MatchGUID, localPath); syncErr != nil {
+			s.logger.Warn("failed to sync replay stats for downloaded replay",
+				slog.String("guid", rec.MatchGUID),
+				slog.String("local_path", localPath),
+				slog.Any("error", syncErr),
+			)
+		}
 	}
 
 	// 5. Upload pending replays
@@ -283,6 +299,12 @@ func (s *Syncer) RunCycle(ctx context.Context) (*SyncStats, error) {
 				slog.String("guid", rec.MatchGUID),
 			)
 			continue
+		}
+
+		if latest, err := s.store.GetMatch(ctx, rec.MatchGUID); err == nil && latest != nil {
+			if latest.UploadStatus == storage.UploadUploaded || latest.UploadStatus == storage.UploadDuplicate {
+				continue
+			}
 		}
 
 		if err := s.store.MarkUploading(ctx, rec.MatchGUID); err != nil {
@@ -353,4 +375,60 @@ func (s *Syncer) RunCycle(ctx context.Context) (*SyncStats, error) {
 	// 6. Return populated cycle statistics
 	stats.PopulateAliases()
 	return stats, nil
+}
+
+// SyncDownloadedReplayStats parses the downloaded replay file and merges the replay statistics
+// with telemetry in the local store using matchGUID as key.
+func (s *Syncer) SyncDownloadedReplayStats(ctx context.Context, matchGUID, localPath string) error {
+	meta, err := replay.ParseReplayFile(localPath)
+	if err != nil {
+		return fmt.Errorf("parsing replay file: %w", err)
+	}
+
+	existing, _ := s.store.GetMatch(ctx, matchGUID)
+	playlist := 0
+	if existing != nil {
+		playlist = existing.Playlist
+	}
+
+	var players []storage.ReplayPlayerStats
+	for _, p := range meta.Players {
+		players = append(players, storage.ReplayPlayerStats{
+			Name:     p.Name,
+			Platform: p.Platform,
+			OnlineID: p.OnlineID,
+			Team:     p.Team,
+			Score:    p.Score,
+			Goals:    p.Goals,
+			Assists:  p.Assists,
+			Saves:    p.Saves,
+			Shots:    p.Shots,
+			IsBot:    p.IsBot,
+		})
+	}
+
+	st := &storage.ReplayMatchStats{
+		MatchGUID:   matchGUID,
+		MapName:     meta.MapName,
+		Playlist:    playlist,
+		BlueScore:   meta.Team0Score,
+		OrangeScore: meta.Team1Score,
+		WinnerTeam:  meta.WinnerTeam,
+		Duration:    int(meta.TotalSeconds),
+		Date:        meta.Date,
+		Players:     players,
+	}
+
+	if err := s.store.SyncReplayStats(ctx, st); err != nil {
+		return fmt.Errorf("storing synced replay stats: %w", err)
+	}
+
+	s.logger.Info("synced replay stats into local store",
+		slog.String("guid", matchGUID),
+		slog.Int("players", len(players)),
+		slog.Int("blue_score", meta.Team0Score),
+		slog.Int("orange_score", meta.Team1Score),
+	)
+
+	return nil
 }

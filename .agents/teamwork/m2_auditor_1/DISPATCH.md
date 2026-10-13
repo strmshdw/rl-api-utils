@@ -1,26 +1,30 @@
 # Dispatch: m2_auditor_1
 
-**Milestone**: M2 - Auth & PsyNet Integration
-**Role**: Forensic Auditor (internal/auth & internal/psynet)
+## Mission & Role
+You are `m2_auditor_1`, the Forensic Auditor for Milestone 2: Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment (R2 & R3).
+Working directory: `d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1`
 
-## Scope
-Perform forensic integrity audit on Milestone 2 deliverables (`internal/auth` and `internal/psynet`):
-- Checks:
-  1. Hardcoded Output Detection: check for hardcoded test GUIDs, timestamps, tokens, or mock return branches in production code.
-  2. Facade Implementation Detection: verify all methods perform authentic logic (genuine OAuth flows, token exchange, HTTP streaming, size checking, atomic renaming).
-  3. Pre-populated Artifact Detection: ensure no stale output files, dummy replays, or pre-recorded responses exist in the repo.
-  4. Behavioral Verification: verify tests run and pass authentically.
-  5. Static Analysis: verify `go vet` passes cleanly.
-- Provide verdict (CLEAN or INTEGRITY_VIOLATION) with full evidence in `d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1\handoff.md` and notify parent via `send_message`.
+## Scope & Objective
+Perform rigorous forensic integrity verification of Milestone 2 changes in `web/src/components/live/` and `web/src/components/session/`:
+1. Static Analysis: Inspect `RosterTable.tsx`, `PlayerRow.tsx`, and `MatchDetailModal.tsx`. Ensure stat badges, team goals, and disconnected styling are genuinely rendered and computed from player data, not hardcoded mock values.
+2. Dynamic Execution: Run `npm test -- --run` in `web/` and verify that all 150 tests pass legitimately.
+3. Cheating / Facade Detection: Verify no test-only branching (e.g. `if (isTest) return ...`) in production components.
+4. Report: Provide a clear binary verdict: `CLEAN` or `INTEGRITY VIOLATION` / `CHEATING DETECTED`.
 
-## 2026-09-25T03:51:30Z
+## Inputs
+- `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T11:02:53Z`)
+- `d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md`
+- `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md`
+
+## Output
+Write your handoff report to `d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1\handoff.md`.
+
+## 2026-10-06T12:18:38Z
 You are m2_auditor_1.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md.
-
-Perform forensic integrity audit on Milestone 2 (internal/auth and internal/psynet):
-1. Audit for hardcoded test outputs, dummy implementations, facade structs, fake assertions, or bypassed requirements.
-2. Check for pre-populated artifacts or stale output files.
-3. Verify test execution and go vet.
-4. Provide your verdict (CLEAN or INTEGRITY_VIOLATION) with full evidence in d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1\handoff.md and notify parent via send_message.
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1
+Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md, and d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1\DISPATCH.md.
+Perform forensic integrity audit on Milestone 2 frontend changes in web/src/components/live/ and MatchDetailModal.tsx.
+Check for static integrity, dynamic execution, lack of hardcoded cheats or facade implementations.
+State your verdict as CLEAN or INTEGRITY VIOLATION in:
+d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1\handoff.md
+Send message to parent when done.

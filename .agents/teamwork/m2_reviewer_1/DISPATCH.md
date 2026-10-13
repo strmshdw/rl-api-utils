@@ -1,47 +1,40 @@
 # Dispatch: m2_reviewer_1
 
-**Milestone**: M2 - Auth & PsyNet Integration
-**Role**: Reviewer 1 (internal/auth & internal/psynet)
+## Mission & Role
+You are `m2_reviewer_1`, an independent reviewer for Milestone 2: Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment (R2 & R3).
+Working directory: `d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1`
 
-## Scope
-Review the Milestone 2 implementation delivered by `m2_worker_1`:
-- Source files:
-  - `internal/auth/provider.go`
-  - `internal/auth/epic.go`
-  - `internal/auth/steam.go`
-  - `internal/auth/auth_test.go`
-  - `internal/psynet/client.go`
-  - `internal/psynet/client_test.go`
-  - `internal/psynet/downloader.go`
-  - `internal/psynet/downloader_test.go`
-  - `internal/testutil/mock_psynet.go`
-- Review criteria:
-  - Correctness, completeness, and interface conformance (`AuthProvider`, `MatchHistoryProvider`, `ReplayDownloader`).
-  - Error propagation and context cancellation handling.
-  - Windows file system safety: handles closed before rename, retry backoff on transient lock.
-  - Run build, unit tests, and vet:
-    ```powershell
-    $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-    cd d:\code\rl-api-utils
-    go test -v -count=1 ./internal/auth/...
-    go test -v -count=1 ./internal/psynet/...
-    go vet ./internal/auth/... ./internal/psynet/...
-    ```
-- Provide verdict (APPROVE or REQUEST_CHANGES) in `d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1\handoff.md` and notify parent via `send_message`.
+## Scope & Verification Tasks
+Review the frontend changes implemented by `m2_worker_1`:
+- `web/src/components/live/RosterTable.tsx`
+- `web/src/components/live/PlayerRow.tsx`
+- `web/src/components/session/MatchDetailModal.tsx`
+- `web/src/components/live/LiveGameView.layout.test.tsx`
 
-## 2026-09-25T03:51:30Z
-You are m2_reviewer_1.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md.
+1. Verify semantic table architecture with `.overflow-x-auto` wrapper and all 11 `data-testid="th-*"` headers.
+2. Verify glowing team headers with aggregated goals badge (`data-testid="team-goals"`) and aggregated score badge (`data-testid="team-score"`).
+3. Verify prominent stat badge pills for Score, Goals (amber glow), Assists (cyan), Saves (emerald), Shots, Demos, Rank, and MMR (`toFixed(1)`).
+4. Verify disconnected styling (`opacity-65 saturate-60 hover:opacity-85`) and `data-testid="badge-disconnected"` with `WifiOff` icon.
+5. Run tests and builds:
+   - `cd web; npm test -- --run` (verify all 150 tests pass)
+   - `npm run build` (verify clean Vite bundle into `internal/web/dist`)
+6. State your verdict clearly as `APPROVE` or `REQUEST_CHANGES` in your handoff report.
 
-Review Milestone 2 (Auth & PsyNet Integration):
-1. Review internal/auth/provider.go, epic.go, steam.go, auth_test.go, internal/psynet/client.go, client_test.go, downloader.go, downloader_test.go, and internal/testutil/mock_psynet.go.
-2. Run build and tests:
-   $env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-   cd d:\code\rl-api-utils
-   go test -v -count=1 ./internal/auth/...
-   go test -v -count=1 ./internal/psynet/...
-   go vet ./internal/auth/... ./internal/psynet/...
-3. Provide your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1\handoff.md and notify parent via send_message.
+## Inputs
+- `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T11:02:53Z`)
+- `d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md`
+- `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md`
 
+## Output
+Write your handoff report to `d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1\handoff.md`.
+
+
+## 2026-10-06T12:18:37Z
+[Message] timestamp=2026-10-06T12:18:37Z sender=18e4e66b-5835-4b6b-bd1e-a34092f47346 priority=MESSAGE_PRIORITY_HIGH content=You are m2_reviewer_1.
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1
+Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md, and d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1\DISPATCH.md.
+Review Milestone 2 frontend changes in RosterTable.tsx, PlayerRow.tsx, MatchDetailModal.tsx, and LiveGameView.layout.test.tsx.
+Run tests and build (npm test -- --run in web/, npm run build).
+State your verdict clearly as APPROVE or REQUEST_CHANGES in:
+d:\code\rl-api-utils\.agents\teamwork\m2_reviewer_1\handoff.md
+Send message to parent when done.

@@ -1,83 +1,84 @@
-# Sentinel Handoff: Live Game UI Revamp, Persistent Player State, and Match Logging
+# Project Sentinel Completion Report: True In-Game MMR & Sleek Esports Matchup UX
 
-- **Agent**: Sentinel (`sentinel`)
-- **Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\sentinel`
-- **Parent**: `f76e2283-f213-493e-a059-9f6c1bd7cfd9`
-- **Date**: 2026-10-06T10:37:00Z
-- **Verdict**: **VICTORY CONFIRMED**
+**Date**: 2026-10-06T12:35:00Z  
+**Request Reference**: `.agents/teamwork/ORIGINAL_REQUEST.md` (`## 2026-10-06T11:02:53Z`)  
+**Verdict**: **VICTORY CONFIRMED** (by independent auditor `victory_auditor_5`)  
+**Orchestrator**: `orchestrator_8` (`18e4e66b-5835-4b6b-bd1e-a34092f47346`)  
+**Auditor**: `victory_auditor_5` (`04101c93-dc70-452c-999b-af86f590648c`)  
 
 ---
 
 ## 1. Observation
 
-All requirements specified under `ORIGINAL_REQUEST.md ## 2026-10-06T08:30:09Z` have been implemented, tested, and validated by an independent Victory Auditor:
+All requirements specified under `## 2026-10-06T11:02:53Z` have been fully implemented, rigorously tested across iterative gates, and independently audited:
 
-1. **R1. UI Revamp**:
-   - `web/src/components/live/PlayerRow.tsx` and `RosterTable.tsx`: Live game match rosters rearranged to place box score telemetry (`Score`, `Goals`, `Assists`, `Saves`, `Shots`, `Demos`) directly next to player names, ahead of secondary rank/MMR/platform details.
-   - Enforced high-contrast typography hierarchy (Score at 18px white font-black; Goals at 18px amber font-black with glow; Assists at 16px cyan font-extrabold; Saves at 16px emerald font-extrabold; Shots/Demos at 14px).
-   - Removed superfluous UI chrome: static footer hidden during active matches, daemon debug info (`Port 49125`, `Uptime`) removed, playlist carousel hidden during live match, and redundant player count headers removed from `ScoreboardBanner.tsx`.
-   - Compressed vertical layout hierarchy: stack height for standard 3v3 matches constrained to ~376px (< 414px for 4v4), ensuring zero vertical scroll on standard viewports (1080p, 1440p, 4K, 768p) with >500px headroom.
-   - Automated testing: 19 DOM layout tests in `web/src/components/live/LiveGameView.layout.test.tsx` (145 total web tests passing).
+1. **R1: True In-Game MMR Conversion**:
+   - Implemented `ConvertSkillRatingToMMR(skillRating float64)` in `internal/playertrack/rank_client.go` using the canonical formula `math.Round((skillRating * 20.0) + 100.0)`.
+   - Included defensive guards: casual/unranked guard (`<= 0.0 -> 0.0`) preventing unranked modes from defaulting to 100 MMR, and idempotency guard (`> 150.0 -> unchanged`) preserving pre-scaled MMR values.
+   - Integrated into single ingestion chokepoints (`FromSkill` and `BuildRanksSnapshot`) and dynamic deserialization migration (`ParseRanksJSON`).
+   - Downstream session tracking (`internal/session`), active match state, SQLite persistence (`internal/storage`), and JSON APIs (`/api/current-match`, `/api/session`, `/api/players`) verified to operate natively on true in-game MMR scale.
 
-2. **R2. Persistent Player State on Disconnect**:
-   - `internal/playertrack/tracker.go`: `OnUpdateState` implements differential player retention within the active match GUID. Players present in previous ticks who disconnect or leave mid-game are preserved in `currentMatch` with `IsDisconnected: true`, maintaining their accumulated statistics and team affiliations. Casual AI bots departing are cleanly ignored.
-   - Verified by programmatic disconnect tests in `internal/playertrack/tracker_test.go` and `internal/session/session_test.go`.
+2. **R2: Sleek Esports Matchup UX Overhaul**:
+   - Redesigned live game view (`web/src/components/live/RosterTable.tsx`, `PlayerRow.tsx`) into a high-contrast broadcast-style esports matchup.
+   - Implemented high-contrast horizontal team groupings (Blue vs Orange) with glowing ambient borders (`border-[#00a2ff]/40` and `border-[#ff7b00]/40`), ambient gradient lines, and drop shadows.
+   - Implemented glowing team headers with aggregated goals badge (`data-testid="team-goals"`) and aggregated score badge (`data-testid="team-score"`).
+   - Preserved semantic table hierarchy (`<table>`, `<th>`, `<tr>`, `<td>`) wrapped in `.overflow-x-auto`, ensuring 100% parity with Column Customizer across all 1,024 column configurations.
+   - Streamlined player rows with prominent, readable stat badges (Score, Goals with amber glow, Assists, Saves, Shots, Demos) and verified zero vertical scrolling on standard 1080p desktop and 768p laptop displays.
 
-3. **R3. Match Logging for Disconnected Participants**:
-   - `Tracker.OnMatchEnded` aggregates both active and disconnected participants into match outcome vectors, recording win/loss outcomes to persistent storage (`player_matchups`) via `storage.RecordMatchResults` (both SQLite and JSONStore).
-   - `internal/session/session.go`: `ConcludeMatch` evaluates win/loss against team numbers for all participants, setting `Won *bool` and aggregating all player goals into final team scores.
+3. **R3: Disconnected Player UX Treatment**:
+   - Applied clean visual distinction for disconnected players via dimmed styling (`opacity-65 saturate-60 hover:opacity-85`) and a clean indicator badge (`data-testid="badge-disconnected"` with `WifiOff` icon).
+   - Preserved all stats, team placement, MMR numbers, and outcome logging in both live match state and post-game box score modal (`MatchDetailModal.tsx`).
+
+4. **Independent Post-Victory Audit Results (`victory_auditor_5`)**:
+   - **Phase A (Timeline & Traceability)**: PASS (100% requirements traceability, zero anomalies).
+   - **Phase B (Anti-Cheating & Integrity)**: PASS (Zero hardcoded values, zero facade returns, zero mock branching in production code).
+   - **Phase C (Independent Empirical Execution)**:
+     - Frontend Vitest: 197/197 tests passed across all 13 test files (100% pass).
+     - Frontend Build: `npm run build` cleanly bundled into `internal/web/dist` with 0 errors.
+     - Backend Go: 100% pass across all 14 Go packages.
+     - Executable: `go build ./cmd/rl-sync` compiles `rl-sync.exe` cleanly.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Routing**: Task was evaluated per the Routing Decision Table. With multiple distinct requirements across frontend and backend, it was routed to the General path (`teamwork_preview_orchestrator`).
-2. **Lifecycle Execution**: `orchestrator_6` drove the survey phase, M1 (Persistent State on Disconnect), M2 (Match Logging), M3 (UI Revamp & Viewport Optimization), and M4 (Full Regression & Hardening) across dedicated explorers, workers, reviewers, challengers, and forensic auditors.
-3. **Independent Verification**: On the orchestrator's completion claim, `teamwork_preview_victory_auditor` (`victory_auditor_4`) was spawned with fresh context. The auditor executed:
-   - Target disconnect tests in `internal/playertrack` and `internal/session`: 100% PASS.
-   - Repository-wide Go test suite (`go test -count=1 ./...`): 14/14 packages PASS.
-   - Static analysis (`go vet ./...`): 0 warnings.
-   - Frontend test suite (`npm --prefix web test`): 145/145 PASS.
-   - Production asset build (`npm --prefix web run build`): PASS.
-   - Binary compilation (`go build ./cmd/rl-sync`): PASS.
-   - Binary execution (`.\rl-sync.exe -help`, `.\rl-sync.exe -version`): PASS.
-4. **Cleanup**: Both monitoring crons (task-26, task-28) were killed, and all subagents terminated via `manage_subagents(Action="kill_all")`.
+- **Single-Chokepoint Ingestion**: Converting raw PsyNet skill ratings at the rank client level ensures all downstream consumers receive standard in-game MMR numbers without requiring widespread schema rewrites or fragile ad-hoc conversions across disparate controllers.
+- **Dynamic Legacy Migration**: Applying `ConvertSkillRatingToMMR` during `ParseRanksJSON` guarantees backwards compatibility with existing SQLite database records populated under older daemon runs without requiring destructive manual database migrations.
+- **Semantic Table Restoration**: Re-architecting the live game view within a semantic `<table>` wrapped in a horizontal scroll container provides the broadcast aesthetic while preserving DOM accessibility, responsive flex budget, and existing customizer test contracts.
 
 ---
 
 ## 3. Caveats
 
-1. **Narrow Viewports (< 1024px)**: Responsive CSS collapses side-by-side team tables into stacked columns on mobile screens (<1024px width), where vertical scrolling is expected. Zero vertical scrolling applies to standard desktop viewports (1080p, 1440p, 4K, 768p).
-2. **Browser Zoom > 150%**: Extreme browser zoom reducing vertical viewport height below ~450px will cause browser-level scrollbars.
+- **Unranked Playlists**: Playlists where PsyNet reports skill rating `0.0` or unranked status will display `0.0` MMR due to the `< 0.0` guard. This avoids displaying an artificial `100.0` MMR.
+- **Pre-existing Stored Ratings**: SQLite records containing historical snapshots with raw decimal ratings (> 0 and <= 150) will be automatically converted to standard MMR on read; records already saved in converted scale (> 150) are preserved as-is.
 
 ---
 
 ## 4. Conclusion
 
-All acceptance criteria and requirements from `ORIGINAL_REQUEST.md ## 2026-10-06T08:30:09Z` have been achieved, verified, and audited. The rollout is complete.
+All acceptance criteria are fully satisfied. The project delivery is complete, verified, and certified **VICTORY CONFIRMED**.
 
 ---
 
 ## 5. Verification Method
 
-To reproduce the verified outcomes:
-```powershell
-# 1. Verify Go disconnect and player retention tests
-go test -v -run TestTracker_MidGameDisconnect ./internal/playertrack/...
-go test -v -run TestSessionTracker_MidGameDisconnect ./internal/session/...
+To independently verify the deliverables:
 
-# 2. Run repository-wide test suite
+```powershell
+# 1. Run all backend Go tests
 go test -count=1 ./...
 
-# 3. Static analysis & build
-go vet ./...
+# 2. Run frontend Vitest test suite
+cd web
+npm test -- --run
+cd ..
+
+# 3. Build frontend bundle into Go embedded dist
+cd web
+npm run build
+cd ..
+
+# 4. Compile standalone binary with embedded UI
 go build ./cmd/rl-sync
-
-# 4. Frontend tests & production build
-npm --prefix web test
-npm --prefix web run build
-
-# 5. Sanity check binary
-.\rl-sync.exe -help
-.\rl-sync.exe -version
 ```

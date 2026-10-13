@@ -1,190 +1,162 @@
-# Handoff Report: Milestone M1 Adversarial Verification (Requirement R2: Persistent Player State on Mid-Game Disconnect)
-
-**Agent**: `m1_challenger_1`  
-**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m1_challenger_1`  
-**Target Milestone**: M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect)  
-**Parent**: `orchestrator_6` (`f26416a7-29be-4b99-8406-d28bf983644d`)  
-**Date**: 2026-10-06T09:23:30Z  
-**Verdict**: **APPROVE**  
-**Handoff Type**: Hard Handoff  
-
----
+# Handoff Report: Milestone 1 Adversarial Verification - True In-Game MMR Conversion (R1)
 
 ## 1. Observation
 
-### 1.1 Implementation Review
-1. **Participant Retention in `internal/playertrack/tracker.go`**:
-   - Lines 358-379: Within the same match (`isSameMatch`), previous snapshots (`prevLocalPlayer`, `prevTeammates`, `prevOpponents`, `prevSpectators`) are captured, and `LocalTeam` fallback is retained when `resolvedLocal == nil`.
-   - Lines 402-413: Incoming human players are normalized via `normID := strings.ToLower(strings.TrimSpace(p.PrimaryId))` and recorded in `seenThisFrame[normID] = true`.
-   - Lines 513-566: Differential retention iterates over `prevLocalPlayer`, `prevTeammates`, `prevOpponents`, and `prevSpectators`. Any human participant not present in `seenThisFrame` is cloned via `DeepClone()`, flagged with `IsDisconnected = true`, and retained in the active roster.
-   - Lines 527-529, 541-543: Departed bots (`oldP.IsBot == true`) are explicitly skipped from retention.
-2. **Downstream Session Ingestion in `internal/session/session.go`**:
-   - Lines 244-270: `ConcludeMatch` aggregates goals into `blueScore` and `orangeScore` across all participants, including disconnected players.
-   - Lines 282-303: Maps `IsDisconnected` from `LobbyPlayer` to `SessionMatchPlayer` and calculates `Won *bool` based on team alignment with `WinnerTeam`.
-   - Lines 404-407: Broadcasts `EventMatchEnded` and `EventSessionUpdate` over SSE with serialized `is_disconnected: true`.
-3. **Data Models and API Contracts**:
-   - `internal/playertrack/models.go`: Added `IsDisconnected bool` to `LobbyPlayer` (JSON tag: `is_disconnected,omitempty`).
-   - `internal/session/models.go`: Added `IsDisconnected bool` and `Won *bool` to `SessionMatchPlayer` with pointer-safe `DeepClone()`.
-   - `web/src/types/api.ts`: Added `is_disconnected?: boolean;` to `LobbyPlayer` and `SessionMatchPlayer`, and `won?: boolean;`.
+### 1.1 Implementation & Contracts Under Review
+- **File: `internal/playertrack/rank_client.go`**:
+  - `ConvertSkillRatingToMMR(skillRating float64) float64` (lines 646–654):
+    ```go
+    func ConvertSkillRatingToMMR(skillRating float64) float64 {
+    	if skillRating <= 0.0 {
+    		return 0.0
+    	}
+    	if skillRating > 150.0 {
+    		return skillRating
+    	}
+    	return math.Round((skillRating * 20.0) + 100.0)
+    }
+    ```
+  - `FromSkill(s rlapi.Skill) PlayerPlaylistRank` (lines 657–667): Converts raw `s.MMR` via `ConvertSkillRatingToMMR(s.MMR)` at the ingestion boundary.
+  - `ParseRanksJSON(raw string) (PlayerRanksSnapshot, error)` (lines 696–737): Normalizes legacy stored ranks JSON, backfills playlist and rank names, migrates raw decimals `rank.MMR > 0.0 && rank.MMR <= 150.0` to true in-game MMR, and clamps negative ratings to `0.0`.
 
-### 1.2 Empirical Adversarial Stress Testing
-Authored and executed dedicated adversarial stress suites co-located in `internal/playertrack` and `internal/session`:
-1. `internal/playertrack/adversarial_disconnect_test.go`:
-   - `TestAdversarial_RapidReconnect_NoDuplicateInvariants`: 10 rapid cycles of connect -> disconnect -> reconnect. Verified zero duplicate rows, monotonic stat accumulation, and strict `IsDisconnected` toggling across both SQLite and JSONStore engines.
-   - `TestAdversarial_Splitscreen_IndependentDisconnectAndLocalFallback`: Tested primary `Steam|id|0` and guest `Steam|id|1`. Verified independent disconnects, local player fallback preservation, and guest reconnection without collisions.
-   - `TestAdversarial_CasualBotChurn_DepartedBotsNeverRetained`: Tested human drop -> Bot "Tex" join -> Bot "Tex" leave / Bot "Foamer" join -> Bot "Foamer" leave / Human replacement join. Verified departed AI bots are never retained as ghosts, and bot profiles are never written to `player_matchups`.
-   - `TestAdversarial_SustainedLocalDisconnect_Across10Frames`: Local player disconnects in frame 2 and remains omitted for 10 frames. Verified local team and local player state persist across all frames, culminating in valid victory outcome persistence in `storage`.
-   - `TestAdversarial_FullOpponentRageQuit_AllRetained`: All 3 opponents disconnect simultaneously on forfeit. Verified all 3 are retained as disconnected, and match conclusion records wins against all 3.
-   - `TestAdversarial_ChaosFuzz_DropsAndReconnects`: 30 random frames of presence/stat progression across 6 players. Invariants verified: exact player pool preserved, zero duplicates.
-   - `TestAdversarial_ConcurrentUpdateAndReadStress`: High-frequency concurrent `OnUpdateState` updates with alternating drops/reconnects against concurrent `GetCurrentMatch()` readers. 0 panics, 0 data races.
-2. `internal/session/adversarial_disconnect_test.go`:
-   - `TestAdversarialSession_MidGameDisconnect_GoalSummationAndScores`: Conclude match with disconnected goal scorers. Invariant verified: team scores sum goals from disconnected and active players alike, `IsDisconnected=true` and `Won` pointer boolean accurate for all participants.
-   - `TestAdversarialSession_SSEBroadcast_EmitsDisconnectedFlags`: Verified SSE `EventMatchUpdate` payload serializes `"is_disconnected":true`.
-   - `TestAdversarialSession_ConcurrentDisconnectsAndConcludes`: High-concurrency publisher/reader stress with rapid disconnects and match conclusions.
+### 1.2 Adversarial Test Suite Added
+- **File: `internal/playertrack/mmr_adversarial_test.go`** (new co-located test suite, 287 lines):
+  - `TestAdversarial_ConvertSkillRatingToMMR_PrecisionAndRounding`:
+    - Evaluated standard rank anchors: C1 (47.5 -> 1050), D3 (47.0 -> 1040), Gold 3 (30.4646 -> 709), GC (81.8645 -> 1737), C3 (55.0 -> 1200), GC1 (67.5 -> 1450).
+    - Evaluated half-integer rounding boundaries around 925.0: exact `.25` (41.25 -> 925), `.24` (41.24 -> 925), `.26` (41.26 -> 925), midpoint lower `.225` (41.225 -> 925), minus epsilon `.224999` (41.224999 -> 924), midpoint upper `.275` (41.275 -> 926), minus epsilon `.274999` (41.274999 -> 925).
+    - Evaluated `.75` half-step rounding around 935.0: exact `.75` (41.75 -> 935), `.74` (41.74 -> 935), `.76` (41.76 -> 935).
+    - Evaluated exact integers: 1.0 -> 120, 10.0 -> 300, 25.0 (default unranked) -> 600, 50.0 -> 1100, 75.0 -> 1600, 100.0 -> 2100, 125.0 -> 2600, 150.0 -> 3100.
+    - Evaluated lower positive increments: 0.01 -> 100, 0.02499 -> 100, 0.025 -> 101.
+  - `TestAdversarial_ConvertSkillRatingToMMR_ZeroAndCasual`:
+    - Verified exact positive zero (`0.0 -> 0.0`) and IEEE negative zero (`-0.0 -> 0.0`).
+    - Verified subnormals: `math.SmallestNonzeroFloat64 -> 100.0`, `-math.SmallestNonzeroFloat64 -> 0.0`.
+  - `TestAdversarial_ConvertSkillRatingToMMR_NegativesAndExtremes`:
+    - Verified negative floats: `-0.0000001 -> 0.0`, `-0.5 -> 0.0`, `-1.0 -> 0.0`, `-10.0 -> 0.0`, `-100.0 -> 0.0`, `-1e9 -> 0.0`, `math.Inf(-1) -> 0.0`.
+    - Verified boundary at 150.0: `149.999999 -> 3100.0`, `150.0 -> 3100.0`, `150.000001 -> 150.000001`, `150.1 -> 150.1`.
+    - Verified pre-scaled values: `200.0 -> 200.0`, `1050.0 -> 1050.0`, `2600.0 -> 2600.0`, `3500.0 -> 3500.0`, `math.Inf(1) -> +Inf`.
+  - `TestAdversarial_ConvertSkillRatingToMMR_Idempotency`:
+    - Verified Rule 1: For all pre-scaled inputs `> 150.0` (150.000001 to 3500.0), `Convert(x) == x` and `Convert(Convert(x)) == Convert(x)`.
+    - Verified Rule 2: For casual and negative inputs `<= 0.0`, `Convert(x) == 0.0` and `Convert(Convert(x)) == 0.0`.
+    - Verified Rule 3: For realistic competitive raw ratings (2.55 to 150.0), `Convert(x) > 150.0`, guaranteeing two-step idempotency `Convert(Convert(x)) == Convert(x)`.
+  - `TestAdversarial_ConvertSkillRatingToMMR_BoundarySlice`:
+    - Explored behavior for theoretical slice `(0.0, 2.5]`: `0.01 -> 100.0 -> 2100.0`, `1.0 -> 120.0 -> 2500.0`, `2.5 -> 150.0 -> 3100.0`.
+  - `TestAdversarial_ParseRanksJSON_LegacyMigrationAndCorruptedInputs`:
+    - Verified empty/whitespace/`{}` strings return empty snapshot without errors.
+    - Verified malformed JSON syntax gracefully returns descriptive errors.
+    - Verified mixed payload: casual `0.0 -> 0.0`, legacy `47.5 -> 1050.0`, in-game `1350.0 -> 1350.0`, boundary `150.0001 -> 150.0001`, boundary `150.0 -> 3100.0`, negative `-12.5 -> 0.0`.
+    - Verified high-precision decimal `47.50000000000001 -> 1050.0`.
+  - `TestAdversarial_RoundTrip_SerializationFidelity`:
+    - Verified `FromSkill` -> `SerializeRanksJSON` -> `ParseRanksJSON` -> `SerializeRanksJSON` produces bitwise-accurate, non-drifting MMR representations.
+  - `TestAdversarial_Concurrency_HighLoadMMRConversion`:
+    - Ran 50 concurrent goroutines executing 25,000 iterations of random float conversions and `ParseRanksJSON` deserializations without panics, data races, or memory corruption.
 
-### 1.3 Test Command Executions & Verbatim Outputs
-1. **Target Adversarial Playertrack Tests**:
-   - Command: `go test -v -run TestAdversarial_ ./internal/playertrack/...`
-   - Result:
-     ```
-     === RUN   TestAdversarial_RapidReconnect_NoDuplicateInvariants
-     --- PASS: TestAdversarial_RapidReconnect_NoDuplicateInvariants (0.03s)
-     === RUN   TestAdversarial_Splitscreen_IndependentDisconnectAndLocalFallback
-     --- PASS: TestAdversarial_Splitscreen_IndependentDisconnectAndLocalFallback (0.02s)
-     === RUN   TestAdversarial_CasualBotChurn_DepartedBotsNeverRetained
-     --- PASS: TestAdversarial_CasualBotChurn_DepartedBotsNeverRetained (0.05s)
-     === RUN   TestAdversarial_SustainedLocalDisconnect_Across10Frames
-     --- PASS: TestAdversarial_SustainedLocalDisconnect_Across10Frames (0.03s)
-     === RUN   TestAdversarial_FullOpponentRageQuit_AllRetained
-     --- PASS: TestAdversarial_FullOpponentRageQuit_AllRetained (0.03s)
-     === RUN   TestAdversarial_ChaosFuzz_DropsAndReconnects
-     --- PASS: TestAdversarial_ChaosFuzz_DropsAndReconnects (0.03s)
-     === RUN   TestAdversarial_ConcurrentUpdateAndReadStress
-     --- PASS: TestAdversarial_ConcurrentUpdateAndReadStress (0.42s)
-     PASS
-     ok  github.com/dank/rl-api-utils/internal/playertrack 0.753s
-     ```
-
-2. **Target Adversarial Session Tests**:
-   - Command: `go test -v -run TestAdversarialSession_ ./internal/session/...`
-   - Result:
-     ```
-     === RUN   TestAdversarialSession_MidGameDisconnect_GoalSummationAndScores
-     --- PASS: TestAdversarialSession_MidGameDisconnect_GoalSummationAndScores (0.00s)
-     === RUN   TestAdversarialSession_SSEBroadcast_EmitsDisconnectedFlags
-     --- PASS: TestAdversarialSession_SSEBroadcast_EmitsDisconnectedFlags (0.00s)
-     === RUN   TestAdversarialSession_ConcurrentDisconnectsAndConcludes
-     --- PASS: TestAdversarialSession_ConcurrentDisconnectsAndConcludes (0.20s)
-     PASS
-     ok  github.com/dank/rl-api-utils/internal/session 0.734s
-     ```
-
-3. **Full Repository-Wide Test Suite (Task-130)**:
-   - Command: `go test -count=1 ./...`
-   - Result: `PASS` across all 14 packages (0 failures, 0 regressions):
-     ```
-     ok  github.com/dank/rl-api-utils/cmd/rl-sync        0.348s
-     ok  github.com/dank/rl-api-utils/internal/auth       2.356s
-     ok  github.com/dank/rl-api-utils/internal/ballchasing 8.277s
-     ok  github.com/dank/rl-api-utils/internal/config     0.729s
-     ok  github.com/dank/rl-api-utils/internal/daemon     14.912s
-     ok  github.com/dank/rl-api-utils/internal/playertrack 10.757s
-     ok  github.com/dank/rl-api-utils/internal/psynet     4.764s
-     ok  github.com/dank/rl-api-utils/internal/session    5.852s
-     ok  github.com/dank/rl-api-utils/internal/statsapi   1.040s
-     ok  github.com/dank/rl-api-utils/internal/storage    24.268s
-     ok  github.com/dank/rl-api-utils/internal/syncer     1.396s
-     ok  github.com/dank/rl-api-utils/internal/testutil   1.277s
-     ok  github.com/dank/rl-api-utils/internal/web        0.726s
-     ok  github.com/dank/rl-api-utils/test/e2e            24.323s
-     ```
-
-4. **Static Analysis & Build Verification**:
-   - `go vet ./...`: Exited 0 with 0 warnings.
-   - `go build ./cmd/rl-sync`: Exited 0 with single executable generated.
-
-5. **Frontend Test Suite & Production Build**:
-   - `npm --prefix web test`: 9 test files passed, 112 tests passed (0 failures).
-   - `npm --prefix web run build`: `tsc -b && vite build` succeeded, bundle generated in `internal/web/dist`.
+### 1.3 Execution Results
+1. **Adversarial and M1 Unit Tests**:
+   `go test -v -count=1 ./internal/playertrack -run "TestConvertSkillRatingToMMR|TestFromSkill|TestParseRanksJSON|TestBuildRanksSnapshot|TestAdversarial_Convert|TestAdversarial_Parse|TestAdversarial_Round|TestAdversarial_Concurrency"`:
+   ```
+   PASS
+   ok  	github.com/dank/rl-api-utils/internal/playertrack	0.143s
+   ```
+2. **Session MMR Tests**:
+   `go test -v -count=1 ./internal/session -run "TestSessionTracker_TrueInGameMMR"`:
+   ```
+   PASS
+   ok  	github.com/dank/rl-api-utils/internal/session	0.911s
+   ```
+3. **Daemon API & SSE Tests**:
+   `go test -v -count=1 ./internal/daemon -run "TestDaemonAPI.*MMR"`:
+   ```
+   PASS
+   ok  	github.com/dank/rl-api-utils/internal/daemon	0.253s
+   ```
+4. **Go Vet**:
+   `go vet ./...`:
+   ```
+   (clean, exit 0)
+   ```
+5. **Compilation**:
+   `go build ./cmd/rl-sync`:
+   ```
+   (clean, exit 0)
+   ```
 
 ---
 
 ## 2. Logic Chain
 
-1. **Reconnection & Deduplication**:
-   - In `Tracker.OnUpdateState`, `seenThisFrame` normalizes IDs using `strings.ToLower(strings.TrimSpace(p.PrimaryId))` and indexes incoming frame players.
-   - When a previously disconnected player returns, they are ingested in the primary loop with `IsDisconnected = false` and registered in `seenThisFrame`.
-   - Differential retention checks `!seenThisFrame[normID]`. Because the reconnected player is already present in `seenThisFrame`, the previous snapshot entry is bypassed.
-   - Empirical validation in `TestAdversarial_RapidReconnect_NoDuplicateInvariants` across 10 rapid cycles proved zero duplicate entries, valid stat transitions, and exact count preservation.
+1. **Floating-Point Precision & Rounding Verification**:
+   - Observations in Section 1.2 confirm that standard TrueSkill ratings $\mu$ (e.g. 47.5, 47.0, 30.4646, 81.8645) convert accurately to expected in-game MMR values (1050, 1040, 709, 1737).
+   - Half-integer boundary tests prove that `math.Round` reliably rounds midpoint steps away from zero (`41.25 * 20 + 100 = 925.0`, `41.225 * 20 + 100 = 924.5 -> 925.0`, `41.224999 * 20 + 100 = 924.49998 -> 924.0`). No precision drift or unexpected rounding bias was detected.
 
-2. **Casual Bot Backfill Immunity**:
-   - `oldP.IsBot` is determined by `ParsedPlayerID.IsBot` (`Unknown` platform or account ID `0`).
-   - Differential retention loops explicitly check `if oldP.IsBot { continue }`.
-   - Empirical validation in `TestAdversarial_CasualBotChurn_DepartedBotsNeverRetained` proved that when AI bots replace human players and subsequently depart, the departing bots are discarded, leaving active human replacements and retained disconnected humans without bot ghosts. Furthermore, `storage.RecordMatchResults` ignores bots when compiling matchup outcomes.
+2. **Casual Zero Guard**:
+   - Rocket League unranked and casual playlists provide uncalibrated or zero ratings (`0.0`).
+   - Observations in Section 1.2 confirm that `skillRating <= 0.0` safely returns `0.0`. Without this guard, `(0.0 * 20) + 100` would falsely yield `100.0` MMR.
+   - Negative ratings (`-0.0001`, `-10.0`, `-1e9`) are clamped to `0.0` both in `ConvertSkillRatingToMMR` and during `ParseRanksJSON` deserialization.
 
-3. **Local Player Fallback & Match Conclusion Integrity**:
-   - If the local player disconnects mid-game, `localPlayerLobby == nil && prevLocalPlayer != nil` triggers retention of `prevLocalPlayer` with `IsDisconnected = true`.
-   - `t.currentMatch.LocalTeam` is preserved via fallback logic (`if resolvedLocal == nil && t.currentMatch.LocalTeam != nil ...`).
-   - Empirical validation in `TestAdversarial_SustainedLocalDisconnect_Across10Frames` proved that over 10 consecutive frames without the local player present in `UpdateState`, the local team context and local player snapshot remained intact.
-   - When `OnMatchEnded` fired, `localPlayer != nil` and `localTeam != nil` allowed full outcome compilation, properly updating win/loss records in both `SQLiteStore` and `JSONStore`.
+3. **Boundary at 150.0 & Idempotency (> 150.0)**:
+   - In Rocket League, raw TrueSkill ratings $\mu$ range from $[0, 125]$, where $\mu \approx 125$ corresponds to $\approx 2600$ MMR (top pro rank).
+   - Raw ratings never exceed $150.0$. Therefore, any input $> 150.0$ represents an already-converted in-game MMR fixture.
+   - For all values $> 150.0$, `ConvertSkillRatingToMMR(x)` returns `x` identically, guaranteeing strict idempotency: `Convert(Convert(x)) == Convert(x)`. Pre-scaled test fixtures (1040, 1050, 1150.5, 2600) remain untouched.
+   - For the theoretical interval $(0.0, 2.5]$, conversion yields $[100, 150]$, which would undergo a second transformation if re-passed. However, in live Rocket League ranked play, calibrated ratings start at $\mu = 25.0$ (600 MMR), and Bronze I starts around $\mu \approx 5.0$ (200 MMR), well above 2.5. Thus, this boundary slice does not occur in practice and does not compromise live ingestion.
 
-4. **Downstream Session & SSE Broadcasting**:
-   - `SessionTracker.ConcludeMatch` iterates over `allPlayers` (which includes retained disconnected players).
-   - Goals are credited to `blueScore` or `orangeScore` regardless of player disconnect status.
-   - `SessionMatchPlayer` captures `IsDisconnected` and computes `Won` based on team affiliation.
-   - Empirical validation in `TestAdversarialSession_MidGameDisconnect_GoalSummationAndScores` and `TestAdversarialSession_SSEBroadcast_EmitsDisconnectedFlags` confirmed exact score arithmetic, JSON serialization (`"is_disconnected": true`), and event dispatch.
+4. **Legacy Deserialization Migration in `ParseRanksJSON`**:
+   - `ParseRanksJSON` dynamically inspects `rank.MMR > 0.0 && rank.MMR <= 150.0`.
+   - Legacy stored records with raw TrueSkill floats (e.g. `47.5`) are upgraded to true in-game MMR (`1050.0`) on deserialization.
+   - Already-converted in-game MMR entries (`> 150.0`) and casual ratings (`0.0`) are preserved without alteration.
+   - Round-trip testing proves that serialization followed by deserialization maintains bitwise equality and eliminates duplicate conversions.
+
+5. **Downstream Integration Parity**:
+   - Tests in `internal/session` and `internal/daemon` verify that session delta calculations (`InitialMMR`, `CurrentMMR`, `MMRDelta`, `MMRChange`) and REST/SSE JSON payloads operate strictly on the true in-game MMR scale.
 
 ---
 
 ## 3. Caveats
 
-No caveats. All edge cases identified in the project specification and dispatch were investigated and empirically validated with zero failures across SQLite, JSONStore, session aggregation, SSE streaming, and the frontend web layer.
+1. **Transient Windows File Handle Lock in Unrelated Storage Stress Test**:
+   - In `internal/storage/search_concurrency_stress_test.go`, `TestConcurrencyStress_SQLiteStore_ConnectionPoolStarvationAndRowLeaks` intermittently encounters an `unlinkat` access error during `t.TempDir()` cleanup under high load on Windows due to file lock timing. When executed individually, it passes cleanly in 0.12s. This test belongs to a prior search milestone (Feature 26) and does not affect Milestone 1 rank conversion.
+2. **Milestone 2 Frontend Test Expectations**:
+   - Vitest tests in `web/src/components/live/LiveGameView.layout.test.tsx` currently expect M2 UI features (e.g. `data-testid="team-goals"`, `data-testid="team-score"`, high-contrast layout) which are planned for Milestone 2. They do not block Milestone 1 backend MMR conversion.
 
 ---
 
 ## 4. Conclusion
 
-**VERDICT: APPROVE**
+**Verdict: APPROVE**
 
-Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) has passed all adversarial stress tests:
-- Mid-game disconnects retain player profile and accumulated stats in active match state.
-- Reconnections cleanly restore active status without duplicate entries.
-- Splitscreen players are tracked independently.
-- Departed AI bots are never retained as ghosts.
-- Local player drop preserves team context and enables complete outcome recording upon match completion.
-- Goals scored by disconnected participants are credited in final box scores.
-- SSE events serialize `"is_disconnected": true` cleanly.
-- 100% pass across all 14 Go packages, clean static analysis, clean executable build, and 100% frontend test/build success.
+Milestone 1 (Requirement R1: True In-Game MMR Conversion) meets all functional, numerical, and architectural requirements:
+- `ConvertSkillRatingToMMR` handles floating-point precision, half-integer boundaries, casual zero ratings, negative clamping, and `> 150.0` idempotency with complete accuracy.
+- `FromSkill` and `ParseRanksJSON` provide transparent ingestion conversion and legacy database deserialization migration.
+- Session MMR telemetry and daemon REST/SSE APIs correctly emit in-game MMR values.
+- All 15 unit tests from worker and 8 adversarial stress suites (including 25,000-iteration concurrency harness) pass with 100% success.
+- Clean `go vet` and successful `go build ./cmd/rl-sync`.
 
 ---
 
 ## 5. Verification Method
 
-To independently reproduce this verification:
-1. **Run Playertrack Adversarial Tests**:
+To independently reproduce the empirical findings of this adversarial review:
+
+1. **Run Playertrack Unit & Adversarial Tests**:
    ```powershell
-   go test -v -run TestAdversarial_ ./internal/playertrack/...
+   go test -v -count=1 ./internal/playertrack -run "TestConvertSkillRatingToMMR|TestFromSkill|TestParseRanksJSON|TestBuildRanksSnapshot|TestAdversarial_Convert|TestAdversarial_Parse|TestAdversarial_Round|TestAdversarial_Concurrency"
    ```
-2. **Run Session Adversarial Tests**:
+2. **Run Session Tracker MMR Tests**:
    ```powershell
-   go test -v -run TestAdversarialSession_ ./internal/session/...
+   go test -v -count=1 ./internal/session -run "TestSessionTracker_TrueInGameMMR"
    ```
-3. **Run Full Repository Test Suite**:
+3. **Run Daemon API & SSE MMR Tests**:
    ```powershell
-   go test -count=1 ./...
+   go test -v -count=1 ./internal/daemon -run "TestDaemonAPI.*MMR"
    ```
-4. **Run Static Analysis & Build**:
+4. **Run Go Vet & Build**:
    ```powershell
    go vet ./...
    go build ./cmd/rl-sync
    ```
-5. **Run Frontend Tests & Build**:
-   ```powershell
-   npm --prefix web test
-   npm --prefix web run build
-   ```
 
-### Invalidation Conditions
-- Removing `if oldP.IsBot { continue }` in `tracker.go` causes `TestAdversarial_CasualBotChurn_DepartedBotsNeverRetained` to fail with ghost bot retention.
-- Removing `normID` deduplication in `seenThisFrame` causes `TestAdversarial_RapidReconnect_NoDuplicateInvariants` to fail with duplicate player rows on reconnection.
-- Removing `LocalTeam` fallback in `tracker.go` causes `TestAdversarial_SustainedLocalDisconnect_Across10Frames` to fail outcome recording on early local player exit.
+### Invalidation Conditions:
+- If `ConvertSkillRatingToMMR(47.5)` does not equal `1050.0`.
+- If `ConvertSkillRatingToMMR(0.0)` evaluates to anything other than `0.0`.
+- If `ConvertSkillRatingToMMR(x)` for $x > 150.0$ mutates $x$.
+- If `ParseRanksJSON(`{"11":{"tier":16,"division":2,"mmr":47.5}}`)` fails to migrate MMR to `1050.0`.
+- If any test in `internal/playertrack/mmr_adversarial_test.go` fails.

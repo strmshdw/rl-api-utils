@@ -1,80 +1,87 @@
-# DISPATCH: m1_worker_1
+# Dispatch: m1_worker_1
 
-## Objective
-Implement Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect):
-1. Retain player information and accumulated stats in the active game state when a player leaves or disconnects mid-game.
-2. Flag retained participants with `IsDisconnected: true` while preserving their last observed box score stats (`Score`, `Goals`, `Assists`, `Saves`, `Shots`, `Demos`).
-3. Handle reconnection cleanly (restores active status, updates stats, no duplicate entries).
-4. Preserve `LocalPlayer` and `LocalTeam` if local player disconnects early.
-5. Propagate `IsDisconnected` through `SessionTracker.RecordActiveMatch`, `SessionMatchPlayer`, and API models.
-6. Provide comprehensive automated programmatic tests simulating mid-game disconnect asserting player stats remain in active match state.
-7. Ensure 100% test pass rate across all packages and clean build.
-
-## Scope & File Ownership
-You exclusively own and may modify:
-- `internal/playertrack/tracker.go`
-- `internal/playertrack/tracker_test.go`
-- `internal/session/models.go`
-- `internal/session/session.go`
-- `internal/session/session_test.go`
-- `web/src/types/api.ts`
-
-Do NOT touch any other source files outside this scope.
-
-## Context & Inputs
-- Authoritative User Request: `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T08:30:09Z`)
-- Project Architecture & Milestones: `d:\code\rl-api-utils\PROJECT.md`
-- Explorer Reports:
-  - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\handoff.md` (exact differential retention algorithm)
-  - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md` (session propagation, models, DeepClone)
-  - `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\handoff.md` (complete programmatic test suite)
-
-## Implementation Requirements
-1. **`internal/playertrack/tracker.go`**:
-   - Add `IsDisconnected bool json:"is_disconnected,omitempty"` to `LobbyPlayer`.
-   - Update `OnUpdateState`: implement differential participant retention when `isSameMatch` (`MatchGUID == trimmedGUID`).
-   - Retain departed human teammates, opponents, and spectators from previous snapshot with `IsDisconnected = true`.
-   - Reconnections update stats and set `IsDisconnected = false` without creating duplicate rows.
-   - Departed AI bots (`oldP.IsBot`) are excluded from retention.
-   - Retain `LocalPlayer` and `LocalTeam` if local player is omitted.
-   - Reset retention cleanly when transitioning to a new match GUID.
-2. **`internal/session/models.go` & `session.go`**:
-   - Add `IsDisconnected bool json:"is_disconnected,omitempty"` and `Won *bool json:"won,omitempty"` to `SessionMatchPlayer`.
-   - Update `SessionMatchPlayer.DeepClone()` to clone `Won` pointer.
-   - In `ConcludeMatch`, map `lp.IsDisconnected` to `SessionMatchPlayer.IsDisconnected`, compute `Won`, and sum goals from all participants into team scores.
-3. **`web/src/types/api.ts`**:
-   - Add `is_disconnected?: boolean;` to `LobbyPlayer` and `SessionMatchPlayer`.
-4. **Automated Tests**:
-   - Add test suites in `internal/playertrack/tracker_test.go` and `internal/session/session_test.go` as specified in `m1_explorer_3\handoff.md`.
-   - Execute verification: `go test -v ./internal/playertrack/...`, `go test -v ./internal/session/...`, and `go test ./...`.
-   - Ensure all tests pass 100%.
+## Mission & Role
+You are `m1_worker_1`, the implementation worker for Milestone 1: True In-Game MMR Conversion (R1).
+Working directory: `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1`
 
 ## Mandatory Integrity Warning
 DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_preview_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
 
-## Completion Criteria
-Deliver a comprehensive report in `handoff.md` in your working directory `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md` including exact code modifications, test execution results, and verification commands. Send a completion message back to orchestrator_6.
+## Write Ownership Boundaries
+You exclusively own and may edit/create:
+- `internal/playertrack/rank_client.go`
+- `internal/playertrack/rank_client_test.go`
+- `internal/session/session_mmr_test.go`
+- `internal/daemon/daemon_mmr_test.go`
+
+DO NOT edit any files in `web/` or files owned by other milestones.
+
+## Exact Implementation Requirements
+1. **`internal/playertrack/rank_client.go`**:
+   - Add `"math"` to the import block.
+   - Implement `ConvertSkillRatingToMMR(skillRating float64) float64`:
+     ```go
+     func ConvertSkillRatingToMMR(skillRating float64) float64 {
+         if skillRating <= 0.0 {
+             return 0.0
+         }
+         if skillRating > 150.0 {
+             return skillRating
+         }
+         return math.Round((skillRating * 20.0) + 100.0)
+     }
+     ```
+   - Update `FromSkill(s rlapi.Skill)`:
+     Set `MMR: ConvertSkillRatingToMMR(s.MMR)`.
+   - Update `ParseRanksJSON(raw string)` normalization loop:
+     Add migration for legacy stored raw floats:
+     ```go
+     if rank.MMR > 0.0 && rank.MMR <= 150.0 {
+         rank.MMR = ConvertSkillRatingToMMR(rank.MMR)
+         changed = true
+     } else if rank.MMR < 0.0 {
+         rank.MMR = 0.0
+         changed = true
+     }
+     ```
+2. **`internal/playertrack/rank_client_test.go`**:
+   - Add comprehensive tests specified in `m1_explorer_1\handoff.md` and `m1_explorer_3\handoff.md`:
+     - `TestConvertSkillRatingToMMR_StandardValues` (47.5 -> 1050, 47.0 -> 1040, 30.4646 -> 709, etc.)
+     - `TestConvertSkillRatingToMMR_CasualAndNegative` (0.0 -> 0.0, negatives -> 0.0)
+     - `TestConvertSkillRatingToMMR_HighMMRAndIdempotency` (1040 -> 1040, 1150.5 -> 1150.5)
+     - `TestFromSkill_TrueInGameMMR`
+     - `TestParseRanksJSON_LegacyRawRatingMigration`
+     - `TestBuildRanksSnapshot_And_SerializeRanksJSON_TrueInGameMMR`
+3. **`internal/session/session_mmr_test.go`**:
+   - Place the session MMR tests from `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_session_mmr_test.go`.
+4. **`internal/daemon/daemon_mmr_test.go`**:
+   - Place the daemon API MMR tests from `d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_daemon_mmr_test.go`.
+5. **Run builds and tests**:
+   - `go test -v -count=1 ./internal/playertrack -run "TestConvertSkillRatingToMMR|TestFromSkill|TestParseRanksJSON"`
+   - `go test -v -count=1 ./internal/session -run "TestSessionTracker_TrueInGameMMR"`
+   - `go test -v -count=1 ./internal/daemon -run "TestDaemonAPI"`
+   - `go test -count=1 ./...`
+   - Document all command outputs in your handoff report.
+
+## Output
+Write your handoff report to `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md`.
+Report completion back to parent when done.
 
 
-## 2026-10-06T08:56:14Z
-You are m1_worker_1, an implementation worker for Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect).
+## 2026-10-06T11:29:24Z
+From parent:
+You are m1_worker_1.
 Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m1_worker_1
-
-You MUST read before starting:
-1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
-2. Your task assignment & file ownership: d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\DISPATCH.md
-3. Explorer Handoff Reports:
-   - d:\code\rl-api-utils\.agents\teamwork\m1_explorer_1\handoff.md
-   - d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\handoff.md
-   - d:\code\rl-api-utils\.agents\teamwork\m1_explorer_3\handoff.md
+Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\DISPATCH.md.
 
 MANDATORY INTEGRITY WARNING:
 DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_preview_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
 
-Your Tasks:
-1. Implement differential participant retention in internal/playertrack/tracker.go and add IsDisconnected to LobbyPlayer.
-2. Update internal/session/models.go and session.go to support IsDisconnected (and Won) in SessionMatchPlayer and ConcludeMatch.
-3. Update web/src/types/api.ts with is_disconnected.
-4. Add the comprehensive automated programmatic test suites in internal/playertrack/tracker_test.go and internal/session/session_test.go.
-5. Run build and tests (e.g., go test -v ./internal/playertrack/..., go test -v ./internal/session/..., go test ./...).
-6. Document changes and test results in d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md and send a completion message back to orchestrator_6.
+Implement Milestone 1: True In-Game MMR Conversion (R1):
+- internal/playertrack/rank_client.go: add math import, ConvertSkillRatingToMMR(skillRating float64), update FromSkill, update ParseRanksJSON.
+- internal/playertrack/rank_client_test.go: add comprehensive unit tests.
+- internal/session/session_mmr_test.go: copy from d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_session_mmr_test.go.
+- internal/daemon/daemon_mmr_test.go: copy from d:\code\rl-api-utils\.agents\teamwork\m1_explorer_2\proposed_daemon_mmr_test.go.
+Run all tests and build commands, verify 100% pass, and write handoff to:
+d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md
+Send message to parent when done.

@@ -244,6 +244,39 @@ func (c *Client) Ping(ctx context.Context) error {
 	}
 }
 
+// PingInfo queries Ballchasing API root and returns account metadata (name, steam_id, etc.).
+func (c *Client) PingInfo(ctx context.Context) (*PingResponse, error) {
+	endpoint := fmt.Sprintf("%s/", strings.TrimRight(c.baseURL, "/"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ballchasing: create ping request: %w", err)
+	}
+
+	req.Header.Set("Authorization", c.apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ballchasing: ping request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var p PingResponse
+		if err := json.Unmarshal(bodyBytes, &p); err == nil {
+			return &p, nil
+		}
+		return &PingResponse{}, nil
+	case http.StatusUnauthorized:
+		return nil, ErrInvalidAPIKey
+	default:
+		return nil, fmt.Errorf("ballchasing: ping returned HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+}
+
 // rawUploadResponse deserializes both 201 Created and 409 Conflict responses.
 type rawUploadResponse struct {
 	Error    string `json:"error"`
@@ -622,4 +655,92 @@ func extractErrorMessage(body []byte) string {
 		}
 	}
 	return string(body)
+}
+
+// GetUploadedReplays queries Ballchasing API for replays uploaded by the user.
+// If nextURL is non-empty, it queries nextURL directly for cursor-based pagination.
+// Otherwise, it queries GET {baseURL}/replays?uploader=me&count=200.
+// Handles rate limits (HTTP 429) by waiting and retrying up to maxRetries.
+func (c *Client) GetUploadedReplays(ctx context.Context, nextURL string) (*ReplayListResponse, error) {
+	reqURL := strings.TrimSpace(nextURL)
+	if reqURL == "" {
+		reqURL = fmt.Sprintf("%s/replays?uploader=me&count=200", strings.TrimRight(c.baseURL, "/"))
+	} else if !strings.HasPrefix(reqURL, "http://") && !strings.HasPrefix(reqURL, "https://") {
+		reqURL = fmt.Sprintf("%s/%s", strings.TrimRight(c.baseURL, "/"), strings.TrimLeft(reqURL, "/"))
+	}
+
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("ballchasing: create get replays request: %w", err)
+		}
+
+		req.Header.Set("Authorization", c.apiKey)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if attempt < c.maxRetries {
+				backoff := c.calculateBackoff(attempt)
+				if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+					return nil, sleepErr
+				}
+				continue
+			}
+			return nil, fmt.Errorf("ballchasing: request failed: %w", err)
+		}
+
+		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("ballchasing: read response body: %w", readErr)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			var listResp ReplayListResponse
+			if err := json.Unmarshal(bodyBytes, &listResp); err != nil {
+				return nil, fmt.Errorf("ballchasing: decode replay list: %w", err)
+			}
+			return &listResp, nil
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if attempt >= c.maxRetries {
+				return nil, ErrRateLimitExhausted
+			}
+			retryAfter := c.resolveRetryAfter(resp.Header.Get("Retry-After"), attempt)
+			if sleepErr := sleepWithContext(ctx, retryAfter); sleepErr != nil {
+				return nil, sleepErr
+			}
+			continue
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, ErrInvalidAPIKey
+		}
+
+		if resp.StatusCode >= 500 {
+			if attempt < c.maxRetries {
+				backoff := c.calculateBackoff(attempt)
+				if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+					return nil, sleepErr
+				}
+				continue
+			}
+			return nil, fmt.Errorf("%w: HTTP %d", ErrServerError, resp.StatusCode)
+		}
+
+		return nil, fmt.Errorf("ballchasing: unexpected status HTTP %d: %s", resp.StatusCode, extractErrorMessage(bodyBytes))
+	}
+
+	return nil, ErrRateLimitExhausted
 }

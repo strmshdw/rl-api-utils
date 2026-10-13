@@ -1,15 +1,16 @@
-# Progress — M2 Polling Auth & PsyNet Rank Client
+# Progress — M2 Sleek Esports Matchup UX & Disconnected Player Treatment (R2 & R3)
 
-Last visited: 2026-09-26T01:00:00Z
+Last visited: 2026-10-06T12:15:00Z
 
 ## Status
 - Current Step: Complete! Ready for Handoff.
 - Completed:
-  - 1. `internal/config/config.go`: Added `PollingAuthConfig` (with `ToAuthConfig()`), `PlayerTrackingConfig`, `CLIFlags` fields, defaults, environment variable overrides (`RL_SYNC_POLLING_*`, `RL_SYNC_PLAYER_TRACKING_*`, `RL_SYNC_LOCAL_*`), aliases, and anti-collision validation in `Validate()`.
-  - 2. `internal/config/config_test.go`: Added 9 unit test suites covering defaults, YAML/JSON loading, env var overrides, aliases, validation, anti-collision Error 67 guard, and CLI flags.
-  - 3. `internal/auth/provider.go`: Implemented `NewPollingProvider` enforcing in-memory tokens (`store = nil`) to prevent clobbering primary auth tokens in SQLite/JSONStore.
-  - 4. `internal/auth/auth_test.go`: Added `TestNewPollingProvider`.
-  - 5. `internal/playertrack/rank_client.go`: Implemented `SkillFetcher`, `SkillRPCClient`, `SkillRPCFactory`, `PsyNetRankClient` (with transparent reconnect and single retry), `NoOpRankClient`, `CheckCredentialCollision`, `FormatRank` (canonical 23 tiers & 4 divisions, Unranked & SSL division suppression), `FormatPlaylist`, `SerializeRanksJSON`, `ParseRanksJSON`, and `MockSkillFetcher`.
-  - 6. `internal/playertrack/rank_client_test.go`: Implemented 20 unit test suites covering exhaustive tiers, divisions, Unranked/SSL suppression, out-of-bounds, playlist mapping, serialization roundtrip, mock fetcher, offline degradation, reconnect, concurrency, and auth supplier.
-  - 7. `configs/config.example.yaml`: Updated with `polling_auth` and `player_tracking` sections.
-  - 8. Full verification: `go build ./cmd/rl-sync`, `go test -count=1 ./...` (100% pass across all packages), `go vet ./...` (0 warnings).
+  - 1. `web/src/components/live/RosterTable.tsx`: Restored semantic `<table>` wrapped in `.overflow-x-auto`. Implemented glowing team headers with ambient glow stripe (`h-1 bg-gradient-to-r`), glowing borders (`border-[#00a2ff]/40` / `border-[#ff7b00]/40`), ambient dropshadows. Implemented dedicated aggregated goals badge (`data-testid="team-goals"`) and aggregated score badge (`data-testid="team-score"`). Ensured all 11 semantic `data-testid="th-*"` table headers exist in order.
+  - 2. `web/src/components/live/PlayerRow.tsx`: Implemented streamlined broadcast card-row as `<tr>`. Applied disconnected treatment (`opacity-65 saturate-60 hover:opacity-85`). Added clean `data-testid="badge-disconnected"` with `WifiOff` icon in `data-testid="player-identity"`. Rendered prominent stat badge styling for Score, Goals (amber glow), Assists (cyan), Saves (emerald), Shots, Demos, Rank, and MMR formatted as `toFixed(1)`.
+  - 3. `web/src/components/session/MatchDetailModal.tsx`: Applied matching `opacity-65 saturate-60 hover:opacity-85` and `data-testid="badge-disconnected"` with `WifiOff` icon for concluded matches box score parity.
+  - 4. `web/src/components/live/LiveGameView.layout.test.tsx`: Fixed all 15 Vitest failures. Added dedicated R2 tests (`team-goals`, `team-score` aggregations) and R3 tests (`badge-disconnected`, `opacity-65 saturate-60`, active player negation, `MatchDetailModal` parity).
+  - 5. Full test & build verification:
+    - `npm test -- --run` in `web/`: 100% pass (11/11 test files, 150/150 tests passing).
+    - `npm run build` in `web/`: clean build, bundling into `internal/web/dist` with 0 errors.
+    - `go test -count=1 ./...`: 100% pass across all 14 Go packages.
+    - `go build ./cmd/rl-sync`: compiles `rl-sync.exe` cleanly with embedded frontend.

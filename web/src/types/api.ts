@@ -172,3 +172,79 @@ export type ColumnKey =
   | 'platform';
 
 export type ColumnPreset = 'full' | 'competitive' | 'streamer';
+
+// ============================================================================
+// Historical Games & Ballchasing Sync Types
+// ============================================================================
+
+export interface ReplayPlayerStats {
+  name: string;
+  platform: string;
+  online_id: string;
+  team: number;
+  score: number;
+  goals: number;
+  assists: number;
+  saves: number;
+  shots: number;
+  demos: number;
+}
+
+export interface ReplayMatchStats {
+  match_guid: string;
+  map_name: string;
+  playlist: number;
+  blue_score: number;
+  orange_score: number;
+  winner_team?: number;
+  duration: number;
+  overtime: boolean;
+  date: string;
+  players: ReplayPlayerStats[];
+  ballchasing_id?: string;
+  ballchasing_url?: string;
+  raw_json?: string;
+}
+
+export interface HistoricalMatchRecord {
+  match_guid: string;
+  record_start_timestamp: number;
+  map_name: string;
+  playlist: number;
+  replay_url: string;
+  download_status: string;
+  local_file_path: string;
+  downloaded_at?: string;
+  upload_status: string;
+  ballchasing_id: string;
+  ballchasing_url: string;
+  uploaded_at?: string;
+  retry_count: number;
+  last_error: string;
+  blue_score: number;
+  orange_score: number;
+  winner_team?: number;
+  replay_stats_json: string;
+  synced_at?: string;
+  created_at: string;
+  updated_at: string;
+  stats?: ReplayMatchStats;
+  result?: 'victory' | 'defeat' | 'draw' | 'unknown' | '';
+}
+
+export interface MatchesResponse {
+  matches: HistoricalMatchRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface BallchasingSyncStatus {
+  running: boolean;
+  total_replays: number;
+  synced_matches: number;
+  synced_players: number;
+  started_at?: string;
+  ended_at?: string;
+  last_error?: string;
+}

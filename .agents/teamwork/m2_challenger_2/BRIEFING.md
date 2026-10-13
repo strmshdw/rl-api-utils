@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-24T20:56:45-07:00
+# BRIEFING — 2026-10-06T12:26:00Z
 
 ## Mission
-Adversarially challenge and stress-test internal/psynet (ReplayDownloader and MatchHistoryProvider).
+Stress-test disconnected player handling, stat retention, team score aggregation, and concluded match parity in MatchDetailModal across live and post-match views.
 
 ## 🔒 My Identity
 - Archetype: empirical challenger
@@ -10,49 +10,61 @@ Adversarially challenge and stress-test internal/psynet (ReplayDownloader and Ma
 - Original parent: 6e6c9567-59d2-415e-8d6e-41314a903548
 - Milestone: M2 - Auth & PsyNet Integration
 - Instance: 2 of 2
+- Current parent: 18e4e66b-5835-4b6b-bd1e-a34092f47346
+- Current Milestone: M2 - Sleek Esports Matchup UX & Disconnected Player Treatment (R2 & R3)
+- Current instance: 2 of 2
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
 - Run verification tests directly via Go tooling
 - Write only to own directory .agents/teamwork/m2_challenger_2
 - Provide verdict (APPROVE or CHALLENGE_FAILED) in handoff.md and notify parent via send_message
+- Do not modify implementation code (review-only)
+- Co-locate test files in appropriate component/package directories
+- Provide clear verdict (APPROVE or REJECT) in handoff.md
 
 ## Current Parent
-- Conversation ID: 6e6c9567-59d2-415e-8d6e-41314a903548
-- Updated: 2026-09-24T20:56:45-07:00
+- Conversation ID: 18e4e66b-5835-4b6b-bd1e-a34092f47346
+- Updated: 2026-10-06T12:26:00Z
 
 ## Review Scope
-- **Files to review**: `internal/psynet/downloader.go`, `internal/psynet/downloader_test.go`, `internal/psynet/client.go`, `internal/psynet/client_test.go`
+- **Files to review**: `web/src/components/live/PlayerRow.tsx`, `web/src/components/live/RosterTable.tsx`, `web/src/components/session/MatchDetailModal.tsx`, `web/src/components/live/LiveGameView.tsx`
 - **Interface contracts**: `PROJECT.md`, `ORIGINAL_REQUEST.md`, `m2_worker_1/handoff.md`
-- **Review criteria**: Robustness against adversarial inputs, network disruptions, Windows file semantics, path traversal, concurrency, timeout/context leaks
+- **Review criteria**: Disconnected player styling (`opacity-65 saturate-60 hover:opacity-85`), disconnected badge (`data-testid="badge-disconnected"` with `WifiOff` icon), active connected player styling exclusion, team goals & score aggregation accuracy, concluded match parity in `MatchDetailModal`, stat retention, and dynamic reconnection lifecycle.
 
 ## Attack Surface
 - **Hypotheses tested**:
-  - ReplayDownloader payload size boundaries (<1024B rejected, ==1024B accepted, >1MB/5MB accepted): Confirmed robust.
-  - ReplayDownloader HTTP error codes (400, 401, 403, 404, 410, 429, 500, 502, 503, 504): Confirmed typed errors and zero disk footprint.
-  - ReplayDownloader mid-stream drops and timeouts: Confirmed deferred cleanup removes all temp files on Windows.
-  - ReplayDownloader path traversal & illegal filename characters: Confirmed all variants rejected.
-  - ReplayDownloader concurrency & file contention (30 distinct workers, 5-20 identical GUID stampede): Confirmed file validity and zero leaked orphans.
-  - ReplayDownloader failed overwrite preserves existing valid replay on disk: Confirmed undamaged.
-  - MatchHistoryProvider empty ReplayURL arrival across cycles: Confirmed preserved as empty string.
-  - MatchHistoryProvider malformed GUIDs: Confirmed empty/whitespace GUIDs skipped.
-  - MatchHistoryProvider connection drop transparent reconnect: Confirmed single retry succeeds on dropped socket.
-  - MatchHistoryProvider context cancellation & deadlines: Confirmed terminates immediately without hanging.
-  - MatchHistoryProvider concurrent calls & Close idempotency: Confirmed thread-safe.
-- **Vulnerabilities found**: None. Contention on identical filenames under Windows NTFS requires retry backoff, which is implemented and configurable via `WithRenameRetries`.
-- **Untested angles**: None within M2 scope.
+  - Disconnected visual classes (`opacity-65 saturate-60 hover:opacity-85`): Confirmed applied to disconnected rows.
+  - Active connected player styling: Confirmed active players NEVER receive `opacity-65`, `saturate-60`, or disconnected badge.
+  - Badge testid and iconography: Confirmed `data-testid="badge-disconnected"` renders uppercase `DISCONNECTED`, `WifiOff` svg icon, and title tooltip.
+  - Disconnected local player: Confirmed displays both `YOU` and `DISCONNECTED` badges with cyan background and dimming.
+  - Disconnected bot: Confirmed displays both `BOT` and `DISCONNECTED` badges.
+  - Multi-platform support: Confirmed Steam, Epic, PlayStation, Xbox, and Nintendo render cleanly alongside disconnected badge.
+  - Leaderboard sorting invariant: Confirmed disconnected top-scorer stays ranked #1 in RosterTable.
+  - Team score and goals aggregation: Confirmed arithmetic sum includes all disconnected players' stats across mixed rosters, 100% disconnected rosters, empty rosters, and 30-player stress harnesses.
+  - Concluded match parity in MatchDetailModal: Confirmed parity in Blue and Orange rosters for concluded matches, with active player exclusion and null match safety.
+  - Dynamic reconnection lifecycle: Confirmed 6-frame stateful simulation and 10-cycle flapping connection stress test maintain zero stuck badges and accurate team totals.
+  - Component tree integration in LiveGameView: Confirmed simultaneous disconnected local player, teammate, and opponent with column configuration toggling.
+  - Extreme inputs: Confirmed resilience against extreme Unicode/HTML entity player names, 100,000 score, 100 goals, and undefined ranks.
+- **Vulnerabilities found**: None.
+- **Untested angles**: None within Milestone 2 scope.
 
 ## Loaded Skills
-- None requested
+- **Source**: `C:\Users\strms\.gemini\config\plugins\modern-web-guidance\skills\modern-web-guidance\SKILL.md`
+- **Local copy**: Consulted directly for modern React/web guidelines
+- **Core methodology**: Search and verify modern web patterns and component structures
 
 ## Key Decisions Made
-- Authored `internal/psynet/adversarial_test.go` containing 11 comprehensive adversarial stress tests.
-- Verified 31 tests in `internal/psynet` with 100% pass across 5 iterations.
-- Verified workspace-wide test pass (`go test -count=1 ./...`).
-- Issued final verdict: APPROVE.
+- Authored comprehensive empirical test file: `web/src/components/live/DisconnectedPlayer.adversarial.test.tsx` containing 24 rigorous test cases across 8 suites.
+- Verified 197/197 tests pass across all 13 Vitest test files in `web/` (100% pass rate).
+- Verified `npm run build` succeeds cleanly (`tsc -b && vite build`) into `internal/web/dist`.
+- Verified all 14 Go packages pass `go test -count=1 ./...` (100% pass rate).
+- Verified standalone executable compiles cleanly via `go build ./cmd/rl-sync`.
+- Final verdict: APPROVE.
 
 ## Artifact Index
 - `BRIEFING.md` — Situational awareness
 - `progress.md` — Liveness heartbeat
+- `DISPATCH.md` — Task dispatches
 - `handoff.md` — Final verdict and empirical challenge report
-- `internal/psynet/adversarial_test.go` — Co-located empirical adversarial test suite
+- `web/src/components/live/DisconnectedPlayer.adversarial.test.tsx` — Co-located empirical adversarial test suite

@@ -1,7 +1,7 @@
 import React from 'react';
 import { SessionMatchDetail } from '../../types/api';
 import { formatDuration, formatMMRDelta, formatRelativeTime } from '../../utils/formatters';
-import { Trophy, ShieldAlert, Minus, TrendingUp, TrendingDown, Clock, Swords } from 'lucide-react';
+import { Trophy, ShieldAlert, Minus, TrendingUp, TrendingDown, Clock, Swords, Crown, Target, Shield, WifiOff } from 'lucide-react';
 
 interface MatchCardProps {
   match: SessionMatchDetail;
@@ -36,6 +36,27 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onClick }) => {
   const localColor = localTeamNum === 0 ? 'text-[#00a2ff]' : 'text-[#ff7b00]';
   const oppColor = localTeamNum === 0 ? 'text-[#ff7b00]' : 'text-[#00a2ff]';
 
+  // Local player performance stats
+  const localStats = localPlayer?.stats;
+
+  // Determine Match MVP: highest score on the winning team
+  const winningTeam = match.winner_team !== undefined && match.winner_team !== null
+    ? match.winner_team
+    : match.blue_score > match.orange_score
+    ? 0
+    : match.orange_score > match.blue_score
+    ? 1
+    : null;
+  const eligibleMvpPool = winningTeam !== null ? match.players.filter((p) => p.team_num === winningTeam) : [];
+  const mvpPlayer = eligibleMvpPool.reduce<typeof match.players[0] | null>((top, p) => {
+    if (!top || (p.stats?.score || 0) > (top.stats?.score || 0)) {
+      return p;
+    }
+    return top;
+  }, null);
+
+  const isLocalMvp = localPlayer && mvpPlayer && localPlayer.player_id === mvpPlayer.player_id && (mvpPlayer.stats?.score || 0) > 0;
+
   return (
     <div
       role="button"
@@ -59,23 +80,54 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onClick }) => {
             {badgeConfig.text}
           </span>
           <div>
-            <h3 className="font-semibold text-white group-hover:text-cyan-300 transition-colors flex items-center gap-2">
-              <Swords className="w-4 h-4 text-slate-400" />
-              {match.playlist_name}
-            </h3>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-white group-hover:text-cyan-300 transition-colors flex items-center gap-1.5">
+                <Swords className="w-4 h-4 text-slate-400" />
+                {match.playlist_name}
+              </h3>
+              {isLocalMvp && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  <Crown className="w-3 h-3 text-amber-400" />
+                  MVP
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
               <span className="flex items-center gap-1">
                 <Clock className="w-3.5 h-3.5" />
                 {formatDuration(match.duration_seconds)}
               </span>
               <span>•</span>
               <span>{formatRelativeTime(match.ended_at)}</span>
+              <span>•</span>
+              <span className="text-slate-400 font-medium">
+                Team: <strong className={localColor}>{localTeamNum === 0 ? 'Blue' : 'Orange'}</strong>
+              </span>
             </div>
           </div>
         </div>
 
         {/* Score & MMR Delta */}
-        <div className="flex items-center gap-5 justify-between md:justify-end">
+        <div className="flex items-center gap-4 justify-between md:justify-end">
+          {/* Local stats preview snippet */}
+          {localStats && (
+            <div className="hidden sm:flex items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 text-slate-300">
+                <Target className="w-3 h-3 text-amber-400" />
+                <span className="text-slate-400">G:</span>
+                <strong className={localStats.goals > 0 ? 'text-amber-400' : 'text-slate-400'}>{localStats.goals}</strong>
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 text-slate-300">
+                <Shield className="w-3 h-3 text-emerald-400" />
+                <span className="text-slate-400">SV:</span>
+                <strong className={localStats.saves > 0 ? 'text-emerald-400' : 'text-slate-400'}>{localStats.saves}</strong>
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 font-mono text-white font-bold">
+                {localStats.score} <span className="text-[10px] font-sans text-slate-400 font-normal">pts</span>
+              </span>
+            </div>
+          )}
+
           {/* Neon Scoreboard Pill */}
           <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800">
             <span className="text-xl font-extrabold text-[#00a2ff]">{match.blue_score}</span>
@@ -107,12 +159,17 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onClick }) => {
       {/* Roster Preview Strip */}
       <div className="mt-3 pt-3 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
         <div className="flex items-center gap-2 overflow-hidden text-ellipsis whitespace-nowrap">
-          <span className={`${localColor} font-medium`}>
+          <span className={`${localColor} font-medium flex items-center gap-1`}>
             {localPlayer?.name ?? 'You'}
+            {localPlayer?.is_disconnected && (
+              <span title="Disconnected">
+                <WifiOff className="w-3 h-3 text-rose-400" />
+              </span>
+            )}
             {teammates.length > 0 && ` + ${teammates.map((t) => t.name).join(', ')}`}
           </span>
           <span className="text-slate-600 font-bold">vs</span>
-          <span className={oppColor}>
+          <span className={`${oppColor} flex items-center gap-1`}>
             {opponents.length > 0 ? opponents.map((o) => o.name).join(', ') : 'Opponents'}
           </span>
         </div>

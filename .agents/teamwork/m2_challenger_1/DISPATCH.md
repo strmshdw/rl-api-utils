@@ -1,26 +1,33 @@
 # Dispatch: m2_challenger_1
 
-**Milestone**: M2 - Auth & PsyNet Integration
-**Role**: Auth Challenger (internal/auth)
+## Mission & Role
+You are `m2_challenger_1`, an adversarial challenger for Milestone 2: Sleek Esports Matchup UX Overhaul (R2).
+Working directory: `d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1`
 
-## Scope
-Adversarially challenge and stress-test `internal/auth`:
-- Test scenarios:
-  - Epic auth: refresh token renewal, auth code exchange, fallback to `StateStore.GetAuthState`, expired token detection via `IsExpired()`.
-  - Steam auth: strictly numeric 17-digit SteamID64 validation (boundary tests: 16 digits, 18 digits, letters, special characters, wrong prefix), session ticket exchange.
-  - Concurrency: multiple goroutines reading `TokenInfo()` concurrently while `Refresh()` or `Authenticate()` is in progress.
-  - Error resilience: canceled context, rate limits, invalid credentials.
-- Run tests and provide verdict (APPROVE or CHALLENGE_FAILED) in `d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1\handoff.md` and notify parent via `send_message`.
+## Scope & Objective
+Empirically stress-test the live match UI components:
+1. Column Customizer permutations: toggle every combination of the 10 columns (including all disabled and all enabled) and assert table header and cell 1:1 alignment.
+2. Viewport and layout boundaries: assert live view stack height on 1080p (1920x1080) and 768p laptop resolutions.
+3. Zero-stat muted styling: assert that zero stats (0 goals, 0 assists, 0 saves) render with muted slate classes and no glowing colors.
+4. Edge cases: XSS strings in player names, long player names, AI bots, spectators.
 
-## 2026-09-25T03:51:30Z
+Write and execute adversarial tests, report results, and state verdict (`APPROVE` or `REJECT`) in `handoff.md`.
+
+## Inputs
+- `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T11:02:53Z`)
+- `d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md`
+- `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md`
+
+## Output
+Write your handoff report to `d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1\handoff.md`.
+
+## 2026-10-06T12:18:38Z
 You are m2_challenger_1.
-Working directory: d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md, d:\code\rl-api-utils\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1\DISPATCH.md.
-Worker report is at d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md.
-
-Adversarially challenge internal/auth:
-1. Stress-test Epic auth (refresh token vs auth code, fallback to store, expired tokens, token info caching).
-2. Stress-test Steam auth (malformed SteamID64, session ticket exchange, ticket renewal error).
-3. Test concurrency safety and context cancellation.
-4. Run tests and provide your verdict (APPROVE or CHALLENGE_FAILED) in d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1\handoff.md and notify parent via send_message.
+Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1
+Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md, and d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1\DISPATCH.md.
+Stress-test frontend layout, column toggling permutations, zero-stat muted classes, and extreme inputs in web/.
+Write and run adversarial tests.
+State your verdict clearly (APPROVE or REJECT) in:
+d:\code\rl-api-utils\.agents\teamwork\m2_challenger_1\handoff.md
+Send message to parent when done.
 

@@ -50,6 +50,7 @@ type Daemon struct {
 	playerTracker  *playertrack.Tracker
 	sessionTracker *session.SessionTracker
 	stateStore     storage.StateStore
+	historySyncer  *syncer.BallchasingHistorySyncer
 	webHandler     http.Handler
 	manualTrigger  chan string
 
@@ -121,6 +122,13 @@ func WithStateStore(store storage.StateStore) Option {
 // WithStore attaches persistent storage to the Daemon (alias for WithStateStore).
 func WithStore(store storage.StateStore) Option {
 	return WithStateStore(store)
+}
+
+// WithHistorySyncer attaches a BallchasingHistorySyncer for on-demand historical imports.
+func WithHistorySyncer(s *syncer.BallchasingHistorySyncer) Option {
+	return func(d *Daemon) {
+		d.historySyncer = s
+	}
 }
 
 // New constructs a new Daemon instance.
@@ -542,6 +550,11 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 	mux.HandleFunc("GET /api/current-match", d.handleCurrentMatch)
 	mux.HandleFunc("GET /api/players", d.handleListPlayers)
 	mux.HandleFunc("GET /api/players/{id...}", d.handleGetPlayer)
+	mux.HandleFunc("GET /api/matches", d.handleListMatches)
+	mux.HandleFunc("GET /api/matches/{guid...}", d.handleGetMatch)
+	mux.HandleFunc("GET /api/historical-matches", d.handleListMatches)
+	mux.HandleFunc("POST /api/sync/ballchasing", d.handleTriggerBallchasingSync)
+	mux.HandleFunc("GET /api/sync/ballchasing/status", d.handleBallchasingSyncStatus)
 	mux.HandleFunc("GET /api/events", d.handleEvents)
 
 	// Backward Compatible Player Tracking Aliases

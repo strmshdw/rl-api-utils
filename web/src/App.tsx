@@ -5,6 +5,7 @@ import { Header } from './components/layout/Header';
 import { Navbar, DashboardTab } from './components/layout/Navbar';
 import { LiveGameView } from './components/live/LiveGameView';
 import { SessionHistoryView } from './components/session/SessionHistoryView';
+import { HistoricalGamesView } from './components/historical/HistoricalGamesView';
 import { PlayerDirectoryView } from './components/players/PlayerDirectoryView';
 import { OBSOverlayView } from './components/overlay/OBSOverlayView';
 
@@ -58,7 +59,8 @@ export const App: React.FC = () => {
       {/* Main View Area */}
       <main className={`flex-1 container mx-auto px-4 ${activeTab === 'live' ? 'py-2' : 'py-4'}`}>
         {activeTab === 'live' && <LiveGameView session={session} />}
-        {activeTab === 'history' && <SessionHistoryView />}
+        {(activeTab === 'session' || activeTab === 'history') && <SessionHistoryView />}
+        {activeTab === 'historical' && <HistoricalGamesView />}
         {activeTab === 'players' && <PlayerDirectoryView />}
       </main>
 

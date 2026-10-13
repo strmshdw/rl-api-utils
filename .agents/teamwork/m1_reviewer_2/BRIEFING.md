@@ -1,7 +1,7 @@
-# BRIEFING — 2026-10-06T09:16:00Z
+# BRIEFING — 2026-10-06T11:45:00Z
 
 ## Mission
-Independent review and adversarial stress-testing of Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) for concurrency safety, data integrity, memory leaks, interface conformance, and integrity violations.
+Independent review and adversarial stress-testing of Milestone 1: True In-Game MMR Conversion (Requirement R1) covering mathematical precision, thread safety, backward compatibility, legacy deserialization migration, API output verification, and active integrity violation checks.
 
 ## 🔒 My Identity
 - Archetype: teamwork_preview_reviewer
@@ -12,6 +12,8 @@ Independent review and adversarial stress-testing of Milestone M1 (Requirement R
 - Instance: 2 of 2
 - Milestone Update: Milestone M1 (Requirement R2: Persistent Player State on Disconnect)
 - Parent Update: f26416a7-29be-4b99-8406-d28bf983644d
+- Milestone Update 2: Milestone 1: True In-Game MMR Conversion (Requirement R1)
+- Parent Update 2: 18e4e66b-5835-4b6b-bd1e-a34092f47346
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
@@ -19,50 +21,49 @@ Independent review and adversarial stress-testing of Milestone M1 (Requirement R
 - All findings must be evidence-based with file paths, line numbers, and exact observations
 - Provide clear verdict (APPROVE or REQUEST_CHANGES) in handoff.md and send_message to parent
 - Do NOT fix code failures yourself — report them as findings
+- Verify true in-game MMR conversion 47.5 -> 1050 across ingestion, session, storage, and API
 
 ## Current Parent
-- Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
-- Updated: 2026-10-06T09:11:18Z
+- Conversation ID: 18e4e66b-5835-4b6b-bd1e-a34092f47346
+- Updated: 2026-10-06T11:37:22Z
 
 ## Review Scope
-- **Files to review**: `internal/playertrack/tracker.go`, `internal/playertrack/tracker_test.go`, `internal/session/models.go`, `internal/session/session.go`, `internal/session/session_test.go`, `web/src/types/api.ts`
-- **Interface contracts**: `PROJECT.md:44-103` (`LobbyPlayer`, `SessionMatchPlayer`, `web/src/types/api.ts`), `ORIGINAL_REQUEST.md:231-257`
-- **Review criteria**: Concurrency & thread safety (`t.mu.Lock()`, `s.mu.Lock()`, `Won *bool` isolation), robustness & memory leaks (`MatchGUID` reset, player leaks across matches), data integrity (in-game box score retention), interface conformance, integrity violations
+- **Files to review**: `internal/playertrack/rank_client.go`, `internal/playertrack/rank_client_test.go`, `internal/session/session_mmr_test.go`, `internal/daemon/daemon_mmr_test.go`
+- **Interface contracts**: `PROJECT.md:51-56` (`ConvertSkillRatingToMMR`, `FromSkill`, `ParseRanksJSON`), `ORIGINAL_REQUEST.md:259-288`
+- **Review criteria**: True in-game MMR conversion formula `round((SkillRating * 20) + 100)`, casual 0.0 guard, idempotency guard (> 150.0), legacy JSON deserialization migration, session delta accuracy on in-game scale, API output compliance, test coverage, and integrity violations
 
 ## Key Decisions Made
-- Confirmed zero integrity violations: No hardcoded test values in production code, no dummy facades, genuine differential retention algorithms.
-- Executed full test suite independently: 100% pass across all 14 Go packages (710+ tests) including target packages `internal/playertrack` and `internal/session`.
+- Confirmed zero integrity violations: No hardcoded test values in production code, no dummy facades, genuine mathematical formula `math.Round((skillRating * 20.0) + 100.0)`.
+- Executed full test suite independently: 100% pass across all 14 Go packages (including `internal/playertrack`, `internal/session`, `internal/daemon`, `test/e2e`).
 - Static analysis: `go vet ./...` executed cleanly with 0 warnings.
-- Frontend build & tests: `npm run build` and `npm test` (112 tests across 9 files) passed cleanly.
 - Standalone build: `go build ./cmd/rl-sync` succeeded cleanly.
-- Adversarial review: Evaluated reconnection cycles, simultaneous multi-player disconnects, AI bot replacement, match transitions, and pointer isolation.
+- Adversarial review: Evaluated floating point rounding, casual/negative ratings, idempotency boundaries, legacy JSON migration, and concurrent conversion safety.
 - Issued verdict: **APPROVE**.
 
 ## Artifact Index
-- `BRIEFING.md` — Situational awareness and working memory
-- `DISPATCH.md` — Dispatch logs and task instructions
+- `BRIEFING.md` — Situational awareness and persistent memory
+- `DISPATCH.md` — Incoming dispatch log
 - `progress.md` — Liveness heartbeat and step tracking
 - `handoff.md` — 5-component review and adversarial challenge report with verdict APPROVE
 
 ## Review Checklist
 - **Items reviewed**:
-  - `internal/playertrack/tracker.go:49-81, 330-580, 680-790` (LobbyPlayer struct, differential retention, DeepClone, OnMatchEnded outcome inclusion)
-  - `internal/playertrack/tracker_test.go:1310-1813` (5 mid-game disconnect lifecycle tests)
-  - `internal/session/models.go:71-143` (SessionMatchPlayer struct, DeepClone with pointer isolation)
-  - `internal/session/session.go:142-209, 212-305` (RecordActiveMatch, ConcludeMatch goal summation and player mapping)
-  - `internal/session/session_test.go:695-1154` (4 session disconnect integration and snapshot preservation tests)
-  - `web/src/types/api.ts:37-52, 84-96` (TypeScript interface alignment for LobbyPlayer and SessionMatchPlayer)
+  - `internal/playertrack/rank_client.go:646-654` (`ConvertSkillRatingToMMR` implementation and guards)
+  - `internal/playertrack/rank_client.go:657-667` (`FromSkill` integration)
+  - `internal/playertrack/rank_client.go:669-691` (`BuildRanksSnapshot`, `SerializeRanksJSON`)
+  - `internal/playertrack/rank_client.go:724-733` (`ParseRanksJSON` legacy migration)
+  - `internal/playertrack/rank_client_test.go:1227-1480` (Unit tests for conversion, casual, negative, idempotency, legacy JSON)
+  - `internal/session/session_mmr_test.go:1-398` (Session tracking MMR deltas, multi-playlist, late rank arrival, roster snapshots)
+  - `internal/daemon/daemon_mmr_test.go:1-442` (REST `/api/current-match`, `/api/session`, `/api/players`, and SSE `/api/events` serialization)
 - **Verdict**: APPROVE
-- **Unverified claims**: None. All claims directly verified through independent test runs and code inspections.
+- **Unverified claims**: None. All verified empirically.
 
 ## Attack Surface
 - **Hypotheses tested**:
-  - Reconnection after disconnect -> VERIFIED (seenThisFrame deduplicates, updates stats, resets IsDisconnected=false).
-  - Multiple simultaneous leavers -> VERIFIED (both teammates and opponents retained accurately).
-  - Bot backfill & departure -> VERIFIED (departed AI bots excluded from retention, active AI bots not recorded in matchups).
-  - Local player disconnect -> VERIFIED (local team and player retained, allowing outcome compilation on match conclusion).
-  - MatchGUID transition -> VERIFIED (new match resets participant slices and upsert cache, avoiding cross-match player leakage).
-  - Pointer isolation during cloning -> VERIFIED (SessionMatchPlayer.DeepClone() copies Won *bool pointer safely).
-  - Memory / CPU overhead -> VERIFIED (slice allocations bounded by lobby size, O(N) map lookups).
+  - Floating point rounding (.25, .24, .26, .75) -> VERIFIED (exact integer rounding matching standard in-game tiers).
+  - Casual and unranked zero guard (<= 0.0 -> 0.0) -> VERIFIED (prevents false 100 MMR outputs).
+  - Idempotency guard (> 150.0 -> unchanged) -> VERIFIED (preserves pre-scaled test fixtures and satisfies idempotency).
+  - Sub-150 MMR edge in legacy deserialization -> EXPLORED (documented theoretical ambiguity for < 150 MMR in legacy deserialization).
+  - Concurrency and race conditions -> VERIFIED (safe pure mathematical operations without shared state mutation).
 - **Vulnerabilities found**: None.
 - **Untested angles**: None within M1 scope.

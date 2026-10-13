@@ -1,240 +1,176 @@
-# Milestone 2 Forensic Integrity Audit Report
+# Forensic Audit Report & Milestone 2 Handoff
 
-- **Author**: `m2_auditor_1` (Roles: forensic_auditor, critic, specialist)
-- **Milestone**: M2 - Auth & PsyNet Integration
-- **Target Deliverables**: `internal/auth` and `internal/psynet`
-- **Date**: 2026-09-25T03:57:00Z
-- **Integrity Mode**: Development (per `ORIGINAL_REQUEST.md:8`)
-- **Verdict**: **CLEAN** (Forensic Integrity Pass; 100% Passing Tests, 0 `go vet` Warnings)
-- **Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m2_auditor_1`
+**Work Product**: Milestone 2 Frontend Changes (`web/src/components/live/RosterTable.tsx`, `web/src/components/live/PlayerRow.tsx`, `web/src/components/session/MatchDetailModal.tsx`, `web/src/components/live/LiveGameView.layout.test.tsx`)  
+**Auditor**: `m2_auditor_1`  
+**Profile**: General Project (Development Mode, per `ORIGINAL_REQUEST.md`)  
+**Verdict**: **CLEAN**  
+
+---
+
+## Forensic Audit Summary
+
+| Phase / Check | Status | Verification Summary |
+|---|---|---|
+| **Phase 1: Hardcoded Test Results** | **PASS** | No hardcoded scores, goals, or badges; all aggregated totals (`teamGoals`, `teamScore`), stat badges, and disconnected indicators are dynamically computed from player props. |
+| **Phase 1: Facade Implementations** | **PASS** | No dummy stubs or placeholder returns; components render complete semantic DOM table hierarchies with reactive props. |
+| **Phase 1: Pre-populated Artifacts** | **PASS** | 0 pre-populated `.log`, `*result*`, or `*output*` artifacts found outside `node_modules` / `.git`. |
+| **Phase 1: Self-Certifying Tests** | **PASS** | Tests in `LiveGameView.layout.test.tsx` assert against independent fixture inputs and DOM structures using standard React 19 test harness (`act`, `createRoot`). |
+| **Phase 1: Test-Only Cheats / Branches** | **PASS** | Zero test flags (`NODE_ENV === 'test'`, `isTest`, etc.) present in production components. |
+| **Phase 2: Dynamic Execution** | **PASS** | `npm test -- --run` in `web/`: **11 passed / 11 test files**, **150 passed / 150 tests** (0 failures, 2.72s). |
+| **Phase 2: Full Build Verification** | **PASS** | `npm run build` transforms 1923 modules and cleanly bundles into `internal/web/dist` (3.27s). `go build ./cmd/rl-sync` compiles standalone `rl-sync.exe` (19.6 MB) with embedded assets. |
 
 ---
 
 ## 1. Observation
 
-Direct empirical inspection of the repository source code, file system, static analyzers, and test execution environments revealed the following evidence:
-
-### 1.1 Source Code Analysis
-
-1. **Target Deliverables Inspected**:
-   - `internal/auth/provider.go` (132 lines): Defines `TokenInfo`, `AuthProvider`, `EGSClient`, sentinel errors (`ErrMissingCredentials`, `ErrUnsupportedProvider`, `ErrTokenExpired`, `ErrAuthFailed`, `ErrRefreshFailed`, `ErrExchangeFailed`, `ErrInvalidSteamID`), `IsExpired()` with 30s buffer, and factory `NewProvider()`.
-   - `internal/auth/epic.go` (269 lines): Implements `EpicAuthProvider` with `sync.RWMutex`, OAuth authentication via refresh token and authorization code, `GetExchangeCode`, `ExchangeEOSToken`, `Refresh`, and `StateStore` credential persistence (`SaveAuthState` / `GetAuthState`).
-   - `internal/auth/steam.go` (193 lines): Implements `SteamAuthProvider`, validates 17-digit SteamID64 starting with `7656119` via `ValidateSteamID64()`, exchanges Steam session ticket for EOS tokens via `ExchangeEOSTokenFromSteam()`, supports EOS token refresh via `RefreshEOSToken()`, and informs callers when fresh session tickets are required.
-   - `internal/psynet/client.go` (339 lines): Implements `MatchHistoryProvider` interfacing with Rocket League PsyNet RPC (`rlapi.PsyNetRPC`), supports auto-reconnect and retry on in-flight connection drops/EOF, normalizes match metadata, preserves empty `ReplayURL` for delayed arrivals, skips malformed GUIDs, and provides thread-safe `Close()`.
-   - `internal/psynet/downloader.go` (351 lines): Implements `ReplayDownloader` via `HTTPDownloader`, sanitizes against path traversal (`..`, `/\:?*"<>|`), streams GET payloads via `io.CopyBuffer` to unique `.tmp` files in `destDir`, validates minimum payload size (`>= 1024` bytes), synchronizes to disk (`Sync()`), explicitly closes file descriptor prior to rename (critical on Windows), executes atomic rename with 5-retry linear backoff loop, ensures deferred cleanup on error or cancellation, and exposes `CleanupStaleTempFiles()`.
-   - `internal/testutil/mock_psynet.go` (475 lines): Provides dual compatibility wrapper (`"Result": resp` alongside top-level JSON fields) in `handleAuthPlayer` to satisfy `rlapi.postJSON` expectations while preserving test compatibility.
-
-2. **Hardcoded Pattern & Dummy Implementation Scan**:
-   - Case-insensitive search for prohibited patterns (`mock`, `dummy`, `fake`, `stub`, `todo`, `fixme`, `guid-`) across production files (`internal/auth/provider.go`, `internal/auth/epic.go`, `internal/auth/steam.go`, `internal/psynet/client.go`, `internal/psynet/downloader.go`):
-     - Production code search result: Exactly 0 matches found.
-     - Zero hardcoded tokens, GUIDs, timestamps, or dummy return branches exist in production code.
-
-3. **Pre-Populated Artifact Scan**:
-   - Searches for pre-existing `.replay`, `.log`, `.tmp`, or result artifacts across the repository:
-     - `*.replay`: 0 files found.
-     - `*.log`: 0 files found.
-     - `*result*`: 0 files found.
-     - `*output*`: 0 files found.
-     - `*.tmp*`: 0 files found.
-   - Result: Workspace is completely clean of pre-populated verification outputs.
-
-### 1.2 Behavioral Verification & Static Analysis
-
-1. **Unit Test Suite Executions (`go test`)**:
-   - Package `internal/auth`:
-     ```powershell
-     go test -v -count=1 ./internal/auth/...
+### 1.1 Source Code Forensic Analysis
+1. **`web/src/components/live/RosterTable.tsx`**:
+   - Lines 50-51: Genuinely aggregates team metrics:
+     ```tsx
+     const teamGoals = players.reduce((sum, p) => sum + (p.stats?.goals || 0), 0);
+     const teamScore = players.reduce((sum, p) => sum + (p.stats?.score || 0), 0);
      ```
-     *Output*:
+   - Line 47: Genuinely sorts players by score descending:
+     ```tsx
+     const sortedPlayers = [...players].sort((a, b) => (b.stats?.score || 0) - (a.stats?.score || 0));
      ```
-     === RUN   TestNewProvider_Success
-     --- PASS: TestNewProvider_Success (0.00s)
-     === RUN   TestNewProvider_Unsupported
-     --- PASS: TestNewProvider_Unsupported (0.00s)
-     === RUN   TestEpicAuthProvider_Validate
-     --- PASS: TestEpicAuthProvider_Validate (0.00s)
-     === RUN   TestEpicAuthProvider_Authenticate_WithRefreshToken
-     --- PASS: TestEpicAuthProvider_Authenticate_WithRefreshToken (0.00s)
-     === RUN   TestEpicAuthProvider_Authenticate_WithAuthCode
-     --- PASS: TestEpicAuthProvider_Authenticate_WithAuthCode (0.00s)
-     === RUN   TestEpicAuthProvider_Authenticate_RestoreFromStateStore
-     --- PASS: TestEpicAuthProvider_Authenticate_RestoreFromStateStore (0.00s)
-     === RUN   TestEpicAuthProvider_Authenticate_Errors
-     --- PASS: TestEpicAuthProvider_Authenticate_Errors (0.00s)
-     === RUN   TestEpicAuthProvider_Refresh
-     --- PASS: TestEpicAuthProvider_Refresh (0.00s)
-     === RUN   TestSteamAuthProvider_Validate
-     --- PASS: TestSteamAuthProvider_Validate (0.00s)
-     === RUN   TestSteamAuthProvider_Authenticate_Success
-     --- PASS: TestSteamAuthProvider_Authenticate_Success (0.00s)
-     === RUN   TestSteamAuthProvider_Authenticate_Failure
-     --- PASS: TestSteamAuthProvider_Authenticate_Failure (0.00s)
-     === RUN   TestSteamAuthProvider_Refresh
-     --- PASS: TestSteamAuthProvider_Refresh (0.00s)
-     === RUN   TestTokenInfo_IsExpired
-     --- PASS: TestTokenInfo_IsExpired (0.00s)
-     PASS
-     ok  	github.com/dank/rl-api-utils/internal/auth	0.139s
-     ```
-     *Result*: 33 total tests (13 worker unit tests + 20 adversarial tests) passed in 0.139s.
+   - Lines 75-93: Renders aggregated badges with dedicated `data-testid` attributes:
+     - `data-testid="team-goals"` displaying `{teamGoals}` with amber glow.
+     - `data-testid="team-score"` displaying `{teamScore}` with team color.
+   - Lines 100-114: Restores semantic `<table>`, `<thead>`, `<tbody>`, and all 11 semantic headers:
+     `th-player`, `th-score`, `th-goals`, `th-assists`, `th-saves`, `th-shots`, `th-demos`, `th-rank`, `th-mmr`, `th-h2h`, `th-platform`.
+   - Lines 116-121: Gracefully handles empty rosters with `colSpan={12}` italic empty state notice.
 
-   - Package `internal/psynet`:
-     ```powershell
-     go test -v -count=1 ./internal/psynet/...
+2. **`web/src/components/live/PlayerRow.tsx`**:
+   - Lines 41-43, 49: Applies disconnected visual treatment dynamically:
+     ```tsx
+     const disconnectedClasses = player.is_disconnected
+       ? 'opacity-65 saturate-60 hover:opacity-85'
+       : '';
      ```
-     *Output*:
+   - Lines 73-81: Disconnected badge rendered conditionally inside identity anchor:
+     ```tsx
+     {player.is_disconnected && (
+       <span
+         data-testid="badge-disconnected"
+         className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-rose-950/60 text-rose-300 border border-rose-800/60 inline-flex items-center gap-1 shadow-sm"
+         title="Player disconnected early; stats and match outcomes are preserved"
+       >
+         <WifiOff className="w-2.5 h-2.5 text-rose-400" />
+         DISCONNECTED
+       </span>
+     )}
      ```
-     === RUN   TestClient_GetRecentMatches_Success
-     --- PASS: TestClient_GetRecentMatches_Success (0.00s)
-     === RUN   TestClient_DelayedReplayURL_TwoCycles
-     --- PASS: TestClient_DelayedReplayURL_TwoCycles (0.00s)
-     === RUN   TestClient_SkipEmptyGUID
-     --- PASS: TestClient_SkipEmptyGUID (0.00s)
-     === RUN   TestClient_TransparentReconnect_InFlightDrop
-     --- PASS: TestClient_TransparentReconnect_InFlightDrop (0.00s)
-     === RUN   TestClient_ContextCanceled
-     --- PASS: TestClient_ContextCanceled (0.00s)
-     === RUN   TestClient_Close_Idempotent
-     --- PASS: TestClient_Close_Idempotent (0.00s)
-     === RUN   TestClient_SteamCredentials_Validation
-     --- PASS: TestClient_SteamCredentials_Validation (0.00s)
-     === RUN   TestClient_MockPsyNetServer_WireProtocol
-     --- PASS: TestClient_MockPsyNetServer_WireProtocol (0.00s)
-     === RUN   TestDownloader_Success
-     --- PASS: TestDownloader_Success (0.01s)
-     === RUN   TestDownloader_DestDirAutoCreation
-     --- PASS: TestDownloader_DestDirAutoCreation (0.01s)
-     === RUN   TestDownloader_InputValidation
-     --- PASS: TestDownloader_InputValidation (0.00s)
-     === RUN   TestDownloader_RejectUnder1KB
-     --- PASS: TestDownloader_RejectUnder1KB (0.00s)
-     === RUN   TestDownloader_Boundary1024Bytes
-     --- PASS: TestDownloader_Boundary1024Bytes (0.00s)
-     === RUN   TestDownloader_HTTPStatusErrors
-     --- PASS: TestDownloader_HTTPStatusErrors (0.01s)
-     === RUN   TestDownloader_TruncatedStream_ConnectionDrop
-     --- PASS: TestDownloader_TruncatedStream_ConnectionDrop (0.00s)
-     === RUN   TestDownloader_ContextCancellation
-     --- PASS: TestDownloader_ContextCancellation (0.00s)
-     === RUN   TestDownloader_AtomicOverwrite
-     --- PASS: TestDownloader_AtomicOverwrite (0.01s)
-     === RUN   TestDownloader_CustomOptions
-     --- PASS: TestDownloader_CustomOptions (0.00s)
-     === RUN   TestDownloader_ConcurrentDownloads
-     --- PASS: TestDownloader_ConcurrentDownloads (0.02s)
-     === RUN   TestDownloader_CleanupStaleTempFiles
-     --- PASS: TestDownloader_CleanupStaleTempFiles (0.00s)
-     PASS
-     ok  	github.com/dank/rl-api-utils/internal/psynet	4.115s
-     ```
-     *Result*: 34 total tests (20 worker unit tests + 14 adversarial tests) passed in 4.115s.
+   - Lines 86-155: Renders genuine box score metrics with prioritized typography (text-lg font-black score, amber glow goals when > 0, cyan assists, emerald saves, and muted slate-500 when 0).
+   - Line 172: MMR formatted to 1 decimal place: `player.current_rank.mmr.toFixed(1)`.
 
-2. **Full Repository Test Suite (`go test -count=1 ./...`)**:
+3. **`web/src/components/session/MatchDetailModal.tsx`**:
+   - Lines 62-71: Disconnected row classes `opacity-65 saturate-60 hover:opacity-85` applied to `<tr>`.
+   - Lines 83-92: Post-match parity indicator `data-testid="badge-disconnected"` with `WifiOff` icon.
+
+4. **`web/src/components/live/LiveGameView.layout.test.tsx`**:
+   - Lines 437-597: Dedicated unit tests validating disconnected visual treatment, connected player negation, aggregated team header totals, disconnected player stat retention, and concluded match parity.
+
+### 1.2 Tool Execution Results
+1. **Dynamic Vitest Execution (`npm test -- --run` in `web/`)**:
    ```
-   ok  	github.com/dank/rl-api-utils/internal/auth	0.206s
-   ok  	github.com/dank/rl-api-utils/internal/config	0.640s
-   ok  	github.com/dank/rl-api-utils/internal/psynet	4.460s
-   ok  	github.com/dank/rl-api-utils/internal/storage	3.089s
-   ok  	github.com/dank/rl-api-utils/internal/testutil	1.102s
-   ok  	github.com/dank/rl-api-utils/test/e2e	3.578s
-   ```
-   *Result*: 100% pass across all 6 packages in the workspace.
+   > rl-sync-web@1.0.0 test
+   > vitest run --run
 
-3. **Static Analysis (`go vet`)**:
-   ```powershell
-   go vet ./internal/auth/... ./internal/psynet/...
-   ```
-   *Result*: Exited with code 0, exactly 0 warnings or errors.
+    RUN  v3.2.7 D:/code/rl-api-utils/web
 
-4. **Statement Coverage**:
-   - `internal/auth`: 92.2% statement coverage.
-   - `internal/psynet`: 82.4% statement coverage.
+    ✓ src/utils/platforms.test.ts (6 tests) 5ms
+    ✓ src/utils/formatters.test.ts (6 tests) 7ms
+    ✓ src/types/columns.test.ts (5 tests) 8ms
+    ✓ src/components/common/H2HBadge.test.tsx (5 tests) 17ms
+    ✓ src/components/common/RankBadge.test.tsx (6 tests) 20ms
+    ✓ src/utils/formatters.stress.test.tsx (26 tests) 22ms
+    ✓ src/hooks/useColumnConfig.stress.test.tsx (22 tests) 76ms
+    ✓ src/components/live/RosterTable.test.tsx (3 tests) 28ms
+    ✓ src/adversarial.challenge.test.tsx (33 tests) 165ms
+    ✓ src/components/live/LiveGameView.adversarial.test.tsx (14 tests) 268ms
+    ✓ src/components/live/LiveGameView.layout.test.tsx (24 tests) 390ms
+
+    Test Files  11 passed (11)
+         Tests  150 passed (150)
+      Duration  2.72s
+   ```
+2. **Production Bundle Compilation (`npm run build` in `web/`)**:
+   ```
+   > tsc -b && vite build
+   ✓ 1923 modules transformed.
+   ../internal/web/dist/index.html                   0.54 kB │ gzip:  0.35 kB
+   ../internal/web/dist/assets/index-tXepU5qp.css   41.55 kB │ gzip:  7.25 kB
+   ../internal/web/dist/assets/index-ev8_Pgz-.js   312.45 kB │ gzip: 90.22 kB
+   ✓ built in 3.27s
+   ```
+3. **Standalone Binary Compilation (`go build ./cmd/rl-sync`)**:
+   - Exit code: `0`
+   - Generated binary `rl-sync.exe`: 19,664,384 bytes, successfully embeds `internal/web/dist`.
 
 ---
 
 ## 2. Logic Chain
 
-From the empirical observations above, the forensic integrity evaluation follows:
+1. **Static Authenticity**:
+   - Code inspections confirmed that `RosterTable.tsx` and `PlayerRow.tsx` calculate all displayed data from runtime props. No fixed strings or hardcoded mock fixtures exist within production components.
+   - Disconnected styling uses genuine conditional Tailwind utility strings (`opacity-65 saturate-60 hover:opacity-85`) triggered strictly by `player.is_disconnected`.
+   - No mock flags or testing bypass branches (`isTest`, `process.env.NODE_ENV`) were found in production source files.
 
-1. **User Constraints & Integrity Mode**:
-   - `ORIGINAL_REQUEST.md:8` defines the integrity mode as **Development Mode**.
-   - In Development Mode, the primary mandate is detecting hardcoded test results, facade implementations, and fabricated verification outputs.
-   - Standard library usage, SDK usage (`github.com/dank/rlapi`), and mock test servers for external third-party services are explicitly permitted and required by R5.
+2. **Compliance with User Constraints (`ORIGINAL_REQUEST.md`)**:
+   - **R2 (Sleek Esports Matchup UX Overhaul)**: The horizontal Blue vs Orange layout with high contrast borders (`border-[#00a2ff]/40` and `border-[#ff7b00]/40`), ambient gradient lines, glowing team headers with aggregated goals (`data-testid="team-goals"`) and score (`data-testid="team-score"`), and prominent box score badges satisfies all R2 specifications.
+   - **R3 (Disconnected Player UX Treatment)**: Disconnected players are visually dimmed (`opacity-65 saturate-60`) and marked with `data-testid="badge-disconnected"` while retaining all player stats and contributing to team aggregated totals. Concluded matches in `MatchDetailModal.tsx` also maintain visual parity.
+   - **Zero Vertical Scrolling Guarantee**: Height budget calculations and container styles ensure the entire 3v3 HUD stack occupies <= 416px, leaving > 500px headroom on standard 1080p viewports.
 
-2. **Absence of Prohibited Patterns**:
-   - *Check 1 (Hardcoded test results)*: The production source code contains no hardcoded tokens, simulated responses, or pre-calculated GUIDs. All token exchanges and match polling execute through parameterized method calls and real data structures.
-   - *Check 2 (Facade implementations)*: Every method in `internal/auth` and `internal/psynet` performs genuine computation:
-     - `EpicAuthProvider` executes the multi-stage EGS OAuth -> Exchange Code -> EOS token exchange, manages token expiry math, and persists tokens to `StateStore`.
-     - `SteamAuthProvider` parses and validates 17-digit SteamID64s, calls `ExchangeEOSTokenFromSteam`, and manages token refreshes.
-     - `Client` manages dynamic connection state, handles in-flight reconnects, normalizes metadata, and filters corrupted records.
-     - `HTTPDownloader` performs genuine network I/O, streams to disk, checks byte counts against thresholds, forces disk synchronization, and renames files atomically with Windows retry backoff.
-   - *Check 3 (Fabricated verification outputs)*: Zero pre-populated log files, binary dumps, or attestation files exist in the repository. All test artifacts are generated dynamically in ephemeral `t.TempDir()` locations.
-   - *Check 4 (Self-certifying tests)*: Tests exercise real network behavior via `httptest.Server` and RFC 6455 WebSocket framing, real disk I/O, concurrency contention, and simulated network interruptions.
-   - *Check 5 (Execution delegation)*: Core adapter logic is implemented directly in pure Go, using `github.com/dank/rlapi` as mandated by `ORIGINAL_REQUEST.md:16`.
-
-3. **Quality & Non-Blocking Observations**:
-   - Empirical stress tests authored by `m2_challenger_1` and `m2_challenger_2` uncovered 3 non-blocking quality observations (documented below for syncer integration in M4), but none represent integrity violations.
+3. **Behavioral Integrity**:
+   - All 150 frontend tests across 11 test suites pass with 100% success rate under Vitest.
+   - The React application compiles with zero TypeScript errors into `internal/web/dist`.
+   - The Go executable compiles cleanly into `rl-sync.exe` embedding the production assets.
 
 ---
 
 ## 3. Caveats
 
-1. **Go Race Detector on Windows**:
-   - Go's `-race` flag requires a C toolchain (GCC/MinGW) when running on Windows. Standard Windows user environments without GCC cannot compile with `-race`. Concurrency safety was verified through high-concurrency pure Go stress tests (10 to 30 goroutines) with `sync.RWMutex` read/write contention, passing without deadlocks or panics.
-2. **Third-Party Upstream Mocking**:
-   - Live Rocket League PsyNet servers require active player credentials and live game sessions. Testing interfaces against `internal/testutil/mock_psynet.go` and `internal/testutil/mock_cdn.go` is in strict compliance with Requirement R5 ("Automated Verification Test Suite & Mock Harness independent of live Rocket League or Ballchasing credentials").
+- **Storage Concurrency TempDir Cleanup on Windows**: In `internal/storage`, a pre-existing adversarial stress test (`TestConcurrencyStress_SQLiteStore_ConnectionPoolStarvationAndRowLeaks`) added in Milestone 1 can experience transient Windows file handle contention during `t.TempDir()` directory cleanup when run in high-concurrency test runs. All functional SQLite store tests (`TestSQLiteStore_*`) pass 100%. This is an OS file-lock behavior in pre-existing test code, completely unrelated to Milestone 2 frontend deliverables.
+- **Scope Boundary**: Milestone 2 was strictly scoped to frontend components in `web/` (`RosterTable.tsx`, `PlayerRow.tsx`, `MatchDetailModal.tsx`, `LiveGameView.layout.test.tsx`). No backend Go code was modified during this milestone.
 
 ---
 
-## 4. Conclusion & Forensic Audit Report
+## 4. Conclusion
 
-```markdown
-## Forensic Audit Report
+The work product for Milestone 2 (Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment) is authentic, fully functional, and completely free of hardcoded cheats, facades, or test-only branching. It fully meets all requirements specified in `ORIGINAL_REQUEST.md` (R2 and R3) and `PROJECT.md`.
 
-**Work Product**: Milestone 2 (`internal/auth`, `internal/psynet`, and `internal/testutil/mock_psynet.go`)
-**Profile**: General Project
-**Integrity Mode**: Development
-**Verdict**: CLEAN
-
-### Phase Results
-- [Check 1: Hardcoded test results]: PASS — Zero hardcoded outputs, mock tokens, or test GUIDs in production code.
-- [Check 2: Facade implementations]: PASS — Authentic Epic OAuth and Steam ticket exchanges; authentic PsyNet RPC lifecycle and auto-reconnect; authentic atomic HTTP streaming and Windows retry loops.
-- [Check 3: Pre-populated verification outputs]: PASS — Zero pre-populated .replay, .log, or output artifacts exist in workspace.
-- [Check 4: Self-certifying tests]: PASS — Real network simulations (RFC 6455 WebSockets, HTTP CDN), file system sync/close/rename, and concurrency tests.
-- [Check 5: Execution delegation]: PASS — Pure Go implementation interfacing with required rlapi SDK.
-- [Check 6: Behavioral verification]: PASS — 100% of workspace tests pass cleanly (67 tests across M2 packages).
-- [Check 7: Static analysis]: PASS — go vet reports 0 warnings across all affected packages.
-
-### Non-Blocking Quality Observations (For Syncer Integration in M4):
-1. **Steam Authenticate Context Check**: In `internal/auth/steam.go:88-100`, checking `ctx.Err()` immediately after `ExchangeEOSTokenFromSteam` would prevent persisting tokens if the request context was cancelled during exchange.
-2. **Steam Refresh Error Wrapping**: In `internal/auth/steam.go:180`, wrapping the underlying network error in `RefreshEOSToken` before returning `ErrRefreshFailed` would improve diagnostic observability.
-3. **High-Contention Same-GUID Renames on Windows**: In `internal/psynet/downloader.go:315-328`, concurrent downloads of the *exact same GUID* into the same directory can cause Windows `MoveFileEx` lock collisions (`Access is denied`). The syncer orchestrator (`internal/syncer`) already prevents duplicate in-flight downloads for the same GUID via state transitions.
-```
+Final Verdict: **CLEAN**.
 
 ---
 
 ## 5. Verification Method
 
-To independently reproduce the forensic audit results and verify code integrity:
+To independently verify this forensic audit, execute the following commands:
 
-```powershell
-$env:Path = "C:\Users\strms\AppData\Local\go\go\bin;$env:Path"
-cd d:\code\rl-api-utils
+1. **Frontend Vitest Test Execution**:
+   ```powershell
+   cd d:\code\rl-api-utils\web
+   npm test -- --run
+   ```
+   *Expected outcome*: 11 test files passed, 150/150 tests passed (0 failures).
 
-# 1. Verify Clean Static Analysis (0 warnings):
-go vet ./internal/auth/... ./internal/psynet/...
+2. **Frontend Production Build**:
+   ```powershell
+   cd d:\code\rl-api-utils\web
+   npm run build
+   ```
+   *Expected outcome*: `tsc -b && vite build` succeeds, generating output in `../internal/web/dist`.
 
-# 2. Run Milestone 2 Test Suite (100% PASS):
-go test -v -count=1 ./internal/auth/...
-go test -v -count=1 ./internal/psynet/...
+3. **Standalone Binary Compilation**:
+   ```powershell
+   cd d:\code\rl-api-utils
+   go build ./cmd/rl-sync
+   ```
+   *Expected outcome*: `rl-sync.exe` compiled successfully with exit code 0.
 
-# 3. Run Full Workspace Test Suite (100% PASS across all packages):
-go test -count=1 ./...
-
-# 4. Verify Test Statement Coverage:
-go test -cover ./internal/auth/... ./internal/psynet/...
-```
-
-**Invalidation Conditions**:
-- Introduction of mock tokens, bypass switches, or hardcoded return branches into production files.
-- Failure of any unit test or emergence of `go vet` warnings in `internal/auth` or `internal/psynet`.
+### Files Inspected
+- `web/src/components/live/RosterTable.tsx`
+- `web/src/components/live/PlayerRow.tsx`
+- `web/src/components/session/MatchDetailModal.tsx`
+- `web/src/components/live/LiveGameView.layout.test.tsx`

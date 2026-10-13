@@ -1,40 +1,40 @@
-# DISPATCH: m1_reviewer_1
+# Dispatch: m1_reviewer_1
 
-## Objective
-Review the implementation of Milestone M1 (Requirement R2: Persistent Player State on Mid-Game Disconnect) produced by `m1_worker_1`.
+## Mission & Role
+You are `m1_reviewer_1`, an independent reviewer for Milestone 1: True In-Game MMR Conversion (R1).
+Working directory: `d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1`
 
-## Scope & Files to Review
-- `internal/playertrack/tracker.go`
-- `internal/playertrack/tracker_test.go`
-- `internal/session/models.go`
-- `internal/session/session.go`
-- `internal/session/session_test.go`
-- `web/src/types/api.ts`
+## Scope
+Review the code changes and test additions made by `m1_worker_1`:
+- `internal/playertrack/rank_client.go`: `ConvertSkillRatingToMMR`, `FromSkill`, `ParseRanksJSON`
+- `internal/playertrack/rank_client_test.go`
+- `internal/session/session_mmr_test.go`
+- `internal/daemon/daemon_mmr_test.go`
 
-## Evaluation Criteria
-1. **Correctness**: Does `Tracker.OnUpdateState` correctly retain departed participants and preserve their box score stats (`Score`, `Goals`, `Assists`, `Saves`, `Shots`, `Demos`) with `IsDisconnected = true`?
-2. **Reconnection & Edge Cases**: Are reconnecting players updated without creating duplicate rows? Are departed AI bots properly ignored? Is local player identity and team preserved if local player disconnects early?
-3. **Session & ConcludeMatch**: Does `SessionTracker` mirror `IsDisconnected`, aggregate goals from all participants into team scores, and compute `Won` properly?
-4. **Interface Conformance**: Conformance with contracts defined in `PROJECT.md`.
-5. **Verification**: Run `go test -v ./internal/playertrack/...`, `go test -v ./internal/session/...`, and `go test ./...`. Verify all tests pass cleanly.
+## Verification Requirements
+1. Verify implementation correctness: `math.Round((skillRating * 20.0) + 100.0)`.
+2. Verify guard behavior: `skillRating <= 0.0 -> 0.0`, `skillRating > 150.0 -> skillRating`.
+3. Verify legacy data migration in `ParseRanksJSON`.
+4. Run tests:
+   `go test -v -count=1 ./internal/playertrack -run "TestConvertSkillRatingToMMR|TestFromSkill|TestParseRanksJSON"`
+   `go test -v -count=1 ./internal/session -run "TestSessionTracker_TrueInGameMMR"`
+   `go test -v -count=1 ./internal/daemon -run "TestDaemonAPI"`
+   `go test -count=1 ./...`
+5. State your verdict clearly as `APPROVE` or `REQUEST_CHANGES` in your handoff report.
 
-Deliver verdict (`APPROVE` or `REQUEST_CHANGES`) with evidence in `d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\handoff.md` and send message back to orchestrator_6.
+## Inputs
+- `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T11:02:53Z`)
+- `d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md`
+- `d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md`
 
+## Output
+Write your handoff report to `d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\handoff.md`.
 
-## 2026-10-06T09:11:18Z
-You are m1_reviewer_1, a high-reliability review agent for Milestone M1 (Requirement R2: Persistent Player State on Disconnect).
+## 2026-10-06T11:37:22Z
+You are m1_reviewer_1.
 Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1
-
-You MUST read:
-1. Authoritative User Request: d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T08:30:09Z)
-2. Project specification: d:\code\rl-api-utils\PROJECT.md
-3. Your dispatch: d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\DISPATCH.md
-4. Worker handoff report: d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md
-
-Review files:
-- internal/playertrack/tracker.go & tracker_test.go
-- internal/session/models.go & session.go & session_test.go
-- web/src/types/api.ts
-
-Run tests (e.g. go test -v ./internal/playertrack/..., go test -v ./internal/session/..., go test ./...).
-Deliver your verdict (APPROVE or REQUEST_CHANGES) in d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\handoff.md and notify orchestrator_6.
+Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, d:\code\rl-api-utils\.agents\teamwork\m1_worker_1\handoff.md, and d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\DISPATCH.md.
+Review Milestone 1 code changes and test additions. Run verification commands (go test -count=1 ./...).
+State your verdict clearly as APPROVE or REQUEST_CHANGES in:
+d:\code\rl-api-utils\.agents\teamwork\m1_reviewer_1\handoff.md
+Send a message to parent when done.
