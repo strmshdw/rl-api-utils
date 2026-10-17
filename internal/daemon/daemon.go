@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -34,7 +35,8 @@ type Syncer interface {
 // PlayerDetailResponse represents the composite response for GET /players/{id}.
 type PlayerDetailResponse struct {
 	*storage.PlayerRecord
-	Matchups []*storage.PlayerMatchup `json:"matchups"`
+	Matchups      []*storage.PlayerMatchup      `json:"matchups"`
+	RecentMatches []*storage.PlayerMatchDetail `json:"recent_matches"`
 }
 
 // Daemon coordinates the periodic execution of the synchronization engine.
@@ -485,7 +487,7 @@ func (d *Daemon) httpHost() string {
 	if d.cfg.Web.Host != "" {
 		return d.cfg.Web.Host
 	}
-	return "0.0.0.0"
+	return "127.0.0.1"
 }
 
 func (d *Daemon) httpPort() int {
@@ -533,6 +535,15 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 
 	// Stats API Trigger Endpoint (Backward compatible)
 	mux.HandleFunc("/sync", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !isAllowedMutatingOrigin(r) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
+			return
+		}
 		d.logger.Info("received manual trigger request via local HTTP endpoint", slog.String("remote", r.RemoteAddr))
 		if err := d.TriggerSync(ctx, "manual_http_request"); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -546,13 +557,18 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 
 	// REST API v1 Endpoints (Milestone M4)
 	mux.HandleFunc("GET /api/session", d.handleGetSession)
+	mux.HandleFunc("GET /api/session/state", d.handleGetSession)
 	mux.HandleFunc("/api/session/reset", d.handleResetSession)
 	mux.HandleFunc("GET /api/current-match", d.handleCurrentMatch)
 	mux.HandleFunc("GET /api/players", d.handleListPlayers)
+	mux.HandleFunc("GET /api/players/{id}/matches", d.handleGetPlayerMatches)
 	mux.HandleFunc("GET /api/players/{id...}", d.handleGetPlayer)
+	mux.HandleFunc("PATCH /api/players/{id...}", d.handlePatchPlayer)
 	mux.HandleFunc("GET /api/matches", d.handleListMatches)
+	mux.HandleFunc("POST /api/matches/{guid}/retry", d.handleRetryMatch)
 	mux.HandleFunc("GET /api/matches/{guid...}", d.handleGetMatch)
 	mux.HandleFunc("GET /api/historical-matches", d.handleListMatches)
+	mux.HandleFunc("GET /api/mmr-history", d.handleListMMRHistory)
 	mux.HandleFunc("POST /api/sync/ballchasing", d.handleTriggerBallchasingSync)
 	mux.HandleFunc("GET /api/sync/ballchasing/status", d.handleBallchasingSyncStatus)
 	mux.HandleFunc("GET /api/events", d.handleEvents)
@@ -560,7 +576,9 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 	// Backward Compatible Player Tracking Aliases
 	mux.HandleFunc("GET /current-match", d.handleCurrentMatch)
 	mux.HandleFunc("GET /players", d.handleListPlayers)
+	mux.HandleFunc("GET /players/{id}/matches", d.handleGetPlayerMatches)
 	mux.HandleFunc("GET /players/{id...}", d.handleGetPlayer)
+	mux.HandleFunc("PATCH /players/{id...}", d.handlePatchPlayer)
 
 	// Embedded Static Frontend SPA (Fallback to index.html for non-API routes)
 	if d.webHandler != nil {
@@ -570,6 +588,29 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 	}
 
 	return mux
+}
+
+func isAllowedMutatingOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // non-browser clients (curl, go tests)
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	originHost := u.Hostname()
+	if strings.EqualFold(originHost, host) {
+		return true
+	}
+	if originHost == "localhost" || originHost == "127.0.0.1" || originHost == "::1" {
+		return true
+	}
+	return false
 }
 
 func isPathTraversal(r *http.Request) bool {
@@ -605,8 +646,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Origin, Accept")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

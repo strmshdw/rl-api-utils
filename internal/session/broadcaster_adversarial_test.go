@@ -200,9 +200,9 @@ func TestAdversarial_StalledSubscribersNonBlocking(t *testing.T) {
 		if d > maxBroadcastDuration {
 			maxBroadcastDuration = d
 		}
-		// Yield execution briefly every 25 events to allow fast subscriber goroutines to drain buffers under heavy CPU load
-		if i%25 == 0 {
-			time.Sleep(20 * time.Microsecond)
+		// Yield execution briefly every 20 events to allow fast subscriber goroutines to drain buffers under heavy CPU load
+		if i%20 == 0 {
+			time.Sleep(150 * time.Microsecond)
 		}
 	}
 	totalDuration := time.Since(startTotal)

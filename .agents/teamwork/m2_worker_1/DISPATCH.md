@@ -1,73 +1,90 @@
-# Dispatch: m2_worker_1
+# DISPATCH: Milestone M2 Implementation Worker
 
-## Mission & Role
-You are `m2_worker_1`, the implementation worker for Milestone 2: Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment (R2 & R3).
-Working directory: `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1`
+**Agent**: `m2_worker_1`  
+**Role**: Milestone M2 Implementation Worker  
+**Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1`  
+**Parent**: `orchestrator_9`  
+**Timestamp**: 2026-10-17T02:00:00Z  
 
-## Mandatory Integrity Warning
+## Mission
+Implement Milestone M2: Syncer Post-Upload Telemetry Polling, Multi-Identity Local Player Resolution, PsyNet Replay Matchup Recording, Bounded Retry Queue with Exponential Backoff, and Replay Parser RFC3339 Date Normalization / Overtime / Demolition Extraction (SPEC-01, SPEC-04, SPEC-06).
+
+## Mandatory Reference Documents
+Read these files thoroughly before writing code:
+1. `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically timestamp 2026-10-16T23:46:37Z)
+2. `d:\code\rl-api-utils\.agents\teamwork\orchestrator_9\PROJECT.md`
+3. `d:\code\rl-api-utils\.agents\teamwork\m2_exp_syncer_1\handoff.md` and `syncer_analysis.md`
+4. `d:\code\rl-api-utils\.agents\teamwork\m2_exp_retry_1\handoff.md` and `retry_analysis.md`
+5. `d:\code\rl-api-utils\.agents\teamwork\m2_exp_parser_1\handoff.md` and `parser_analysis.md`
+
+## Exclusive Write Ownership Files
+You have exclusive write ownership of:
+- `internal/syncer/*` (`syncer.go`, `interfaces.go`, `ballchasing_history.go`, `syncer_test.go`, etc.)
+- `internal/replay/*` (`parser.go`, `replay.go`, `parser_test.go`, etc.)
+- `internal/storage/sqlite.go` (only for `ListPendingDownloads`, `ListPendingUploads`, `ListPendingStatsSync`, `MarkDownloaded`, `ResetMatchRetry`)
+- `internal/storage/jsonstore.go` (only for `ListPendingDownloads`, `ListPendingUploads`, `ListPendingStatsSync`, `MarkDownloaded`, `ResetMatchRetry`, `CalculateBackoff`)
+- `internal/storage/store.go` (only for interface methods / helper definitions if needed)
+- `internal/storage/m2_retry_test.go` (new unit tests for retry queue and backoff)
+
+## MANDATORY INTEGRITY WARNING
 DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_preview_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
 
-## Write Ownership Boundaries
-You exclusively own and may edit:
-- `web/src/components/live/RosterTable.tsx`
-- `web/src/components/live/PlayerRow.tsx`
-- `web/src/components/live/LiveGameView.tsx`
-- `web/src/components/session/MatchDetailModal.tsx`
-- `web/src/components/live/LiveGameView.layout.test.tsx`
-- `web/src/components/live/LiveGameView.adversarial.test.tsx`
+## Detailed Tasks to Implement
 
-DO NOT edit any Go backend files (`internal/playertrack/`, `internal/session/`, etc.).
+### 1. Replay Parser Fixes (`internal/replay`)
+- In `internal/replay/parser.go`:
+  - Add `Demos int json:"demos,omitempty"` to `ReplayPlayerStats`.
+  - Implement `normalizeReplayDate(raw string) string` supporting layouts (`"2006-01-02 15-04-05"`, `"2006-01-02:15-04"`, `"2006-01-02 15:04:05"`, `"2006-01-02T15:04:05"`, `time.RFC3339`, `time.RFC3339Nano`, `"2006-01-02"`), converting to UTC RFC3339.
+  - Fall back to `MatchStartEpoch` when `Date` is empty or missing.
+  - Implement `extractOvertime(meta *ReplayMetadata, props map[string]*propertyValue) bool`: check explicit properties (`bOvertime`, `bOverTime`, `Overtime`, `overtime`, `OvertimeSeconds > 0`), and fallback heuristic (`TotalSeconds >= 315.0 && !Forfeit && abs(Team0Score - Team1Score) == 1`).
+  - In `populateMetadata()`: assign `meta.Overtime = extractOvertime(...)`, normalize `meta.Date = normalizeReplayDate(...)`, and parse player `Demos` from `sp["Demos"]` / `sp["Demolitions"]`.
+- In `internal/replay/parser_test.go`:
+  - Add comprehensive unit tests verifying date normalization, overtime extraction, demolition extraction, and test all 20 real replays in `replays/*.replay`.
 
-## Inputs & Blueprints
-- `d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md` (specifically `## 2026-10-06T11:02:53Z`)
-- `d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md`
-- `d:\code\rl-api-utils\.agents\teamwork\m2_explorer_1\handoff.md` (and proposed files in `m2_explorer_1\`)
-- `d:\code\rl-api-utils\.agents\teamwork\m2_explorer_2\handoff.md` (and `proposed_PlayerRow.tsx` in `m2_explorer_2\`)
-- `d:\code\rl-api-utils\.agents\teamwork\m2_explorer_3\handoff.md` (and test blueprints)
+### 2. Storage Retry Queue & Backoff (`internal/storage`)
+- In `internal/storage/sqlite.go`:
+  - Update `ListPendingDownloads`: query `(download_status = 'PENDING' OR (download_status = 'FAILED' AND retry_count < ? AND (? - updated_at) >= MIN(?, ? * (1 << (CASE WHEN retry_count > 0 THEN retry_count - 1 ELSE 0 END)))))`. Default `maxRetries = 3`, `baseBackoff = 30s`, `maxBackoff = 15m`.
+  - Update `ListPendingUploads`: query `download_status = 'DOWNLOADED'` AND `(upload_status = 'PENDING' OR (upload_status = 'FAILED' AND retry_count < ? AND (? - updated_at) >= MIN(?, ? * (1 << (CASE WHEN retry_count > 0 THEN retry_count - 1 ELSE 0 END)))))`.
+  - Update `ListPendingStatsSync`: include `(upload_status = 'UPLOADED' OR upload_status = 'DUPLICATE')` AND `(stats_sync_status = 'PENDING' OR (stats_sync_status = 'FAILED' AND stats_retry_count < ? AND (? - updated_at) >= MIN(?, ? * (1 << (CASE WHEN stats_retry_count > 0 THEN stats_retry_count - 1 ELSE 0 END)))))`.
+  - In `MarkDownloaded`: reset `retry_count = 0` so download retries don't starve upload retries.
+  - In `ResetMatchRetry`: also reset `download_status = CASE WHEN download_status = 'FAILED' THEN 'PENDING' ELSE download_status END`.
+- In `internal/storage/jsonstore.go`:
+  - Implement `CalculateBackoff(attempt int, baseBackoff, maxBackoff time.Duration) time.Duration`.
+  - Update `ListPendingDownloads`, `ListPendingUploads`, and `ListPendingStatsSync` with identical bounded retry and backoff logic.
+  - Update `MarkDownloaded` to reset `RetryCount = 0`.
+  - Update `ResetMatchRetry` to reset `DownloadStatus = DownloadPending` if `DownloadFailed`.
+- Add unit tests in `internal/storage/m2_retry_test.go` covering backoff calculation and retry filtering.
 
-## Implementation Tasks
-1. **`web/src/components/live/RosterTable.tsx`**:
-   - Restore semantic `<table>` wrapped in `.overflow-x-auto`.
-   - Implement glowing team headers with ambient glow stripe (`h-1 bg-gradient-to-r`), glowing borders (`border-[#00a2ff]/40` / `border-[#ff7b00]/40`), ambient dropshadows.
-   - Implement dedicated aggregated goals badge (`data-testid="team-goals"`) and aggregated score badge (`data-testid="team-score"`).
-   - Ensure all 11 semantic `data-testid="th-*"` table headers exist in order.
-2. **`web/src/components/live/PlayerRow.tsx`**:
-   - Implement streamlined broadcast card-row as `<tr>`.
-   - Apply disconnected treatment: `player.is_disconnected ? 'opacity-65 saturate-60 hover:opacity-85' : ''`.
-   - Add clean `data-testid="badge-disconnected"` with `WifiOff` icon in `data-testid="player-identity"`.
-   - Render prominent stat badge pills in `<td>` cells for Score, Goals (amber glow), Assists (cyan), Saves (emerald), Shots, Demos, Rank, and MMR (`toFixed(1)`).
-3. **`web/src/components/session/MatchDetailModal.tsx`**:
-   - Apply matching `opacity-65 saturate-60 hover:opacity-85` and `data-testid="badge-disconnected"` badge for concluded matches.
-4. **`web/src/components/live/LiveGameView.layout.test.tsx` & `LiveGameView.adversarial.test.tsx`**:
-   - Fix all 15 Vitest failures.
-   - Add dedicated tests for R2 (`team-goals`, `team-score`) and R3 (`badge-disconnected`, `opacity-65 saturate-60`) from `m2_explorer_3\handoff.md`.
-5. **Run builds and tests**:
-   - `cd web; npm test -- --run` (assert 100% pass)
-   - `npm run build` (assert clean bundle into `internal/web/dist`)
-   - `cd ..; go test -count=1 ./...` (assert 100% pass across all 14 Go packages)
-   - `go build ./cmd/rl-sync` (assert clean `rl-sync.exe` build)
+### 3. Syncer Post-Upload Polling, Multi-Identity Resolution & Matchups (`internal/syncer`)
+- In `internal/syncer/interfaces.go`:
+  - Add `ReplayStatsFetcher` interface: `GetReplay(ctx context.Context, id string) (*ballchasing.ReplayItem, error)`.
+  - Ensure `StateStore` interface includes `ListPendingStatsSync`, `MarkStatsSyncing`, `MarkStatsSynced`, `MarkStatsSyncFailed`, `RecordMatchResults`, `SaveMatchPlayers`, and `GetAuthState`.
+- In `internal/syncer/syncer.go`:
+  - Implement 6-tier local player resolution (`ResolveLocalPlayer`) with strict bot immunity (`!p.IsBot`).
+  - Wire Step 6 `PollAndSyncPendingStats(ctx context.Context)` into `Syncer.RunCycle`:
+    - Poll matches returned by `store.ListPendingStatsSync(ctx)`.
+    - Fetch replay via `ReplayStatsFetcher.GetReplay(ctx, m.BallchasingID)`.
+    - If status == `"ok"`:
+      - Call `store.MarkStatsSynced(ctx, m.MatchGUID, m.BallchasingID)`.
+      - Upsert player rank snapshots if present.
+      - Save `match_players` and sync replay stats.
+      - Call `store.RecordMatchResults` passing actual match time parsed via `storage.ParseReplayDate`.
+    - If status == `"pending"`: leave as pending for subsequent cycle.
+    - If status == `"failed"`: call `store.MarkStatsSyncFailed(ctx, m.MatchGUID, errStr)`.
+  - Update `Syncer.SyncDownloadedReplayStats`:
+    - Propagate `Demos: p.Demos` to `storage.ReplayPlayerStats` and `Overtime: meta.Overtime` to `storage.ReplayMatchStats`.
+    - Resolve local player & local team.
+    - Call `store.RecordMatchResults` with `matchTime` from `storage.ParseReplayDate(meta.Date)`.
+    - Call `store.SaveMatchPlayers`.
+    - Gracefully ignore `storage.ErrMatchAlreadyProcessed`.
+- Add unit tests in `internal/syncer/syncer_test.go` verifying the polling loop, retry logic, and local player resolution.
 
-## Output
-Write your complete handoff report to:
-`d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md`
-Send message to parent when done.
+## Verification
+Worker must execute:
+- `go vet ./...`
+- `go test -v -race ./internal/replay/...`
+- `go test -v -race ./internal/storage/...`
+- `go test -v -race ./internal/syncer/...`
+- `go test -race ./...`
 
-
-## 2026-10-06T12:00:15Z
-[Message] timestamp=2026-10-06T12:00:15Z sender=18e4e66b-5835-4b6b-bd1e-a34092f47346 priority=MESSAGE_PRIORITY_HIGH content=You are m2_worker_1.
-Your working directory is: d:\code\rl-api-utils\.agents\teamwork\m2_worker_1
-Read d:\code\rl-api-utils\.agents\teamwork\ORIGINAL_REQUEST.md (specifically ## 2026-10-06T11:02:53Z), d:\code\rl-api-utils\.agents\teamwork\orchestrator_8\PROJECT.md, and d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\DISPATCH.md.
-
-MANDATORY INTEGRITY WARNING:
-DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_preview_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
-
-Implement Milestone 2: Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment (R2 & R3):
-- Apply proposed components and changes from m2_explorer_1, m2_explorer_2, and m2_explorer_3.
-- In RosterTable.tsx: restore table semantics, glowing team headers with aggregated goals badge (data-testid="team-goals") and score badge (data-testid="team-score").
-- In PlayerRow.tsx: broadcast card-rows with prominent stat badges (Score, Goals with amber glow, Assists, Saves, Shots, Demos), MMR toFixed(1), and disconnected treatment (opacity-65 saturate-60 hover:opacity-85, data-testid="badge-disconnected" with WifiOff icon).
-- In MatchDetailModal.tsx: parity disconnected styling and badge.
-- In LiveGameView.layout.test.tsx: fix the 15 failures and add dedicated R2 & R3 test cases.
-- Run tests and builds: npm test -- --run in web/, npm run build, and go test -count=1 ./... and go build ./cmd/rl-sync.
-Write your complete handoff report to:
-d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md
-Send a message to parent when done.
+Write complete handoff report to `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md` and notify `orchestrator_9`.

@@ -97,6 +97,28 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({ player, isLocal,
               ))}
             </div>
           )}
+          {((player.tags && player.tags.length > 0) || player.notes) && (
+            <div data-testid="live-player-badges" className="flex flex-wrap items-center gap-1.5 mt-0.5">
+              {player.tags?.map((tag) => (
+                <span
+                  key={tag}
+                  data-testid={`badge-tag-${tag}`}
+                  className="bg-line-2/60 text-ink text-[11px] font-bold px-1.5 py-0.5 rounded tracking-wider uppercase"
+                >
+                  {tag}
+                </span>
+              ))}
+              {player.notes && (
+                <span
+                  data-testid="badge-player-note"
+                  title={player.notes}
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-ink bg-blue-slab/20 border border-blue-ink/30 px-1.5 py-0.5 rounded tracking-wider uppercase cursor-help"
+                >
+                  <span>📝</span> NOTE
+                </span>
+              )}
+            </div>
+          )}
         </div>
         {columns.h2h && (
           <div data-testid="player-h2h" className="flex flex-col items-end gap-1.5 shrink-0">

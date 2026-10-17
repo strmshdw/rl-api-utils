@@ -96,6 +96,16 @@ func (m *testSkillFetcher) GetPlayersSkills(ctx context.Context, playerIDs []rla
 	return res, nil
 }
 
+func (m *testSkillFetcher) Calls() [][]rlapi.PlayerID {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res := make([][]rlapi.PlayerID, len(m.calls))
+	for i, c := range m.calls {
+		res[i] = append([]rlapi.PlayerID(nil), c...)
+	}
+	return res
+}
+
 func (m *testSkillFetcher) IsEnabled() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -144,11 +154,11 @@ func (m *mockFaultStore) UpsertPlayer(ctx context.Context, player *storage.Playe
 	return m.StateStore.UpsertPlayer(ctx, player)
 }
 
-func (m *mockFaultStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []storage.PlayerOutcome) error {
+func (m *mockFaultStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []storage.PlayerOutcome, matchTime ...time.Time) error {
 	if m.recordResultsErr != nil {
 		return m.recordResultsErr
 	}
-	return m.StateStore.RecordMatchResults(ctx, matchGUID, playlistID, outcomes)
+	return m.StateStore.RecordMatchResults(ctx, matchGUID, playlistID, outcomes, matchTime...)
 }
 
 func newSQLiteTestStore(t *testing.T) storage.StateStore {
@@ -667,7 +677,7 @@ func TestTracker_ClassificationAndBotExclusion(t *testing.T) {
 
 		// Verify bots excluded from rank queries
 		time.Sleep(20 * time.Millisecond) // Let background worker dispatch
-		for _, call := range fetcher.calls {
+		for _, call := range fetcher.Calls() {
 			for _, pid := range call {
 				if string(pid) == "Unknown|0|0" {
 					t.Errorf("bot ID Unknown|0|0 was dispatched for rank query!")

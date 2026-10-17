@@ -72,14 +72,12 @@ func (g *NodeSteamTicketGenerator) GenerateTicket(ctx context.Context, opts Stea
 
 	args := []string{
 		absScriptPath,
-		"--username", opts.Username,
-		"--account-type", opts.AccountLabel,
 	}
-	if opts.LoginKey != "" {
-		args = append(args, "--login-key", opts.LoginKey)
+	if opts.Username != "" {
+		args = append(args, "--username", opts.Username)
 	}
-	if opts.Password != "" {
-		args = append(args, "--password", opts.Password)
+	if opts.AccountLabel != "" {
+		args = append(args, "--account-type", opts.AccountLabel)
 	}
 
 	nodeBin := g.NodePath
@@ -89,6 +87,22 @@ func (g *NodeSteamTicketGenerator) GenerateTicket(ctx context.Context, opts Stea
 
 	cmd := exec.CommandContext(ctx, nodeBin, args...)
 	cmd.Dir = filepath.Dir(absScriptPath)
+
+	// Inject credentials safely via process environment variables rather than CLI flags (SPEC-06)
+	env := os.Environ()
+	if opts.Username != "" {
+		env = append(env, "STEAM_USERNAME="+opts.Username)
+	}
+	if opts.Password != "" {
+		env = append(env, "STEAM_PASSWORD="+opts.Password)
+	}
+	if opts.LoginKey != "" {
+		env = append(env, "STEAM_LOGIN_KEY="+opts.LoginKey)
+	}
+	if opts.AccountLabel != "" {
+		env = append(env, "STEAM_ACCOUNT_TYPE="+opts.AccountLabel)
+	}
+	cmd.Env = env
 
 	// Attach stdin and stderr for interactive Steam Guard prompts
 	cmd.Stdin = os.Stdin

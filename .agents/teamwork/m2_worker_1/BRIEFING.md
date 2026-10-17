@@ -1,8 +1,7 @@
-# BRIEFING — 2026-10-06T12:15:00Z
+# BRIEFING — 2026-10-17T02:05:00Z
 
 ## Mission
-Implement Milestone 2: Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment (R2 & R3).
-Restore table semantics in `RosterTable.tsx` with glowing team headers, aggregated goals and score badges, prominent stat badges in `PlayerRow.tsx` with true MMR `toFixed(1)` and disconnected player visual treatment (`opacity-65 saturate-60`, `WifiOff` badge), match detail modal parity, and fix all 15 Vitest failures with dedicated R2/R3 test cases.
+Implement Milestone M2: Syncer Post-Upload Telemetry Polling, Multi-Identity Local Player Resolution, PsyNet Replay Matchup Recording, Bounded Retry Queue with Exponential Backoff, and Replay Parser RFC3339 Date Normalization / Overtime / Demolition Extraction (SPEC-01, SPEC-04, SPEC-06).
 
 ## 🔒 My Identity
 - Archetype: worker
@@ -12,6 +11,8 @@ Restore table semantics in `RosterTable.tsx` with glowing team headers, aggregat
 - Milestone: Milestone 2 (Polling Auth & PsyNet Rank Client)
 - Milestone 2: Sleek Esports Matchup UX Overhaul & Disconnected Player Treatment (R2 & R3)
 - Current parent: 18e4e66b-5835-4b6b-bd1e-a34092f47346
+- Current parent: 048a592a-b159-4ea3-a5c3-e619b708dd31 (orchestrator_9)
+- Active Milestone: Milestone M2 (Syncer Post-Upload Telemetry Polling, Multi-Identity Local Player Resolution, PsyNet Replay Matchup Recording, Bounded Retry Queue with Exponential Backoff, Replay Parser)
 
 ## 🔒 Key Constraints
 - Exclusive write ownership:
@@ -34,52 +35,57 @@ Restore table semantics in `RosterTable.tsx` with glowing team headers, aggregat
 - DO NOT edit any Go backend files (`internal/playertrack/`, `internal/session/`, etc.).
 - Mandatory Integrity: No hardcoding test results or creating dummy/facade implementations.
 - 100% Vitest pass rate (`npm test -- --run` in `web/`), clean `npm run build`, and clean `go test` / `go build`.
+- Milestone M2 Exclusive Write Ownership:
+  - `internal/syncer/*` (`syncer.go`, `interfaces.go`, `ballchasing_history.go`, `syncer_test.go`, etc.)
+  - `internal/replay/*` (`parser.go`, `replay.go`, `parser_test.go`, etc.)
+  - `internal/storage/sqlite.go` (only for `ListPendingDownloads`, `ListPendingUploads`, `ListPendingStatsSync`, `MarkDownloaded`, `ResetMatchRetry`)
+  - `internal/storage/jsonstore.go` (only for `ListPendingDownloads`, `ListPendingUploads`, `ListPendingStatsSync`, `MarkDownloaded`, `ResetMatchRetry`, `CalculateBackoff`)
+  - `internal/storage/store.go` (only for interface methods / helper definitions if needed)
+  - `internal/storage/m2_retry_test.go` (new unit tests for retry queue and backoff)
+- DO NOT CHEAT: Genuine implementations maintaining real state and behavior. Independent forensic audit by teamwork_preview_auditor.
 
 ## Current Parent
-- Conversation ID: 18e4e66b-5835-4b6b-bd1e-a34092f47346
-- Updated: 2026-10-06T12:15:00Z
+- Conversation ID: 048a592a-b159-4ea3-a5c3-e619b708dd31 (orchestrator_9)
+- Updated: 2026-10-17T02:05:00Z
 
 ## Task Summary
 - **What to build**:
-  - `web/src/components/live/RosterTable.tsx`: Restored semantic `<table>` wrapped in `.overflow-x-auto`. Added glowing team headers with ambient glow stripe (`h-1 bg-gradient-to-r`), glowing borders (`border-[#00a2ff]/40` / `border-[#ff7b00]/40`), ambient dropshadows. Implemented dedicated aggregated goals badge (`data-testid="team-goals"`) and score badge (`data-testid="team-score"`). Ensured all 11 semantic `data-testid="th-*"` table headers exist in order.
-  - `web/src/components/live/PlayerRow.tsx`: Broadcast card-row as `<tr>`. Disconnected styling (`opacity-65 saturate-60 hover:opacity-85`) and `data-testid="badge-disconnected"` with `WifiOff` icon in `data-testid="player-identity"`. Prominent stat badge styling for Score, Goals (amber glow), Assists, Saves, Shots, Demos, Rank, and MMR (`toFixed(1)`).
-  - `web/src/components/session/MatchDetailModal.tsx`: Parity disconnected styling (`opacity-65 saturate-60 hover:opacity-85`) and `data-testid="badge-disconnected"` with `WifiOff` icon.
-  - `web/src/components/live/LiveGameView.layout.test.tsx`: Fixed all 15 failures and added dedicated R2 & R3 test cases.
+  1. Replay Parser: Add `Demos int` to `ReplayPlayerStats`, implement `normalizeReplayDate`, `extractOvertime`, populate demos in `populateMetadata`, and tests in `parser_test.go`.
+  2. Storage Retry Queue: Update `ListPendingDownloads`, `ListPendingUploads`, `ListPendingStatsSync` with bounded retries (maxRetries=3) and exponential backoff in SQLite and JSONStore; fix `MarkDownloaded` retry count reset; fix `ResetMatchRetry` download status reset; add tests in `m2_retry_test.go`.
+  3. Syncer: Add `ReplayStatsFetcher` and extend `StateStore` in `interfaces.go`; wire Step 6 (`PollAndSyncPendingStats`) in `RunCycle`; implement 6-tier local player resolution with bot immunity; update `SyncDownloadedReplayStats` to propagate Demos/Overtime, resolve local player/team, record match outcomes with actual match timestamp, and save match players; add unit tests in `syncer_test.go`.
 - **Success criteria**:
-  - `npm test -- --run` in `web/` passes 100% (all 11 test files, 150 passed, zero failures).
-  - `npm run build` succeeds cleanly into `internal/web/dist`.
-  - `go test -count=1 ./...` passes 100% across all 14 packages.
-  - `go build ./cmd/rl-sync` compiles standalone `rl-sync.exe` cleanly.
-- **Interface contracts**: PROJECT.md § Interface Contracts
-- **Code layout**: PROJECT.md § Architecture
+  - `go vet ./...` succeeds with zero errors.
+  - `go test -v -race ./internal/replay/...` passes.
+  - `go test -v -race ./internal/storage/...` passes.
+  - `go test -v -race ./internal/syncer/...` passes.
+  - `go test -race ./...` passes across all packages.
+- **Interface contracts**: `d:\code\rl-api-utils\.agents\teamwork\orchestrator_9\PROJECT.md`
+- **Code layout**: `d:\code\rl-api-utils\.agents\teamwork\orchestrator_9\PROJECT.md`
 
 ## Key Decisions Made
-- Restored semantic table layout in `RosterTable.tsx` wrapped in `.overflow-x-auto` to strictly maintain column alignment across player rows while supporting broadcast styling (team glow borders, ambient gradient line, aggregated goals/score badges).
-- Formatted MMR with `toFixed(1)` ensuring exact alignment with true in-game MMR scale.
-- Treated disconnected players with `opacity-65 saturate-60 hover:opacity-85` and `data-testid="badge-disconnected"` with `WifiOff` icon while preserving all match stats, team placement, and outcome aggregation.
-- Replicated disconnected styling and badge in `MatchDetailModal.tsx` for concluded match history drilldowns.
+- Follow analysis recommendations from `m2_exp_parser_1`, `m2_exp_retry_1`, and `m2_exp_syncer_1`.
+- Keep changes minimal, clean, robust, and idiomatic Go.
 
 ## Artifact Index
 - `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\DISPATCH.md` — Assignment instructions
 - `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\progress.md` — Heartbeat and step tracking
 - `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\handoff.md` — Final handoff report
-- `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\modern-web-guidance-skill.md` — Cached copy of domain skill
 
 ## Change Tracker
 - **Files modified**:
-  - `web/src/components/live/RosterTable.tsx`: restored semantic `<table>`, glowing headers, ambient stripe, aggregated `team-goals` and `team-score` badges, 11 `th-*` testids.
-  - `web/src/components/live/PlayerRow.tsx`: restored `<tr>` broadcast card-rows, prominent stat classes, MMR `toFixed(1)`, disconnected row classes and `badge-disconnected` badge.
-  - `web/src/components/session/MatchDetailModal.tsx`: added disconnected row styling and `badge-disconnected` badge with `WifiOff` icon.
-  - `web/src/components/live/LiveGameView.layout.test.tsx`: resolved all 15 failures, added 5 dedicated test cases for R2 and R3.
-- **Build status**: PASS (`npm test` 150/150 passed; `npm run build` passed; `go test` 14/14 packages passed; `go build` passed).
-- **Pending issues**: None
+  - `internal/replay/parser.go`: Added `Demos` to `ReplayPlayerStats`, implemented `normalizeReplayDate`, `extractOvertime`, and metadata extraction.
+  - `internal/replay/parser_test.go`: Added tests for dates, overtime, demolitions, and 20 real replays.
+  - `internal/storage/store.go`: Added backoff constants (`DefaultMaxRetries`, `DefaultBaseBackoff`, `DefaultMaxBackoff`).
+  - `internal/storage/sqlite.go`: Added bounded retries with exponential backoff for pending downloads, uploads, and stats sync; reset retry counts.
+  - `internal/storage/jsonstore.go`: Implemented `CalculateBackoff` with overflow protection; added bounded retries with exponential backoff for pending downloads, uploads, and stats sync.
+  - `internal/storage/m2_retry_test.go`: Added comprehensive unit tests for backoff calculation and retry filtering across SQLite and JSONStore.
+  - `internal/syncer/interfaces.go`: Added `ReplayStatsFetcher` and aligned `StateStore` methods.
+  - `internal/syncer/syncer.go`: Added `statsFetcher`, `WithStatsFetcher`, `WithLocalPlayerID`, `WithLocalPlayerName`, `WithMaxRetries`, `WithRateInterval`, `mu sync.Mutex`, Step 6 `PollAndSyncPendingStats` in `RunCycle`, 6-tier `ResolveLocalPlayer` with bot immunity, and matchup/player persistence in `SyncDownloadedReplayStats`.
+  - `internal/syncer/syncer_test.go`: Implemented `mockStatsFetcher`, updated `mockStore`, and added comprehensive unit tests for polling, duplicate handling, statuses, retries, recovery, local player tiers, bot immunity, and idempotency.
+- **Build status**: PASS
+- **Pending issues**: Awaiting completion of full repository `go test -race ./...`
 
 ## Quality Status
-- **Build/test result**: 100% pass across all frontend and backend test suites.
-- **Lint status**: Clean; TypeScript compilation and Vite build succeeded with 0 warnings/errors.
-- **Tests added/modified**: 5 new test cases in `LiveGameView.layout.test.tsx` covering disconnected player styling/icon, active player negation, aggregated team goals/score, disconnected player aggregation, and MatchDetailModal parity.
-
-## Loaded Skills
-- **Source**: `C:\Users\strms\.gemini\config\plugins\modern-web-guidance\skills\modern-web-guidance\SKILL.md`
-- **Local copy**: `d:\code\rl-api-utils\.agents\teamwork\m2_worker_1\modern-web-guidance-skill.md`
-- **Core methodology**: Modern web best practices for UI layout, content-visibility, and component styling.
+- **Build/test result**: All targeted package tests passing (`internal/replay`, `internal/storage`, `internal/syncer`).
+- **Lint status**: `go vet ./...` clean with zero warnings.
+- **Tests added/modified**: 15+ comprehensive unit test suites added covering all SPEC-01, SPEC-04, and SPEC-06 requirements.

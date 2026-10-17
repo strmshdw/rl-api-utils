@@ -285,3 +285,54 @@ Provide clean visual distinction for disconnected players (e.g. subtle desaturat
 - [ ] Automated frontend tests (Vitest) confirm that live match components render with prominent stat badges, clear team color coding, and no layout overflow on standard 1080p viewports.
 - [ ] Automated tests verify that disconnected participants render with the designated distinct styling while retaining all match stats.
 - [ ] Full build verification succeeds: `npm run build` cleanly bundles into `internal/web/dist` and `go build ./cmd/rl-sync` compiles `rl-sync.exe` without errors.
+
+
+## 2026-10-16T23:46:37Z
+
+Implement the complete engineering and feature specification suite (SPEC-01 through SPEC-09) for `rl-sync` (`d:\code\rl-api-utils`), a Go backend daemon and React/TypeScript web dashboard for Rocket League replay synchronization, Ballchasing telemetry ingestion, and live player/session tracking.
+
+Working directory: d:\code\rl-api-utils
+Integrity mode: development
+
+## Requirements
+
+### R1. Complete Ballchasing Telemetry Ingestion, Post-Upload Stats Sync & Matchup Tracking (SPEC-01)
+- Capture and persist all match, team (`blue`/`orange`), and player telemetry categories returned by Ballchasing's `GET /api/replays/{id}` endpoint (`core`, `boost`, `movement`, `positioning`, `demo`, `ball`, `camera`, `car`, `rank`, `uploader`, `min_rank`/`max_rank`, `overtime_seconds`, and replay `status`), supporting both flat list responses (`GET /api/replays`) and nested detail responses (`GET /api/replays/{id}`).
+- Automatically poll and synchronize full Ballchasing stats for newly uploaded or duplicate replays (`ballchasing_id != ""`) once Ballchasing finishes asynchronous processing (`status == "ok"`), tracking sync state (`stats_sync_status` / retry counts) so pending replays are retried on subsequent sync cycles without data loss.
+- Resolve the local player across all configured and authenticated identities (configured `local_player_id`/`local_player_name`, authenticated primary account ID/display name, Ballchasing `PingInfo`, and replay `uploader`), record head-to-head teammate and opponent outcomes (`RecordMatchResults`) for both Ballchasing historical syncs and locally downloaded PsyNet replays, hydrate player rank snapshots when present in replays, and preserve actual match timestamps (`first_seen_at`, `last_seen_at`, `last_played_at`) from the replay date rather than sync execution time.
+
+### R2. Player Details Full Match History & Interactive Drill-Downs (SPEC-02)
+- Index per-player match participation and performance (backfilled automatically from existing stored matches on startup and updated on every replay sync) and expose paginated, filterable player match history via `GET /api/players/{id}/matches` (filterable by `role=all|teammate|opponent`, `playlist`, and `result=all|victory|defeat`) as well as initial `recent_matches` on `GET /api/players/{id}`.
+- Upgrade the Player Profile dialog (`PlayerProfileDialog`) to display the full chronological match history with that player, supporting interactive filter toggles by clicking the `WITH YOU` / `VS YOU` cards or `BY PLAYLIST` rows, inline expansion (Level 1 drill-down) showing the full two-team box score with both `You` and the inspected player highlighted, a tabbed full-match detail modal (Level 2 drill-down) displaying Box Score, Boost, Movement, Positioning, and Camera/Loadout stats, and cross-player profile navigation when clicking any player in a box score.
+
+### R3. Accurate Post-Match MMR Deltas, Local-Relative Outcomes & SSE State Consistency (SPEC-03)
+- Refresh the local player's rank after match completion (bypassing/invalidating the 15-minute rank cache) so concluded session matches and playlist session summaries record accurate non-zero `mmr_change` and `mmr_delta` values.
+- Compute historical match `result` (`victory` / `defeat`) relative to the local player's team rather than hardcoding Blue > Orange, and expose `local_player_ids` from the backend so the History view and modals orient W/L and highlight `You` immediately on initial load.
+- Fix frontend `match_ended` SSE handling in `useLiveMatch` and `OBSOverlayView` so ending a match transitions the active match state cleanly without overwriting the `CurrentMatchResponse` structure with a `SessionMatchDetail` payload, and consolidate duplicate `EventSource('/api/events')` connections into a single shared SSE stream that hydrates `session_update` directly from event data.
+
+### R4. Retry Queue, Local Replay Parser Fixes & Server-Side Directory Filtering (SPEC-04 & SPEC-05)
+- Update pending download and upload queries to retry transient `'FAILED'` records up to bounded `max_retries` with backoff, and add `POST /api/matches/{guid}/retry` with a retry action in the History UI.
+- Fix local `.replay` header date parsing (`"2006-01-02 15-04-05"` and `"2006-01-02:15-04"`) into `time.RFC3339`, extract `Overtime` and demolitions in the local parser, and add numeric `strconv.Atoi` fallback in `MapPlaylistSlugToID`.
+- Move player directory role filtering (`all`, `frequent`, `teammate`, `opponent`, `synergy`), sorting, global spotlight calculations (`Best Teammate`, `Most Faced`, `Toughest Rival`), and historical match outcome filtering (`WINS`, `LOSSES`) to server-side queries so pagination and spotlights are accurate across the entire dataset.
+
+### R5. Security, Concurrency & Operational Hardening (SPEC-06)
+- Prevent XML/PowerShell injection in `WindowsToastNotifier` via proper XML escaping and environment-variable argument passing; write YAML config updates atomically with `0600` permissions; pass Steam credentials via environment variables rather than process CLI flags.
+- Enforce `POST` on `/sync`, validate `Origin`/`Host` on mutating endpoints, track background sync goroutines in the daemon `WaitGroup` using the daemon lifecycle context, bound in-memory caches (`rankCache`, `failBackoff`, `matchupCache`), enable `StreamUpload: true` for Ballchasing uploads, remove duplicate startup banner logging, and untrack/ignore compiled `.exe` artifacts.
+
+### R6. Player Notes/Tags, MMR Progression History & Live Clock / Configurable OBS Overlay (SPEC-07, SPEC-08 & SPEC-09)
+- Support per-player custom tags and notes (`PATCH /api/players/{id}`), editable in `PlayerProfileDialog` and surfaced as live lobby alert badges on `LivePlayerCard`.
+- Persist per-match MMR history snapshots (`GET /api/mmr-history`) and render MMR progression sparklines/charts in the Session and Idle views.
+- Ingest live game clock (`time_remaining`, `is_overtime`) from the localhost WebSocket into `Scorebug` and `OBSOverlayView`, and support URL query parameter customization on `OBSOverlayView` (`?overlay=true&theme=...&show=...`).
+
+## Acceptance Criteria
+
+### Backend Verification
+- [ ] `go build ./...` and `go vet ./...` succeed with zero errors.
+- [ ] `go test -race ./...` passes across all packages (`internal/ballchasing`, `internal/syncer`, `internal/storage`, `internal/playertrack`, `internal/session`, `internal/daemon`, `internal/replay`, `internal/statsapi`, `internal/config`, `internal/auth`), including new unit and integration tests covering SPEC-01 through SPEC-09.
+- [ ] Unmarshaling a Ballchasing `GET /api/replays/{id}` payload populates nested `core`, `boost`, `movement`, `positioning`, `demo`, `ball`, `camera`, `car`, and `rank` fields, computes `winnerTeam` and `localTeam`, and records non-zero player stats and head-to-head matchups in both `SQLiteStore` and `JSONStore`.
+- [ ] Uploading a replay transitions it through pending stats polling and automatically populates full Ballchasing stats once `GET /api/replays/{id}` returns `status: "ok"`.
+- [ ] `GET /api/players/{id}/matches` returns accurate paginated match history filtered by `role`, `playlist`, and `result`, and startup migration backfills `match_players` from existing stored `matches`.
+
+### Frontend Verification
+- [ ] `npm run build` (TypeScript typecheck + Vite production bundle) in `web/` succeeds with zero errors.
+- [ ] `npm test` (Vitest suite in `web/`) passes, including tests for `PlayerProfileDialog` match history & drill-downs, `HistoricalMatchDetailModal` telemetry tabs, shared SSE handling, and server-side filter integration.

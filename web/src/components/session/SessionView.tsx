@@ -18,6 +18,7 @@ import { formatDuration } from '../../utils/formatters';
 import { COLUMN_HEADER, EmptyLine, GhostButton, MvpChip, PageHeader, ResultSlab, SectionLabel, Segmented } from '../common/ui';
 import { SessionKpiStrip } from './SessionKpis';
 import { MatchDetailModal } from './MatchDetailModal';
+import { useMMRHistory } from '../../hooks/useMMRHistory';
 
 type OutcomeFilter = 'all' | 'victory' | 'defeat';
 
@@ -93,6 +94,7 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
 export const SessionView: React.FC<SessionViewProps> = ({ session, isLoading, error, onResetSession }) => {
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
   const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
+  const { byPlaylist: mmrByPlaylist } = useMMRHistory();
 
   const summary = useMemo(() => summarizeSession(session), [session]);
   const matches = session?.matches ?? [];
@@ -138,7 +140,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, isLoading, er
   return (
     <div data-testid="session-view" className="font-display">
       {header}
-      <SessionKpiStrip kpis={summary.kpis} variant="page" playlists={playlists} />
+      <SessionKpiStrip kpis={summary.kpis} variant="page" playlists={playlists} mmrHistory={mmrByPlaylist} />
 
       <div className="flex flex-wrap justify-between items-center gap-4 pt-9 pb-3.5">
         <SectionLabel>MATCHES · NEWEST FIRST</SectionLabel>

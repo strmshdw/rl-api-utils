@@ -1,7 +1,7 @@
-# BRIEFING — 2026-10-06T11:35:00Z
+# BRIEFING — 2026-10-17T00:15:00Z
 
 ## Mission
-Implement Milestone 1: True In-Game MMR Conversion (R1): Convert raw PsyNet skill ratings to true in-game MMR via ConvertSkillRatingToMMR in internal/playertrack/rank_client.go, migrate legacy ratings in ParseRanksJSON, add comprehensive unit tests, copy proposed session and daemon test suites, and verify 100% pass across all 14 Go packages.
+Implement Milestone M1: Complete Ballchasing Telemetry Ingestion, Schema Migrations, and Dual Persistence Storage Layer (SPEC-01, SPEC-02, SPEC-04, SPEC-07, SPEC-08).
 
 ## 🔒 My Identity
 - Archetype: worker
@@ -16,6 +16,8 @@ Implement Milestone 1: True In-Game MMR Conversion (R1): Convert raw PsyNet skil
 - M1 R2 Parent Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
 - M1 R1 Milestone: Milestone 1: True In-Game MMR Conversion (R1)
 - M1 R1 Parent Conversation ID: 18e4e66b-5835-4b6b-bd1e-a34092f47346
+- M1 Full Spec Milestone: Milestone M1 (Telemetry Models, Schema Migrations & Storage)
+- M1 Full Spec Parent: orchestrator_9 (048a592a-b159-4ea3-a5c3-e619b708dd31)
 
 ## 🔒 Key Constraints
 - Exclusive write ownership:
@@ -54,49 +56,65 @@ Implement Milestone 1: True In-Game MMR Conversion (R1): Convert raw PsyNet skil
   - internal/playertrack/rank_client_test.go
   - internal/session/session_mmr_test.go
   - internal/daemon/daemon_mmr_test.go
+- M1 Full Spec Exclusive write ownership:
+  - internal/ballchasing/types.go
+  - internal/ballchasing/telemetry_test.go
+  - internal/storage/store.go
+  - internal/storage/sqlite.go
+  - internal/storage/jsonstore.go
+  - internal/storage/m1_storage_test.go
+  - internal/auth/auth_test.go (granted by orchestrator_9 for mockStateStore interface synchronization)
 - DO NOT touch other source files outside this scope. DO NOT edit any files in web/ or files owned by other milestones.
 - Integrity mandate: genuine implementations only, zero hardcoding or facades.
 - 100% test pass on all repository packages.
 
 ## Current Parent
-- Conversation ID: 18e4e66b-5835-4b6b-bd1e-a34092f47346
-- Updated: 2026-10-06T11:35:00Z
+- Conversation ID: 048a592a-b159-4ea3-a5c3-e619b708dd31
+- Updated: 2026-10-17T00:15:00Z
 
 ## Task Summary
-- **What to build**: True In-Game MMR Conversion (Milestone 1, Requirement R1)
+- **What to build**: M1 Telemetry models, schema migrations, and dual persistence storage
 - **Success criteria**:
-  - Implement `ConvertSkillRatingToMMR(skillRating float64) float64` in `internal/playertrack/rank_client.go` with casual guard (<= 0 -> 0.0) and idempotency guard (> 150 -> unchanged), returning `math.Round((skillRating * 20.0) + 100.0)`.
-  - Update `FromSkill(s rlapi.Skill)` to set `MMR: ConvertSkillRatingToMMR(s.MMR)`.
-  - Update `ParseRanksJSON(raw string)` normalization loop to migrate legacy stored raw floats (`rank.MMR > 0.0 && rank.MMR <= 150.0` converted, `rank.MMR < 0.0` clamped to 0.0).
-  - Add comprehensive unit tests in `internal/playertrack/rank_client_test.go`.
-  - Add `internal/session/session_mmr_test.go` from explorer 2.
-  - Add `internal/daemon/daemon_mmr_test.go` from explorer 2.
-  - Run build and test suite verification (100% pass across all 14 Go packages).
-- **Interface contracts**: PROJECT.md § Backend Rank Model
-- **Code layout**: PROJECT.md § Architecture
+  - `internal/ballchasing`: complete telemetry domain models (core, boost, movement, positioning, demo, ball, camera, car, rank, uploader, min/max rank, overtime_seconds, status), custom UnmarshalJSON bridging nested detail and flat list responses, numeric slug fallback in MapPlaylistSlugToID.
+  - `internal/storage`: match_players table & index, mmr_history table & index, player notes & tags, match stats_sync_status & stats_retry_count, safe PRAGMA table_info migrations, variadic RecordMatchResults with MIN/MAX monotonicity, replay date timestamp preservation, player rank hydration, and startup backfill migration in SQLiteStore and JSONStore.
+  - Comprehensive unit and integration tests in `telemetry_test.go` and `m1_storage_test.go`.
+  - 100% pass across all Go packages with zero race conditions (`go test -race ./...`).
+- **Interface contracts**: PROJECT.md § Architecture & Database Schemas
+- **Code layout**: internal/ballchasing, internal/storage
 
 ## Key Decisions Made
-- Single chokepoint conversion at `FromSkill`: guarantees all downstream consumers (active match, session tracker, SQLite/JSONStore persistence, API endpoints) receive true in-game MMR.
-- Guard `<= 0.0` returns `0.0` to preserve casual and unranked ratings without artificially displaying 100 MMR.
-- Guard `> 150.0` returns `skillRating` unchanged to provide strict idempotency and preserve pre-scaled test fixtures.
-- Legacy deserialization migration in `ParseRanksJSON` ensures seamless backward compatibility for existing stored player ranks.
+- Custom `UnmarshalJSON` on `ReplayPlayer` and `ReplayItem`: bridges nested detail responses (`stats.core`, `stats.demo`, etc.) with flat fields (`score`, `goals`, etc.) bidirectionally so existing downstream syncer/storage code never suffers zero-stat bugs.
+- `MapPlaylistSlugToID`: added `strconv.Atoi(slug)` with `id > 0` fallback in the default branch.
+- Safe PRAGMA-based schema migration in SQLite: inspects columns via `PRAGMA table_info` before executing `ALTER TABLE ADD COLUMN` to prevent duplicate column errors on modernc.org/sqlite.
+- Dual persistence parity: both SQLiteStore and JSONStore implement full match_players and mmr_history indexing, notes/tags, and stats sync lifecycle.
+- Variadic `matchTime ...time.Time` on `RecordMatchResults`: enables historical replay syncing while preserving backward compatibility for live events.
+- Monotonic `MIN`/`MAX` timestamp updates: `first_seen_at = MIN(...)`, `last_seen_at = MAX(...)`, `last_played_at = MAX(...)` prevent historical replay syncs from overwriting newer activity.
 
 ## Artifact Index
-- internal/playertrack/rank_client.go — ConvertSkillRatingToMMR, FromSkill, ParseRanksJSON migration
-- internal/playertrack/rank_client_test.go — comprehensive unit tests for MMR conversion & legacy migration
-- internal/session/session_mmr_test.go — session MMR scale and delta tests
-- internal/daemon/daemon_mmr_test.go — daemon REST & SSE in-game MMR output tests
+- internal/ballchasing/types.go — full telemetry structs, custom UnmarshalJSON, numeric slug fallback
+- internal/ballchasing/telemetry_test.go — comprehensive unmarshaling and slug mapping tests (100% pass)
+- internal/storage/store.go — MatchPlayerRecord, MMRHistoryRecord, notes/tags, stats sync status, ParseReplayDate, wrapContextErr
+- internal/storage/sqlite.go — DDL, safe PRAGMA migrations, startup backfill, timestamp monotonicity, rank hydration, subquery pagination, CRUD
+- internal/storage/jsonstore.go — in-memory indexing, compact JSON serialization, startup backfill, timestamp monotonicity, rank hydration, CRUD
+- internal/storage/m1_storage_test.go — 8 comprehensive test suites for migrations, backfill, timestamp, and parity
+- internal/auth/auth_test.go — updated mockStateStore to embed storage.StateStore and match RecordMatchResults signature
+- internal/playertrack/tracker_test.go — updated mockFaultStore.RecordMatchResults signature with variadic matchTime
 
 ## Change Tracker
 - **Files modified**:
-  - `internal/playertrack/rank_client.go`: Added math import, implemented ConvertSkillRatingToMMR, updated FromSkill, updated ParseRanksJSON normalization loop.
-  - `internal/playertrack/rank_client_test.go`: Added Category 10 tests (TestConvertSkillRatingToMMR_StandardValues, TestConvertSkillRatingToMMR_CasualAndNegative, TestConvertSkillRatingToMMR_HighMMRAndIdempotency, TestFromSkill_TrueInGameMMR, TestParseRanksJSON_LegacyRawRatingMigration, TestParseRanksJSON_MultiPlaylistMixedPayload, TestBuildRanksSnapshot_And_SerializeRanksJSON_TrueInGameMMR).
-  - `internal/session/session_mmr_test.go`: Created test suite covering session MMR scale, deltas, late arrival backfill, roster snapshots, and casual zero guard.
-  - `internal/daemon/daemon_mmr_test.go`: Created test suite covering GET /api/current-match, GET /api/session, GET /api/players, and GET /api/events SSE stream.
-- **Build status**: PASS (`go build ./cmd/rl-sync`, `go test -count=1 ./...`)
+  - `internal/ballchasing/types.go`: Complete telemetry structs, custom UnmarshalJSON bridging nested/flat, numeric slug fallback.
+  - `internal/ballchasing/telemetry_test.go`: 4 test suites covering full nested, flat compatibility, pending/failed status, numeric slug fallback.
+  - `internal/storage/store.go`: Data models, DDL structs, ParseReplayDate, wrapContextErr, StateStore interface extensions.
+  - `internal/storage/sqlite.go`: DDL, PRAGMA migrations, startup backfill, timestamp monotonicity, rank hydration, subquery pagination, CRUD.
+  - `internal/storage/jsonstore.go`: Dual persistence parity, compact JSON serialization, backfill, monotonicity, rank hydration, CRUD.
+  - `internal/storage/m1_storage_test.go`: 8 test suites validating all M1 specifications across SQLiteStore and JSONStore.
+  - `internal/auth/auth_test.go`: Embedded storage.StateStore in mockStateStore, updated RecordMatchResults signature.
+  - `internal/playertrack/tracker_test.go`: Updated mockFaultStore.RecordMatchResults signature with variadic matchTime.
+- **Build status**: PASS (`go vet ./...` 100% clean, `go test -race ./internal/ballchasing/...` PASS, `go test -race ./internal/storage/...` PASS in 88.8s)
 - **Pending issues**: None
 
 ## Quality Status
-- **Build/test result**: PASS (100% pass rate across all 14 Go packages)
-- **Lint status**: Clean (`go vet ./...` 0 warnings)
-- **Tests added/modified**: 15 test functions added across 3 packages
+- **Build/test result**: PASS. All unit and integration tests in `internal/ballchasing` and `internal/storage` pass 100% under `-race` with zero race conditions.
+- **Lint status**: Clean (zero `go vet` violations across all repo packages).
+- **Tests added/modified**: `telemetry_test.go` (4 suites), `m1_storage_test.go` (8 suites), `auth_test.go` and `tracker_test.go` interface compatibility.
+

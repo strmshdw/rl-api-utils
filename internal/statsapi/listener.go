@@ -30,6 +30,12 @@ type PlayerEventHandler interface {
 	OnMatchEnded(ctx context.Context, matchGUID string, winnerTeamNum *int) error
 }
 
+// GameStateEventHandler extends PlayerEventHandler with match game parameters (e.g. clock).
+type GameStateEventHandler interface {
+	PlayerEventHandler
+	OnUpdateGameState(ctx context.Context, matchGUID string, playlistID int, players []StatsPlayer, game *StatsGame) error
+}
+
 // ListenerOption configures Listener behavior.
 type ListenerOption func(*Listener)
 
@@ -293,12 +299,22 @@ func (l *Listener) handleRawMessage(ctx context.Context, data []byte) {
 		handler := l.PlayerEventHandler()
 		if handler != nil {
 			playlistID := msg.Data.GetPlaylist()
-			if err := handler.OnUpdateState(ctx, guid, playlistID, msg.Data.Players); err != nil {
-				l.logger.Warn("error handling UpdateState in player tracker",
-					slog.String("match_guid", guid),
-					slog.Int("playlist_id", playlistID),
-					slog.Any("error", err),
-				)
+			if gsh, ok := handler.(GameStateEventHandler); ok {
+				if err := gsh.OnUpdateGameState(ctx, guid, playlistID, msg.Data.Players, msg.Data.Game); err != nil {
+					l.logger.Warn("error handling UpdateGameState in player tracker",
+						slog.String("match_guid", guid),
+						slog.Int("playlist_id", playlistID),
+						slog.Any("error", err),
+					)
+				}
+			} else {
+				if err := handler.OnUpdateState(ctx, guid, playlistID, msg.Data.Players); err != nil {
+					l.logger.Warn("error handling UpdateState in player tracker",
+						slog.String("match_guid", guid),
+						slog.Int("playlist_id", playlistID),
+						slog.Any("error", err),
+					)
+				}
 			}
 		}
 

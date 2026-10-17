@@ -121,6 +121,7 @@ func (m *mockEGS) RefreshEOSToken(refreshToken string) (*rlapi.EOSTokenResponse,
 
 // mockStateStore implements storage.StateStore in memory for testing auth persistence.
 type mockStateStore struct {
+	storage.StateStore
 	mu        sync.Mutex
 	authState map[string]struct {
 		refreshToken string
@@ -209,7 +210,7 @@ func (s *mockStateStore) SearchPlayerSummaries(ctx context.Context, query, platf
 func (s *mockStateStore) UpdatePlayerRanks(ctx context.Context, playerID string, ranksJSON string) error {
 	return nil
 }
-func (s *mockStateStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []storage.PlayerOutcome) error {
+func (s *mockStateStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []storage.PlayerOutcome, matchTime ...time.Time) error {
 	return nil
 }
 func (s *mockStateStore) GetPlayerMatchup(ctx context.Context, playerID string, playlistID int) (*storage.PlayerMatchup, error) {

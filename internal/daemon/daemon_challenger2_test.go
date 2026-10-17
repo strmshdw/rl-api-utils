@@ -128,7 +128,7 @@ func TestChallenger2_ConcurrencyStress_50PlusWorkers(t *testing.T) {
 					reqIdx++
 
 					method := http.MethodGet
-					if ep == "/sync" && reqIdx%2 == 0 {
+					if ep == "/sync" {
 						method = http.MethodPost
 					}
 

@@ -45,6 +45,9 @@ function mockFetch(detail?: Partial<PlayerDetailResponse>) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ players: PLAYERS, total: PLAYERS.length, limit: 24, offset: 0 }) });
     }
     if (url.startsWith('/api/players/')) {
+      if (url.includes('/matches')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ matches: [], total: 0, limit: 10, offset: 0 }) });
+      }
       const id = decodeURIComponent(url.slice('/api/players/'.length));
       const p = PLAYERS.find((x) => x.player_id === id)!;
       const body: PlayerDetailResponse = {

@@ -1,168 +1,143 @@
-# Handoff Report: Milestone M3 Implementation (Requirement R1: Live Game UI Revamp & Zero-Scroll Viewport Optimization)
+# Handoff Report: Milestone M3 Implementation
 
 **Author**: `m3_worker_1` (Implementation Worker)  
-**Date**: 2026-10-06T10:00:00Z  
-**Milestone**: Milestone M3 (Requirement R1: Live Game UI Revamp & Viewport Optimization)  
-**Parent Agent**: `orchestrator_6` (`f26416a7-29be-4b99-8406-d28bf983644d`)  
+**Date**: 2026-10-17T03:50:00Z  
+**Milestone**: Milestone M3 (REST/SSE Endpoints & Filtering, Live Clock, Post-Match MMR Deltas, Security & Concurrency Hardening)  
+**Parent Agent**: `orchestrator_9` (`048a592a-b159-4ea3-a5c3-e619b708dd31`)  
 **Working Directory**: `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1`
 
 ---
 
 ## 1. Observation
 
-### 1.1 Baseline Deficiencies in Pre-Implementation Codebase
-Direct examination of the live game frontend components revealed the following issues:
-1. **`web/src/components/live/PlayerRow.tsx` & `RosterTable.tsx`**:
-   - In `PlayerRow.tsx` (Lines 69–147) and `RosterTable.tsx` (Lines 66–78), the column sequence placed static metadata ahead of match telemetry: `Platform -> Rank -> MMR -> Score -> Goals -> Assists -> Saves -> Shots -> Demos -> H2H`.
-   - Box score stats inherited `text-xs` (12px): `Score` was `text-slate-100 font-bold font-mono` at 12px; `Goals`, `Assists`, `Saves`, `Shots` were flat monochromatic numbers without visual tiering or accents for high-impact achievements.
-   - Elements lacked semantic test IDs (`data-testid`), preventing automated structure and layout assertions.
-2. **`web/src/components/live/ScoreboardBanner.tsx`**:
-   - Imposed `mb-8` (32px bottom margin) and `p-6` (24px top + bottom padding = 48px).
-   - Displayed redundant player counts `{allPlayers.filter(...).length} Players` under team headers, duplicate of `RosterTable` headers below.
-   - Team icon boxes used oversized `w-12 h-12` boxes.
-3. **`web/src/components/layout/Header.tsx`**:
-   - Displayed daemon technical debug text: `Port 49125` and `Uptime: {session?.uptime || '0m'}`.
-   - Unconditionally rendered the full horizontal playlist carousel (`Playlists:`) during active matches, consuming ~44px of vertical space.
-4. **`web/src/App.tsx`**:
-   - `main` container padding was `py-4` (32px vertical dead space).
-   - The static copyright/version `footer` was unconditionally rendered, consuming ~40px of vertical height at the bottom of the viewport during live matches.
-5. **`web/src/components/live/LiveGameView.tsx`**:
-   - Used `space-y-6` (24px gap) between `ScoreboardBanner` and `RosterTable` grid, combining with `mb-8` for 56px of dead space.
+### 1.1 Pre-Implementation State & Dispatched Deficiencies
+1. **REST/SSE Endpoints & Filtering**:
+   - `POST /api/matches/{guid}/retry`: Route and handler were not registered. Failed replay uploads/stats could not be re-triggered without restarting daemon.
+   - `GET /api/players/{id}/matches`: Endpoint did not exist. Match history was only available globally via `/api/matches`.
+   - `GET /api/players/{id}`: Missing `recent_matches` array in `PlayerDetailResponse`, forcing frontend to perform secondary requests.
+   - `GET /api/players`: Only supported in-memory platform/substring search. Lacked role filtering (`all`, `frequent`, `teammate`, `opponent`, `synergy`), multi-field sorting (`last_seen`, `match_count`, `win_rate`, `name`), and global dataset spotlights (`BestTeammate`, `MostFaced`, `ToughestRival`).
+   - `GET /api/matches`: Lacked local-relative `result=victory|defeat` filtering; did not expose `local_player_ids`.
+   - `PATCH /api/players/{id}`: Not implemented; CORS middleware did not allow `PATCH`.
+   - `GET /api/mmr-history`: Not implemented; no endpoint served chronological MMR snapshots.
+2. **Live Clock, Local Outcomes & Post-Match MMR Deltas**:
+   - `internal/statsapi/types.go` and `listener.go`: `StatsGame` ignored `time_remaining` and `is_overtime`.
+   - `internal/playertrack/tracker.go`: `rankCache` and `matchupCache` were unbounded. On match end, `rankCache` retained stale pre-match ranks, causing `ConcludeMatch` to compute a 0 MMR delta.
+   - `internal/session/session.go`: `ConcludeMatch` evaluated outcomes relative to hardcoded team 0 or fell back to `"draw"`, rather than using `match.LocalTeam`.
+   - `local_player_ids`: Local player IDs were not exposed in `CurrentMatchResponse`, `SessionResponse`, or `/api/session/state`.
+3. **Security, Concurrency & Operational Hardening**:
+   - `internal/statsapi/notifier.go`: Toast XML contained unescaped user strings, vulnerable to XML injection.
+   - `internal/config/config.go` & `yaml_update.go`: Config writes directly truncated files without atomic rename or `0600` permissions.
+   - `internal/auth/steam_generator.go`: Steam credentials were passed as CLI arguments visible in process listings instead of `cmd.Env`.
+   - `internal/daemon/daemon.go`: `/sync` accepted `GET` requests; mutating endpoints did not validate `Origin` / `Host` headers against CSRF.
+   - `cmd/rl-sync/main.go`: `StreamUpload` was false and startup banner was logged redundantly.
+   - Git tracking: `rl-sync.exe` was tracked in git; `.gitignore` lacked binary ignore rules.
 
-### 1.2 Implemented File Modifications
-1. **`web/src/components/live/PlayerRow.tsx`**:
-   - Reordered columns: `Player` -> `Score` -> `Goals` -> `Assists` -> `Saves` -> `Shots` -> `Demos` -> `Rank` -> `MMR` -> `H2H` -> `Platform`.
-   - Implemented 3-tier visual typography hierarchy:
-     - `Score`: `py-2 px-3 text-right text-lg font-black font-mono text-white` (`data-testid="stat-score"`)
-     - `Goals`: `py-2 px-3 text-right text-lg font-black font-mono` with amber glow `text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]` when >0, else `text-slate-500` (`data-testid="stat-goals"`)
-     - `Assists`: `py-2 px-3 text-right text-base font-extrabold font-mono text-cyan-300` when >0, else `text-slate-500` (`data-testid="stat-assists"`)
-     - `Saves`: `py-2 px-3 text-right text-base font-extrabold font-mono text-emerald-400` when >0, else `text-slate-500` (`data-testid="stat-saves"`)
-     - `Shots`: `py-2 px-3 text-right text-sm font-bold font-mono text-slate-200` when >0, else `text-slate-500` (`data-testid="stat-shots"`)
-     - `Demos`: `py-2 px-3 text-right text-sm font-bold font-mono text-rose-400 font-extrabold` when >0, else `text-slate-500` (`data-testid="stat-demos"`)
-     - Secondary columns tagged with `data-testid="stat-rank"`, `data-testid="stat-mmr"`, `data-testid="stat-h2h"`, `data-testid="stat-platform"`, and player anchor `data-testid="player-identity"`.
-   - Tightened row padding to `py-2 px-3` (player anchor `py-2 px-4`).
-2. **`web/src/components/live/RosterTable.tsx`**:
-   - Reordered `<thead>` headers: `Player` -> `Score` -> `Goals` -> `Assists` -> `Saves` -> `Shots` -> `Demos` -> `Rank` -> `MMR` -> `H2H Record` -> `Platform`.
-   - Added header test IDs: `data-testid="th-player"`, `data-testid="th-score"`, `data-testid="th-goals"`, `data-testid="th-assists"`, `data-testid="th-saves"`, `data-testid="th-shots"`, `data-testid="th-demos"`, `data-testid="th-rank"`, `data-testid="th-mmr"`, `data-testid="th-h2h"`, `data-testid="th-platform"`.
-   - Tightened team banner padding to `px-4 py-2.5` and header cell padding to `py-2.5 px-3` / `py-2.5 px-4`.
-3. **`web/src/components/live/ScoreboardBanner.tsx`**:
-   - Reduced outer margin from `mb-8` to `mb-3`.
-   - Reduced inner grid padding from `p-6` to `py-2.5 px-5`.
-   - Streamlined team icon boxes to `w-9 h-9` with `w-5 h-5` icons.
-   - Removed redundant player counts (`{allPlayers.filter(...).length} Players`).
-   - Added `data-testid="scoreboard-banner"`.
-4. **`web/src/components/layout/Header.tsx`**:
-   - Added `inMatch?: boolean` to `HeaderProps`.
-   - Removed technical daemon debug text (`Port 49125` and `Uptime`).
-   - Conditionally hid playlist MMR carousel during active matches: `{!inMatch && playlists.length > 0 && (...)}`.
-   - Adjusted padding to `py-2.5`, added `data-testid="app-header"`.
-5. **`web/src/App.tsx`**:
-   - Defined `const inMatch = !!match?.active_match;` and passed `inMatch={inMatch}` to `<Header ... />`.
-   - Adjusted main container padding to `py-2` during live tab: `className={`flex-1 container mx-auto px-4 ${activeTab === 'live' ? 'py-2' : 'py-4'}`}`.
-   - Conditionally hid static footer during active live matches: `{!(activeTab === 'live' && inMatch) && <footer>...</footer>}`.
-6. **`web/src/components/live/LiveGameView.tsx`**:
-   - Reduced vertical spacing from `space-y-6` to `space-y-3`.
-   - Tightened container padding to `py-1` and roster grid gap to `gap-4`.
-7. **`web/src/components/live/LiveGameView.layout.test.tsx` (New Suite)**:
-   - Implemented 19 automated programmatic tests covering all 5 layout suites per `m3_explorer_3/handoff.md`.
-8. **`web/vite.config.ts`**:
-   - Configured `rollupOptions.output` to output stable asset names (`index-ev8_Pgz-.js` and `index-tXepU5qp.css`), ensuring static asset serving tests in `internal/daemon/web_test.go` pass seamlessly.
-
-### 1.3 Execution Results
-- `npm test` in `web/`: **10 test files passed, 131 tests passed** (112 baseline + 19 layout tests).
-- `npm run build` in `web/`: **Exit Code 0** (`tsc -b && vite build` built in 3.30s; generated `internal/web/dist`).
-- `go test ./...` in project root: **All 14 packages passed** (`cmd/rl-sync`, `internal/auth`, `internal/ballchasing`, `internal/config`, `internal/daemon`, `internal/playertrack`, `internal/psynet`, `internal/session`, `internal/statsapi`, `internal/storage`, `internal/syncer`, `internal/testutil`, `internal/web`, `test/e2e`).
-- `go build ./cmd/rl-sync`: **Exit Code 0** (binary compiles cleanly with embedded web assets).
+### 1.2 Implemented Changes Across Subsystems
+1. **Security & Concurrency (`internal/statsapi`, `internal/config`, `internal/auth`, `cmd/rl-sync`, `.gitignore`)**:
+   - `internal/statsapi/notifier.go`: Added `xmlEscape` and updated powershell toast script to read payload from `RL_SYNC_TOAST_XML` environment variable.
+   - `internal/config/yaml_update.go` & `config.go`: Implemented `AtomicWriteFile` creating temp files with `0600` permissions and atomic rename.
+   - `internal/auth/steam_generator.go`: Switched Steam credentials from argv arguments to `cmd.Env` (`STEAM_USERNAME`, `STEAM_PASSWORD`).
+   - `cmd/rl-sync/main.go`: Configured `StreamUpload: true` in syncer config; removed duplicate banner print.
+   - `.gitignore`: Untracked `rl-sync.exe` via `git rm --cached rl-sync.exe` and added `*.exe`, `*.exe~`, `rl-sync`, `dist/`, `web/dist/`.
+2. **Storage Dual-Backend Parity (`internal/storage/sqlite.go`, `jsonstore.go`, `store.go`)**:
+   - Implemented `FilterPlayerSummaries`:
+     - In `sqlite.go`: Used CTE `player_agg` with `LEFT JOIN player_matchups`, filtering by `role` (`frequent` = `total_matches >= 3`, `teammate` = `(wins+losses) > 0`, `opponent` = `(wins+losses) > 0`, `synergy` = `teammate_matches >= 2 AND win_rate >= 0.60`), multi-field sorting (`match_count`, `win_rate`, `name`, `last_seen`), pagination, and accurate `COUNT(*)`.
+     - In `jsonstore.go`: Evaluated identical role conditions and sort algorithms over in-memory player maps with full matchup rollups.
+   - Implemented `GetPlayerSpotlights`: Queried candidate summaries with >= 2 games, computed `BestTeammate` (highest win rate with >= 2 games), `MostFaced` (highest opponent games with >= 2 games), and `ToughestRival` (lowest win rate with >= 2 games) with fallback `"NOT ENOUGH GAMES YET"`.
+   - Implemented `GetLocalPlayerIDs`: Gathered unique account IDs from `auth_state` and local players in `match_players`.
+   - Updated `ListHistoricalMatches`: Built SQL and in-memory outcome expression evaluating victory/defeat relative to `match_players.is_local` and scores (`winner_team`, `blue_score`, `orange_score`); supported `filter.Result` (`victory`, `defeat`, `draw`, `all`).
+   - Populated `PlayerMatchDetail.Stats` from `ReplayStatsJSON`.
+3. **Session & Live Clock Tracking (`internal/session`, `internal/playertrack`, `internal/statsapi`)**:
+   - Ingested `time_remaining` and `is_overtime` in `StatsGame` (`internal/statsapi/types.go`), propagated via `GameStateEventHandler` in `listener.go`.
+   - Updated `CurrentMatchResponse` and `SessionResponse` to expose `LocalPlayerIDs`.
+   - Updated `ConcludeMatch` in `session.go` to determine match outcome relative to `match.LocalTeam` and scores instead of defaulting to `"draw"`.
+   - Hardened `Tracker` in `internal/playertrack/tracker.go`: Bounded `rankCache` (1000), `matchupCache` (1000), and `failBackoff` (500) using FIFO eviction; added `InvalidateRankCache`; updated `OnMatchEnded` to immediately invalidate stale cache and trigger fresh telemetry fetch.
+4. **Daemon HTTP Routing & REST API (`internal/daemon`)**:
+   - Enforced `POST` only on `/sync` (returns 405 Method Not Allowed on `GET`).
+   - Added `isAllowedMutatingOrigin(r *http.Request) bool` to validate Origin against Host / localhost on mutating endpoints (`/sync`, `/api/matches/{guid}/retry`, `/api/players/{id}`).
+   - Registered endpoints in `setupRoutes`:
+     - `POST /api/matches/{guid}/retry`: Invokes `store.ResetMatchRetry` and `TriggerSync`.
+     - `GET /api/players/{id}/matches`: Returns paginated `PlayerMatchesResponse` with role, playlist, result filters.
+     - `GET /api/players/{id}`: Returns `PlayerDetailResponse` populated with up to 5 `recent_matches`.
+     - `GET /api/players`: Returns `PlayerSearchResponse` with server-side filtered summaries, totals, and dataset `spotlights`.
+     - `PATCH /api/players/{id}`: Updates notes/tags and returns updated profile.
+     - `GET /api/matches`: Supports `result=victory|defeat` and returns `local_player_ids`.
+     - `GET /api/mmr-history`: Returns chronological MMR progression (`order=asc` / `order=desc`).
+     - `GET /api/session/state`: Alias returning session state and local player IDs.
+   - Updated CORS middleware to allow `PATCH` method and `Origin, Accept` headers.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Prioritizing Match Telemetry Ahead of Static Metadata**:
-   - Rocket League is a fast-paced esports title where players need instant situational awareness of match performance.
-   - By sequencing `Player -> Score -> Goals -> Assists -> Saves -> Shots -> Demos -> Rank -> MMR -> H2H -> Platform`, gameplay box score performance is immediately visible adjacent to player identity.
-   - Static profile attributes (Rank, MMR, H2H, Platform) are moved to secondary columns, accessible when desired without obstructing gameplay metrics.
-2. **Glanceable Visual Hierarchy**:
-   - Hero stats (`Score` and `Goals`) rendered at 18px `text-lg font-black` dominate the visual field. Goals are enhanced with an amber glow drop-shadow when positive (`>0`).
-   - Playmaking stats (`Assists` at 16px cyan, `Saves` at 16px emerald) contrast offensive and defensive clutch contributions.
-   - Supporting stats (`Shots` at 14px off-white, `Demos` at 14px rose) provide detailed tactical context.
-   - Inactive metrics (`0`) render in muted `text-slate-500` to prevent visual noise.
-3. **Eliminating Superfluous Elements & Vertical Space Compression**:
-   - Eliminating the static version footer during live matches recovers 40px of vertical viewport space.
-   - Removing developer debug telemetry (`Port 49125`, `Uptime`) and hiding the playlist carousel during matches recovers ~68px of header space.
-   - Compressing `ScoreboardBanner` from `p-6 mb-8` to `py-2.5 px-5 mb-3` and removing duplicate player count strings saves ~84px.
-   - Compressing `LiveGameView` from `space-y-6` to `space-y-3` saves 12px.
-4. **Zero-Scroll Viewport Compliance on 1080p Standard Displays**:
-   - Total vertical stack height for a standard 3v3 match is **~376px** (and **~414px** for 4v4 Chaos).
-   - On a standard 1080p display with typical browser chrome and taskbar (~920px usable client innerHeight), this leaves **>540px of headroom** (>58% vertical buffer).
-   - Dual rosters render side-by-side via `lg:grid-cols-2`.
-   - Zero vertical scrolling is mathematically guaranteed and programmatically asserted by the test suite.
+1. **Role Filtering & Sorting Logic**:
+   - *Premise*: SPEC-05 requires server-side player filtering for `frequent`, `teammate`, `opponent`, and `synergy` with multi-field sorting.
+   - *Inference*: Both SQLite and JSONStore must compute aggregate matchup metrics across all playlists per player before applying role constraints.
+   - *Implementation*: SQLite uses a Common Table Expression (`player_agg`) aggregating `wins_as_teammate`, `losses_as_teammate`, `wins_as_opponent`, and `losses_as_opponent` with `COALESCE(SUM(...), 0)`. JSONStore loops through `s.players` and aggregates matching entries in `s.playerMatchups[playerID]`. Both backends apply identical filter predicates and sort comparator branches, ensuring 100% parity across test matrices.
+2. **Local-Relative Outcome Calculation**:
+   - *Premise*: Historical and live matches must display `"victory"` or `"defeat"` relative to the user playing the game (SPEC-03, SPEC-09).
+   - *Inference*: If the local player was on Blue (team 0), a Blue win is a victory; if on Orange (team 1), an Orange win is a victory.
+   - *Implementation*: In `session.go:ConcludeMatch`, we check `match.LocalTeam`. In `sqlite.go:ListHistoricalMatches`, SQL `CASE` evaluates `(SELECT lp.team_num FROM match_players lp WHERE lp.match_guid = matches.match_guid AND lp.is_local = 1 LIMIT 1)` to determine the perspective. In `jsonstore.go:ListHistoricalMatches`, we check `matchPlayers[guid]` for `p.IsLocal` or matching IDs from `GetLocalPlayerIDs`.
+3. **Non-Zero Post-Match MMR Progression**:
+   - *Premise*: If rank cache is not invalidated on match conclusion, the final MMR recorded in `ConcludeMatch` will match the initial MMR, producing a 0 delta.
+   - *Inference*: `OnMatchEnded` must clear cached rank for local player and fetch fresh telemetry.
+   - *Implementation*: Added `InvalidateRankCache` in `tracker.go`, invoked immediately in `OnMatchEnded`. The refreshed rank payload is observed by `session.go:UpdateMatchEndingMMR`, computing genuine non-zero MMR deltas.
+4. **Mutating Route Security**:
+   - *Premise*: Web dashboards running on localhost can be targeted by drive-by Cross-Site Request Forgery (CSRF) from malicious browser tabs.
+   - *Inference*: Mutating endpoints (`POST`, `PATCH`) must verify the `Origin` header matches the server's Host header or loopback origins.
+   - *Implementation*: `isAllowedMutatingOrigin` parses `Origin` and allows only requests matching `r.Host`, `localhost`, `127.0.0.1`, or `::1` (while permitting non-browser API clients with empty Origin).
 
 ---
 
 ## 3. Caveats
 
-1. **Narrow Viewport Breakpoint (< 1024px)**:
-   - On viewports with width < 1024px (e.g. mobile phones 375x667), Tailwind collapses `lg:grid-cols-2` into stacked `grid-cols-1`, which will require vertical scrolling. Requirement R1 explicitly scopes the zero-scroll guarantee to standard desktop/laptop viewports (1080p, 1440p, 4K, and 768p).
-2. **Browser Zoom / High DPI (> 150%)**:
-   - If a user configures browser zoom >= 200% on a 1080p display, the logical client height drops below 500px, where vertical scrollbars will naturally appear. At standard 100% and 125% DPI scaling, >400px of headroom is maintained.
-3. **Spectators in Private Matches**:
-   - In private matches with spectators, spectators are separated in `match.spectators` and do not inflate the active playing roster tables.
+- **External Psynet/Ballchasing Services**: Live Psynet and Ballchasing network endpoints were tested using robust mock interfaces and recorded packet fixtures; real external network access is not required for daemon operation or testing.
+- **Windows Toast Notifications**: The PowerShell notification execution is tested for XML escaping and argument safety; on headless environments, Windows toast notifications are suppressed or mocked.
+- **No other caveats**: Dual-backend parity (SQLite vs JSONStore) has been verified 100% under strict race detection.
 
 ---
 
 ## 4. Conclusion
 
-Milestone M3 (Requirement R1: Live Game UI Revamp & Zero-Scroll Viewport Optimization) has been fully implemented and verified:
-- `PlayerRow.tsx` and `RosterTable.tsx` prioritize and enlarge performance stats with distinct color accents and semantic test IDs.
-- `ScoreboardBanner.tsx`, `Header.tsx`, `App.tsx`, and `LiveGameView.tsx` eliminate superfluous UI elements and compress vertical whitespace, guaranteeing zero vertical scrolling on standard viewports (< 500px stack height).
-- `LiveGameView.layout.test.tsx` provides 19 automated programmatic tests verifying all layout and structural guarantees.
-- 100% test pass rate across all 131 Vitest tests and all 14 Go packages, with clean TypeScript and Go compilation.
+Milestone M3 is complete and verified:
+- All required REST/SSE endpoints (`/api/matches/{guid}/retry`, `/api/players/{id}/matches`, `/api/players/{id}` with `recent_matches`, `/api/players` with role filtering/spotlights, `PATCH /api/players/{id}`, `/api/matches` outcome filtering, `/api/mmr-history`) are fully implemented and conform to specifications.
+- Live clock ingestion (`time_remaining`, `is_overtime`), local-relative match outcomes, and post-match MMR delta refreshes are active.
+- Security hardening (toast XML escaping, atomic 0600 config writes, Steam `cmd.Env`, CSRF Origin validation, bounded caches) and operational fixes (`StreamUpload`, banner deduplication, untracking `.exe`) are complete.
+- Complete test suites in `internal/storage/m3_endpoints_test.go` and `internal/daemon/m3_endpoints_test.go` validate all functionality.
+- Zero regressions: `go vet ./...` and `go test -race ./...` pass 100% across all 15 packages in the repository.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify these changes:
+To independently verify this implementation:
 
-1. **Run Full Web Test Suite**:
-   ```bash
-   cd d:\code\rl-api-utils\web
-   npm test
+1. **Verify Static Analysis / Linting**:
+   ```powershell
+   go vet ./...
    ```
-   *Expected Result*: 10 test files passed, 131 tests passed (Exit Code 0).
+   *Expected*: Clean exit (code 0, no output).
 
-2. **Verify Layout Test Suite Specifically**:
-   ```bash
-   cd d:\code\rl-api-utils\web
-   npx vitest run src/components/live/LiveGameView.layout.test.tsx
+2. **Run Milestone M3 Storage & Endpoint Tests**:
+   ```powershell
+   go test -v -race -run "TestM3" ./internal/storage/... ./internal/daemon/...
    ```
-   *Expected Result*: All 19 layout tests pass cleanly (Exit Code 0).
+   *Expected*: All subtests PASS under SQLite and JSONStore backends.
 
-3. **Verify Frontend Production Build**:
-   ```bash
-   cd d:\code\rl-api-utils\web
-   npm run build
+3. **Run Full Concurrency & Race Detection Across Subsystems**:
+   ```powershell
+   go test -v -race ./internal/daemon/...
+   go test -v -race ./internal/storage/...
+   go test -v -race ./internal/session/...
+   go test -v -race ./internal/playertrack/...
+   go test -v -race ./internal/statsapi/...
+   go test -v -race ./internal/config/...
+   go test -v -race ./internal/auth/...
    ```
-   *Expected Result*: `tsc -b && vite build` succeeds with Exit Code 0 and outputs clean production bundle to `../internal/web/dist`.
+   *Expected*: 100% PASS with 0 race warnings.
 
-4. **Verify Entire Go Workspace Test Suite**:
-   ```bash
-   cd d:\code\rl-api-utils
-   go test ./...
+4. **Run Full Project Test Suite**:
+   ```powershell
+   go test -race ./...
    ```
-   *Expected Result*: All 14 packages pass cleanly (`ok`).
-
-5. **Verify Single Standalone Executable Build**:
-   ```bash
-   cd d:\code\rl-api-utils
-   go build ./cmd/rl-sync
-   ```
-   *Expected Result*: `rl-sync.exe` builds cleanly with embedded frontend bundle (Exit Code 0).
-
-6. **Invalidation Conditions**:
-   - If `npm test` or `go test ./...` fails.
-   - If `container.querySelector('footer')` renders during active live matches.
-   - If stat columns appear to the right of `Rank`, `MMR`, or `Platform`.
-   - If stat numbers in `PlayerRow` revert to `text-xs` (12px) without the 3-tier visual hierarchy.
-   - If total vertical layout height exceeds 500px on standard desktop viewports.
+   *Expected*: All 15 packages PASS cleanly.

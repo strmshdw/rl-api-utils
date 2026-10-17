@@ -1,6 +1,6 @@
 import React from 'react';
 import { CurrentMatchResponse, LobbyPlayer } from '../../types/api';
-import { playlistLabels } from '../../utils/broadcast';
+import { formatMatchClock, playlistLabels } from '../../utils/broadcast';
 
 interface ScorebugProps {
   match: CurrentMatchResponse;
@@ -46,6 +46,21 @@ export const Scorebug: React.FC<ScorebugProps> = ({ match, bluePlayers, orangePl
       match.result === 'victory' ? <span className="text-win">WIN</span>
       : match.result === 'defeat' ? <span className="text-loss">LOSS</span>
       : <span className="text-muted">FINAL</span>;
+  } else if (match.time_remaining !== undefined && match.time_remaining !== null) {
+    status = (
+      <div className="flex items-center gap-1.5">
+        <span className="text-loss text-[11px] leading-none">● LIVE</span>
+        <span
+          data-testid="scorebug-clock"
+          className={`font-mono font-extrabold text-[16px] tracking-tight leading-none ${match.is_overtime ? 'text-loss' : 'text-ink'}`}
+        >
+          {formatMatchClock(match.time_remaining, match.is_overtime)}
+        </span>
+        {match.is_overtime && (
+          <span className="text-[10px] font-sans font-bold text-loss px-1 bg-loss/15 rounded">OT</span>
+        )}
+      </div>
+    );
   }
 
   return (

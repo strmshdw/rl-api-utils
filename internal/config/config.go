@@ -89,20 +89,20 @@ type Config struct {
 // WebConfig configures the embedded web dashboard and HTTP server.
 type WebConfig struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"` // default: true
-	Host    string `yaml:"host" json:"host"`       // default: "0.0.0.0"
+	Host    string `yaml:"host" json:"host"`       // default: "127.0.0.1"
 	Port    int    `yaml:"port" json:"port"`       // default: 49125
 }
 
 // StatsAPIConfig configures connection to Rocket League's local Stats API (MatchStatsExporter_TA).
 type StatsAPIConfig struct {
-	Enabled            bool   `yaml:"enabled" json:"enabled"`                                 // default: true
-	Address            string `yaml:"address" json:"address"`                                 // default: "127.0.0.1:49124"
-	Protocol           string `yaml:"protocol" json:"protocol"`                               // "websocket" or "tcp", default: "websocket"
-	TriggerThreshold   int    `yaml:"trigger_threshold" json:"trigger_threshold"`             // default: 15
-	ForceSyncOnTrigger bool   `yaml:"force_sync_on_trigger" json:"force_sync_on_trigger"`     // default: false
-	EnableToast        bool   `yaml:"enable_toast" json:"enable_toast"`                       // default: true
-	HTTPTriggerPort    int    `yaml:"http_trigger_port" json:"http_trigger_port"`             // default: 49125 (0 to disable)
-	AutoSyncOnExit     bool   `yaml:"auto_sync_on_exit" json:"auto_sync_on_exit"`             // default: true
+	Enabled            bool   `yaml:"enabled" json:"enabled"`                             // default: true
+	Address            string `yaml:"address" json:"address"`                             // default: "127.0.0.1:49124"
+	Protocol           string `yaml:"protocol" json:"protocol"`                           // "websocket" or "tcp", default: "websocket"
+	TriggerThreshold   int    `yaml:"trigger_threshold" json:"trigger_threshold"`         // default: 15
+	ForceSyncOnTrigger bool   `yaml:"force_sync_on_trigger" json:"force_sync_on_trigger"` // default: false
+	EnableToast        bool   `yaml:"enable_toast" json:"enable_toast"`                   // default: true
+	HTTPTriggerPort    int    `yaml:"http_trigger_port" json:"http_trigger_port"`         // default: 49125 (0 to disable)
+	AutoSyncOnExit     bool   `yaml:"auto_sync_on_exit" json:"auto_sync_on_exit"`         // default: true
 }
 
 // AuthConfig configures authentication for Rocket League PsyNet RPC.
@@ -160,10 +160,10 @@ type PlayerTrackingConfig struct {
 // BallchasingConfig configures replay uploads to ballchasing.com.
 type BallchasingConfig struct {
 	APIKey     string   `yaml:"api_key" json:"api_key"`
-	Visibility string   `yaml:"visibility" json:"visibility"` // "public", "unlisted", "private"
-	BaseURL    string   `yaml:"base_url" json:"base_url"`     // default: "https://ballchasing.com/api"
-	Timeout    Duration `yaml:"timeout" json:"timeout"`       // default: 60s
-	MaxRetries int      `yaml:"max_retries" json:"max_retries"`// default: 3
+	Visibility string   `yaml:"visibility" json:"visibility"`   // "public", "unlisted", "private"
+	BaseURL    string   `yaml:"base_url" json:"base_url"`       // default: "https://ballchasing.com/api"
+	Timeout    Duration `yaml:"timeout" json:"timeout"`         // default: 60s
+	MaxRetries int      `yaml:"max_retries" json:"max_retries"` // default: 3
 }
 
 // SyncConfig configures synchronization polling and local persistence.
@@ -255,7 +255,7 @@ func NewDefaultConfig() *Config {
 		},
 		Web: WebConfig{
 			Enabled: true,
-			Host:    "0.0.0.0",
+			Host:    "127.0.0.1",
 			Port:    49125,
 		},
 	}
@@ -815,3 +815,67 @@ func (c *Config) Validate() error {
 	}
 	return nil
 }
+
+// AtomicWriteFile writes data to a temporary file in the same directory as filePath,
+// flushes buffers to disk, sets permissions, and atomically renames the temporary file over filePath.
+func AtomicWriteFile(filePath string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("creating directory for atomic write: %w", err)
+	}
+
+	// Create temp file in same directory to ensure atomic same-volume rename
+	tmpFile, err := os.CreateTemp(dir, ".config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temporary file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	// Ensure cleanup on failure
+	success := false
+	defer func() {
+		if !success {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	// Ensure restricted permissions
+	if err := tmpFile.Chmod(perm); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("setting file permissions on %s: %w", tmpPath, err)
+	}
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("writing data to %s: %w", tmpPath, err)
+	}
+
+	// Flush OS page cache to disk
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("syncing data to %s: %w", tmpPath, err)
+	}
+
+	// File MUST be closed prior to os.Rename on Windows
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing temporary file %s: %w", tmpPath, err)
+	}
+
+	// Atomic replace
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return fmt.Errorf("atomic rename from %s to %s: %w", tmpPath, filePath, err)
+	}
+
+	success = true
+	return nil
+}
+
+// SaveConfig marshals the configuration as YAML and atomically writes it with 0600 permissions.
+func (c *Config) SaveConfig(filePath string) error {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("marshaling config to YAML: %w", err)
+	}
+	return AtomicWriteFile(filePath, data, 0600)
+}
+

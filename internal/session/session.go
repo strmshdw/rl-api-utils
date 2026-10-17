@@ -52,6 +52,7 @@ type SessionTracker struct {
 	currentMatch   *playertrack.CurrentMatchResponse
 	broadcaster    *EventBroadcaster
 	logger         *slog.Logger
+	localPlayerIDs []string
 }
 
 // NewSessionTracker constructs a fresh SessionTracker.
@@ -307,13 +308,45 @@ func (s *SessionTracker) ConcludeMatch(match *playertrack.CurrentMatchResponse) 
 	result := strings.ToLower(strings.TrimSpace(match.Result))
 	if result == "" {
 		if match.WinnerTeam != nil && match.LocalTeam != nil {
-			if *match.WinnerTeam == *match.LocalTeam {
+			if *match.WinnerTeam == -1 {
+				result = "draw"
+			} else if *match.WinnerTeam == *match.LocalTeam {
 				result = "victory"
 			} else {
 				result = "defeat"
 			}
+		} else if match.LocalTeam != nil {
+			if *match.LocalTeam == 0 {
+				if blueScore > orangeScore {
+					result = "victory"
+				} else if orangeScore > blueScore {
+					result = "defeat"
+				} else if blueScore == orangeScore && (blueScore > 0 || orangeScore > 0) {
+					result = "draw"
+				} else {
+					result = "unknown"
+				}
+			} else if *match.LocalTeam == 1 {
+				if orangeScore > blueScore {
+					result = "victory"
+				} else if blueScore > orangeScore {
+					result = "defeat"
+				} else if blueScore == orangeScore && (blueScore > 0 || orangeScore > 0) {
+					result = "draw"
+				} else {
+					result = "unknown"
+				}
+			}
 		} else {
-			result = "draw"
+			if blueScore > orangeScore {
+				result = "victory"
+			} else if orangeScore > blueScore {
+				result = "defeat"
+			} else if blueScore == orangeScore && (blueScore > 0 || orangeScore > 0) {
+				result = "draw"
+			} else {
+				result = "draw"
+			}
 		}
 	}
 
@@ -449,6 +482,70 @@ func (s *SessionTracker) GetSessionSummary() *SessionResponse {
 		Playlists:    playlistClones,
 		Matches:      matchClones,
 		ActiveMatch:  activeClone,
+		LocalPlayerIDs: s.getLocalPlayerIDsLocked(),
+	}
+}
+
+// SetLocalPlayerIDs sets the local player IDs known to the daemon.
+func (s *SessionTracker) SetLocalPlayerIDs(ids []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.localPlayerIDs = make([]string, len(ids))
+	copy(s.localPlayerIDs, ids)
+}
+
+// GetLocalPlayerIDs returns the currently known local player IDs.
+func (s *SessionTracker) GetLocalPlayerIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.getLocalPlayerIDsLocked()
+}
+
+func (s *SessionTracker) getLocalPlayerIDsLocked() []string {
+	if s.localPlayerIDs == nil {
+		return []string{}
+	}
+	res := make([]string, len(s.localPlayerIDs))
+	copy(res, s.localPlayerIDs)
+	return res
+}
+
+// UpdateMatchEndingMMR updates the ending MMR and recalculated MMR delta for a concluded match.
+func (s *SessionTracker) UpdateMatchEndingMMR(matchGUID string, endingMMR float64) {
+	if strings.TrimSpace(matchGUID) == "" || endingMMR <= 0 {
+		return
+	}
+
+	s.mu.Lock()
+	var targetMatch *SessionMatchDetail
+	for _, m := range s.matches {
+		if m.MatchGUID == matchGUID {
+			targetMatch = m
+			break
+		}
+	}
+
+	if targetMatch == nil {
+		s.mu.Unlock()
+		return
+	}
+
+	targetMatch.EndingMMR = endingMMR
+	if targetMatch.StartingMMR > 0 {
+		targetMatch.MMRChange = roundFloat(endingMMR-targetMatch.StartingMMR, 2)
+	}
+
+	if stats, ok := s.playlists[targetMatch.PlaylistID]; ok {
+		stats.CurrentMMR = endingMMR
+		if stats.InitialMMR > 0 {
+			stats.MMRDelta = roundFloat(endingMMR-stats.InitialMMR, 2)
+		}
+	}
+	s.mu.Unlock()
+
+	summary := s.GetSessionSummary()
+	if s.broadcaster != nil {
+		s.broadcaster.Broadcast(SessionEvent{Event: EventSessionUpdate, Data: summary})
 	}
 }
 

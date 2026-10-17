@@ -17,7 +17,12 @@ export const App: React.FC = () => {
   // Route / mode switch: detect OBS overlay mode via query param or path
   const isOverlayMode = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('mode') === 'overlay' || window.location.pathname === '/overlay';
+    return (
+      params.get('mode') === 'overlay' ||
+      params.get('overlay') === 'true' ||
+      window.location.pathname === '/overlay' ||
+      window.location.pathname.startsWith('/overlay')
+    );
   }, []);
 
   useEffect(() => {
@@ -35,7 +40,7 @@ export const App: React.FC = () => {
   }, [liveSession]);
 
   const match = useMemo(() => {
-    if (liveMatch?.active_match) return liveMatch;
+    if (liveMatch && (liveMatch.active_match || liveMatch.match_ended)) return liveMatch;
     return isDemoLiveMatch() ? SAMPLE_CURRENT_MATCH : liveMatch;
   }, [liveMatch]);
 
