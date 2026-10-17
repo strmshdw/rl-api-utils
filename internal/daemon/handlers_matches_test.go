@@ -235,3 +235,119 @@ func TestDaemon_BallchasingSyncEndpoints(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 }
+
+// TestDaemon_GetMatch_LocalRelativeOutcome verifies that GET /api/matches/{guid}
+// dynamically resolves the local player's team and evaluates outcome relative to local team.
+func TestDaemon_GetMatch_LocalRelativeOutcome(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_getmatch_outcome.db")
+	store, err := storage.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	localPID := "Steam|76561198000000099|0"
+	_ = store.SaveAuthState(ctx, "steam", "test-token", localPID, "LocalHero")
+
+	// Match 1: Local on Orange (team 1), Orange wins 3-1 -> should be VICTORY for local player
+	guidOrangeWin := "guid-orange-win-test"
+	_ = store.SyncReplayStats(ctx, &storage.ReplayMatchStats{
+		MatchGUID:   guidOrangeWin,
+		MapName:     "Mannfield",
+		Playlist:    11,
+		BlueScore:   1,
+		OrangeScore: 3,
+		Date:        time.Now().UTC().Format(time.RFC3339),
+	})
+	wonTrue := true
+	_ = store.SaveMatchPlayers(ctx, guidOrangeWin, []*storage.MatchPlayerRecord{
+		{MatchGUID: guidOrangeWin, PlayerID: localPID, TeamNum: 1, IsLocal: true, Won: &wonTrue, Score: 450},
+		{MatchGUID: guidOrangeWin, PlayerID: "Steam|opponent|0", TeamNum: 0, IsLocal: false, Score: 300},
+	})
+
+	// Match 2: Local on Blue (team 0), Orange wins 3-1 -> should be DEFEAT for local player
+	guidBlueLoss := "guid-blue-loss-test"
+	_ = store.SyncReplayStats(ctx, &storage.ReplayMatchStats{
+		MatchGUID:   guidBlueLoss,
+		MapName:     "Champions Field",
+		Playlist:    11,
+		BlueScore:   1,
+		OrangeScore: 3,
+		Date:        time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339),
+	})
+	wonFalse := false
+	_ = store.SaveMatchPlayers(ctx, guidBlueLoss, []*storage.MatchPlayerRecord{
+		{MatchGUID: guidBlueLoss, PlayerID: localPID, TeamNum: 0, IsLocal: true, Won: &wonFalse, Score: 200},
+		{MatchGUID: guidBlueLoss, PlayerID: "Steam|opponent|0", TeamNum: 1, IsLocal: false, Score: 500},
+	})
+
+	cfg := &config.Config{}
+	d, err := New(&dummySyncer{}, cfg, WithStateStore(store))
+	if err != nil {
+		t.Fatalf("failed to create daemon: %v", err)
+	}
+	handler := d.Handler(ctx)
+
+	// Test Match 1: Orange Win with Local on Orange -> Victory
+	req1 := httptest.NewRequest(http.MethodGet, "/api/matches/"+guidOrangeWin, nil)
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("GET /api/matches/%s failed: %d", guidOrangeWin, rec1.Code)
+	}
+	var res1 storage.HistoricalMatchRecord
+	if err := json.Unmarshal(rec1.Body.Bytes(), &res1); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if res1.Result != "victory" {
+		t.Errorf("expected Result 'victory' for local Orange win, got %q", res1.Result)
+	}
+
+	// Test Match 2: Orange Win with Local on Blue -> Defeat
+	req2 := httptest.NewRequest(http.MethodGet, "/api/matches/"+guidBlueLoss, nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("GET /api/matches/%s failed: %d", guidBlueLoss, rec2.Code)
+	}
+	var res2 storage.HistoricalMatchRecord
+	if err := json.Unmarshal(rec2.Body.Bytes(), &res2); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if res2.Result != "defeat" {
+		t.Errorf("expected Result 'defeat' for local Blue loss, got %q", res2.Result)
+	}
+}
+
+// TestDaemon_SessionReset_CSRFOriginValidation verifies that POST /api/session/reset
+// blocks unauthorized external origins and permits allowed local origins.
+func TestDaemon_SessionReset_CSRFOriginValidation(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{}
+	d, err := New(&dummySyncer{}, cfg)
+	if err != nil {
+		t.Fatalf("failed to create daemon: %v", err)
+	}
+	handler := d.Handler(ctx)
+
+	// Disallowed origin should return 403 Forbidden
+	reqDisallowed := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
+	reqDisallowed.Header.Set("Origin", "http://evil-attacker.com")
+	recDisallowed := httptest.NewRecorder()
+	handler.ServeHTTP(recDisallowed, reqDisallowed)
+	if recDisallowed.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for disallowed Origin on session reset, got %d", recDisallowed.Code)
+	}
+
+	// Allowed origin should return 200 OK
+	reqAllowed := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
+	reqAllowed.Header.Set("Origin", "http://localhost:5173")
+	recAllowed := httptest.NewRecorder()
+	handler.ServeHTTP(recAllowed, reqAllowed)
+	if recAllowed.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for allowed Origin on session reset, got %d", recAllowed.Code)
+	}
+}
+

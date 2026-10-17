@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ type jsonStatePayload struct {
 	Players          map[string]*PlayerRecord          `json:"players,omitempty"`
 	PlayerMatchups   map[string]map[int]*PlayerMatchup `json:"player_matchups,omitempty"`
 	ProcessedMatches map[string]int64                  `json:"processed_matches,omitempty"`
+	MatchPlayers     map[string][]*MatchPlayerRecord   `json:"match_players,omitempty"`
+	MMRHistory       []*MMRHistoryRecord               `json:"mmr_history,omitempty"`
 }
 
 // JSONStore provides an in-memory StateStore with atomic disk persistence via temporary files
@@ -34,11 +37,51 @@ type JSONStore struct {
 	players          map[string]*PlayerRecord
 	playerMatchups   map[string]map[int]*PlayerMatchup
 	processedMatches map[string]int64
+	matchPlayers     map[string][]*MatchPlayerRecord
+	mmrHistory       []*MMRHistoryRecord
 	closed           bool
+	maxRetries       int
+	baseBackoff      time.Duration
+	maxBackoff       time.Duration
 }
 
 // Compile-time check ensuring JSONStore implements StateStore.
 var _ StateStore = (*JSONStore)(nil)
+
+// SetRetryPolicy configures the maximum retries and backoff limits for pending queries.
+func (s *JSONStore) SetRetryPolicy(maxRetries int, baseBackoff, maxBackoff time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maxRetries > 0 {
+		s.maxRetries = maxRetries
+	}
+	s.baseBackoff = baseBackoff
+	s.maxBackoff = maxBackoff
+}
+
+// CalculateBackoff computes exponential backoff: baseBackoff * 2^(attempt - 1), capped at maxBackoff.
+// Returns 0 if attempt <= 0 or baseBackoff <= 0.
+func CalculateBackoff(attempt int, baseBackoff, maxBackoff time.Duration) time.Duration {
+	if attempt <= 0 || baseBackoff <= 0 {
+		return 0
+	}
+	shift := attempt - 1
+	if shift > 30 {
+		shift = 30
+	}
+	multiplier := time.Duration(1 << shift)
+	if maxBackoff > 0 && multiplier > maxBackoff/baseBackoff {
+		return maxBackoff
+	}
+	delay := baseBackoff * multiplier
+	if delay < 0 || (maxBackoff > 0 && delay > maxBackoff) {
+		if maxBackoff > 0 {
+			return maxBackoff
+		}
+		return time.Duration(1<<63 - 1)
+	}
+	return delay
+}
 
 // NewJSONStore creates or opens a JSONStore at the given file path.
 // If the file does not exist, an empty store is created along with any missing parent directories.
@@ -62,6 +105,11 @@ func NewJSONStore(filePath string) (*JSONStore, error) {
 		players:          make(map[string]*PlayerRecord),
 		playerMatchups:   make(map[string]map[int]*PlayerMatchup),
 		processedMatches: make(map[string]int64),
+		matchPlayers:     make(map[string][]*MatchPlayerRecord),
+		mmrHistory:       make([]*MMRHistoryRecord, 0),
+		maxRetries:       DefaultMaxRetries,
+		baseBackoff:      DefaultBaseBackoff,
+		maxBackoff:       DefaultMaxBackoff,
 	}
 
 	info, err := os.Stat(filePath)
@@ -102,12 +150,22 @@ func NewJSONStore(filePath string) (*JSONStore, error) {
 
 	if payload.Matches != nil {
 		store.matches = payload.Matches
+		for _, m := range store.matches {
+			if m.StatsSyncStatus == "" {
+				m.StatsSyncStatus = StatsSyncPending
+			}
+		}
 	}
 	if payload.Auth != nil {
 		store.auth = payload.Auth
 	}
 	if payload.Players != nil {
 		store.players = payload.Players
+		for _, p := range store.players {
+			if p.Tags == nil {
+				p.Tags = []string{}
+			}
+		}
 	}
 	if payload.PlayerMatchups != nil {
 		store.playerMatchups = payload.PlayerMatchups
@@ -115,6 +173,15 @@ func NewJSONStore(filePath string) (*JSONStore, error) {
 	if payload.ProcessedMatches != nil {
 		store.processedMatches = payload.ProcessedMatches
 	}
+	if payload.MatchPlayers != nil {
+		store.matchPlayers = payload.MatchPlayers
+	}
+	if payload.MMRHistory != nil {
+		store.mmrHistory = payload.MMRHistory
+	}
+
+	// Startup backfill: populate matchPlayers from existing matches with replay_stats_json if missing
+	store.backfillMatchPlayersLocked()
 
 	// Clean up any stale temp files from prior abnormal crashes
 	cleanupStaleTempFiles(dir)
@@ -138,9 +205,11 @@ func (s *JSONStore) saveLocked() error {
 		Players:          s.players,
 		PlayerMatchups:   s.playerMatchups,
 		ProcessedMatches: s.processedMatches,
+		MatchPlayers:     s.matchPlayers,
+		MMRHistory:       s.mmrHistory,
 	}
 
-	data, err := json.MarshalIndent(payload, "", "  ")
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal json state: %w", err)
 	}
@@ -261,8 +330,8 @@ func (s *JSONStore) GetMatch(ctx context.Context, matchGUID string) (*MatchRecor
 	return cloneMatchRecord(rec), nil
 }
 
-// ListPendingDownloads returns all matches ready for replay downloading
-// (download_status = PENDING and non-empty replay_url), ordered by timestamp ASC.
+
+// ListPendingDownloads returns all matches ready for download (PENDING, or FAILED with retry_count < maxRetries and backoff elapsed).
 func (s *JSONStore) ListPendingDownloads(ctx context.Context) ([]*MatchRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -275,10 +344,24 @@ func (s *JSONStore) ListPendingDownloads(ctx context.Context) ([]*MatchRecord, e
 		return nil, ErrStoreClosed
 	}
 
+	now := time.Now().UTC()
+	maxRetries := s.maxRetries
+	if maxRetries <= 0 {
+		maxRetries = DefaultMaxRetries
+	}
+
 	var results []*MatchRecord
 	for _, m := range s.matches {
-		if m.DownloadStatus == DownloadPending && m.ReplayURL != "" {
+		if m.ReplayURL == "" {
+			continue
+		}
+		if m.DownloadStatus == DownloadPending {
 			results = append(results, cloneMatchRecord(m))
+		} else if m.DownloadStatus == DownloadFailed && m.RetryCount < maxRetries {
+			delay := CalculateBackoff(m.RetryCount, s.baseBackoff, s.maxBackoff)
+			if now.Sub(m.UpdatedAt) >= delay {
+				results = append(results, cloneMatchRecord(m))
+			}
 		}
 	}
 
@@ -289,11 +372,14 @@ func (s *JSONStore) ListPendingDownloads(ctx context.Context) ([]*MatchRecord, e
 		return results[i].MatchGUID < results[j].MatchGUID
 	})
 
+	if results == nil {
+		results = make([]*MatchRecord, 0)
+	}
 	return results, nil
 }
 
 // ListPendingUploads returns all matches ready for upload
-// (download_status = DOWNLOADED and upload_status = PENDING and non-empty local path), ordered by timestamp ASC.
+// (download_status = DOWNLOADED and upload_status = PENDING or FAILED with retry_count < maxRetries and backoff elapsed, and non-empty local path), ordered by timestamp ASC.
 func (s *JSONStore) ListPendingUploads(ctx context.Context) ([]*MatchRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -306,10 +392,24 @@ func (s *JSONStore) ListPendingUploads(ctx context.Context) ([]*MatchRecord, err
 		return nil, ErrStoreClosed
 	}
 
+	now := time.Now().UTC()
+	maxRetries := s.maxRetries
+	if maxRetries <= 0 {
+		maxRetries = DefaultMaxRetries
+	}
+
 	var results []*MatchRecord
 	for _, m := range s.matches {
-		if m.DownloadStatus == DownloadDownloaded && m.UploadStatus == UploadPending && m.LocalFilePath != "" {
+		if m.DownloadStatus != DownloadDownloaded || m.LocalFilePath == "" {
+			continue
+		}
+		if m.UploadStatus == UploadPending {
 			results = append(results, cloneMatchRecord(m))
+		} else if m.UploadStatus == UploadFailed && m.RetryCount < maxRetries {
+			delay := CalculateBackoff(m.RetryCount, s.baseBackoff, s.maxBackoff)
+			if now.Sub(m.UpdatedAt) >= delay {
+				results = append(results, cloneMatchRecord(m))
+			}
 		}
 	}
 
@@ -320,6 +420,9 @@ func (s *JSONStore) ListPendingUploads(ctx context.Context) ([]*MatchRecord, err
 		return results[i].MatchGUID < results[j].MatchGUID
 	})
 
+	if results == nil {
+		results = make([]*MatchRecord, 0)
+	}
 	return results, nil
 }
 
@@ -458,6 +561,7 @@ func (s *JSONStore) MarkDownloaded(ctx context.Context, matchGUID, localPath str
 	rec.DownloadStatus = DownloadDownloaded
 	rec.LocalFilePath = localPath
 	rec.DownloadedAt = &now
+	rec.RetryCount = 0
 	rec.LastError = ""
 	rec.UpdatedAt = now
 
@@ -666,6 +770,11 @@ func (s *JSONStore) RecoverInFlight(ctx context.Context) error {
 			m.UpdatedAt = now
 			modified = true
 		}
+		if m.StatsSyncStatus == StatsSyncSyncing {
+			m.StatsSyncStatus = StatsSyncPending
+			m.UpdatedAt = now
+			modified = true
+		}
 	}
 
 	if modified {
@@ -751,6 +860,12 @@ func clonePlayerRecord(src *PlayerRecord) *PlayerRecord {
 		return nil
 	}
 	dst := *src
+	if src.Tags != nil {
+		dst.Tags = make([]string, len(src.Tags))
+		copy(dst.Tags, src.Tags)
+	} else {
+		dst.Tags = []string{}
+	}
 	return &dst
 }
 
@@ -769,11 +884,17 @@ func clonePlayerSummary(src *PlayerSummary) *PlayerSummary {
 		return nil
 	}
 	dst := *src
+	if src.Tags != nil {
+		dst.Tags = make([]string, len(src.Tags))
+		copy(dst.Tags, src.Tags)
+	} else {
+		dst.Tags = []string{}
+	}
 	return &dst
 }
 
-// UpsertPlayer inserts or updates a player record, updating player_name, platform, and last_seen_at.
-// Preserves ranks_json and first_seen_at if existing.
+// UpsertPlayer inserts or updates a player record, updating player_name, platform, notes, tags, and last_seen_at.
+// Preserves ranks_json and first_seen_at if existing. Monotonically updates timestamps.
 func (s *JSONStore) UpsertPlayer(ctx context.Context, player *PlayerRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -792,7 +913,7 @@ func (s *JSONStore) UpsertPlayer(ctx context.Context, player *PlayerRecord) erro
 		return ErrStoreClosed
 	}
 
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Second)
 	existing, exists := s.players[player.PlayerID]
 	if exists {
 		if player.Platform != "" {
@@ -804,21 +925,53 @@ func (s *JSONStore) UpsertPlayer(ctx context.Context, player *PlayerRecord) erro
 		if player.RanksJSON != "" && player.RanksJSON != "{}" {
 			existing.RanksJSON = player.RanksJSON
 		}
-		if !player.LastSeenAt.IsZero() {
-			existing.LastSeenAt = player.LastSeenAt
+		if player.Notes != "" {
+			existing.Notes = player.Notes
+		}
+		if len(player.Tags) > 0 {
+			existing.Tags = make([]string, len(player.Tags))
+			copy(existing.Tags, player.Tags)
+		}
+		// Monotonic timestamps: first_seen moves earlier, last_seen moves later
+		if !player.FirstSeenAt.IsZero() {
+			inFirst := player.FirstSeenAt.Truncate(time.Second)
+			if existing.FirstSeenAt.IsZero() || inFirst.Before(existing.FirstSeenAt) {
+				existing.FirstSeenAt = inFirst
+			}
+		}
+		incomingLastSeen := player.LastSeenAt
+		if incomingLastSeen.IsZero() {
+			incomingLastSeen = now
 		} else {
-			existing.LastSeenAt = now
+			incomingLastSeen = incomingLastSeen.Truncate(time.Second)
+		}
+		if existing.LastSeenAt.IsZero() || incomingLastSeen.After(existing.LastSeenAt) {
+			existing.LastSeenAt = incomingLastSeen
 		}
 	} else {
 		rec := clonePlayerRecord(player)
-		if rec.FirstSeenAt.IsZero() {
-			rec.FirstSeenAt = now
+		if !rec.FirstSeenAt.IsZero() {
+			rec.FirstSeenAt = rec.FirstSeenAt.Truncate(time.Second)
 		}
-		if rec.LastSeenAt.IsZero() {
+		if !rec.LastSeenAt.IsZero() {
+			rec.LastSeenAt = rec.LastSeenAt.Truncate(time.Second)
+		}
+		if rec.FirstSeenAt.IsZero() && rec.LastSeenAt.IsZero() {
+			rec.FirstSeenAt = now
 			rec.LastSeenAt = now
+		} else if rec.FirstSeenAt.IsZero() {
+			rec.FirstSeenAt = rec.LastSeenAt
+		} else if rec.LastSeenAt.IsZero() {
+			rec.LastSeenAt = rec.FirstSeenAt
+		}
+		if rec.FirstSeenAt.After(rec.LastSeenAt) {
+			rec.FirstSeenAt = rec.LastSeenAt
 		}
 		if rec.RanksJSON == "" {
 			rec.RanksJSON = "{}"
+		}
+		if rec.Tags == nil {
+			rec.Tags = []string{}
 		}
 		s.players[player.PlayerID] = rec
 	}
@@ -960,11 +1113,8 @@ func (s *JSONStore) ListPlayerSummaries(ctx context.Context, limit, offset int) 
 	return results, nil
 }
 
-// SearchPlayerSummaries searches players matching query across player_name and player_id
-// (case-insensitive substring match), optionally filtered by platform (case-insensitive; "all" or "" means
-// all platforms), returning paginated PlayerSummary records and the total count of matching records across all pages.
-// Results are ordered by last_seen_at DESC, player_id ASC.
-func (s *JSONStore) SearchPlayerSummaries(ctx context.Context, query, platform string, limit, offset int) ([]*PlayerSummary, int, error) {
+// FilterPlayerSummaries searches, filters, and sorts players across the entire dataset.
+func (s *JSONStore) FilterPlayerSummaries(ctx context.Context, filter PlayerDirectoryFilter) ([]*PlayerSummary, int, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -979,13 +1129,17 @@ func (s *JSONStore) SearchPlayerSummaries(ctx context.Context, query, platform s
 		return nil, 0, ErrStoreClosed
 	}
 
-	cleanQuery := strings.TrimSpace(strings.ToLower(query))
-	cleanPlatform := strings.TrimSpace(strings.ToLower(platform))
+	cleanQuery := strings.TrimSpace(strings.ToLower(filter.Query))
+	cleanPlatform := strings.TrimSpace(strings.ToLower(filter.Platform))
+	cleanRole := strings.TrimSpace(strings.ToLower(filter.Role))
+	cleanSort := strings.TrimSpace(strings.ToLower(filter.Sort))
+	isAsc := strings.TrimSpace(strings.ToLower(filter.Order)) == "asc"
+
 	hasQuery := cleanQuery != ""
 	hasPlatform := cleanPlatform != "" && cleanPlatform != "all"
 
-	// 1. In-memory filter
-	matching := make([]*PlayerRecord, 0)
+	// 1. In-memory filter with full matchup aggregations
+	matching := make([]*PlayerSummary, 0)
 	for _, p := range s.players {
 		if hasPlatform && strings.ToLower(p.Platform) != cleanPlatform {
 			continue
@@ -997,42 +1151,7 @@ func (s *JSONStore) SearchPlayerSummaries(ctx context.Context, query, platform s
 				continue
 			}
 		}
-		matching = append(matching, p)
-	}
 
-	total := len(matching)
-
-	// Boundary shortcuts: total 0 or limit 0 return empty slice with accurate total
-	if total == 0 || limit == 0 {
-		return make([]*PlayerSummary, 0), total, nil
-	}
-
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= total {
-		return make([]*PlayerSummary, 0), total, nil
-	}
-
-	// 2. Deterministic sort: last_seen_at DESC, player_id ASC
-	sort.Slice(matching, func(i, j int) bool {
-		if !matching[i].LastSeenAt.Equal(matching[j].LastSeenAt) {
-			return matching[i].LastSeenAt.After(matching[j].LastSeenAt)
-		}
-		return matching[i].PlayerID < matching[j].PlayerID
-	})
-
-	end := total
-	if limit > 0 {
-		end = offset + limit
-		if end > total {
-			end = total
-		}
-	}
-
-	// 3. Slice and aggregate matchups
-	results := make([]*PlayerSummary, 0, end-offset)
-	for _, p := range matching[offset:end] {
 		sum := &PlayerSummary{
 			PlayerRecord: *clonePlayerRecord(p),
 		}
@@ -1048,10 +1167,211 @@ func (s *JSONStore) SearchPlayerSummaries(ctx context.Context, query, platform s
 				sum.TotalMatches += m.TotalMatches
 			}
 		}
-		results = append(results, sum)
+
+		// Role filter
+		switch cleanRole {
+		case "frequent":
+			if sum.TotalMatches < 3 {
+				continue
+			}
+		case "teammate":
+			if (sum.TotalWinsAsTeammate + sum.TotalLossesAsTeammate) <= 0 {
+				continue
+			}
+		case "opponent":
+			if (sum.TotalWinsAsOpponent + sum.TotalLossesAsOpponent) <= 0 {
+				continue
+			}
+		case "synergy":
+			tmGames := sum.TotalWinsAsTeammate + sum.TotalLossesAsTeammate
+			if tmGames < 2 || (float64(sum.TotalWinsAsTeammate)/float64(tmGames)) < 0.60 {
+				continue
+			}
+		}
+
+		matching = append(matching, sum)
 	}
 
+	total := len(matching)
+
+	if total == 0 || filter.Limit == 0 {
+		return make([]*PlayerSummary, 0), total, nil
+	}
+
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return make([]*PlayerSummary, 0), total, nil
+	}
+
+	// 2. Sorting
+	sort.Slice(matching, func(i, j int) bool {
+		switch cleanSort {
+		case "match_count", "matches":
+			if matching[i].TotalMatches != matching[j].TotalMatches {
+				if isAsc {
+					return matching[i].TotalMatches < matching[j].TotalMatches
+				}
+				return matching[i].TotalMatches > matching[j].TotalMatches
+			}
+		case "win_rate":
+			tmGamesI := matching[i].TotalWinsAsTeammate + matching[i].TotalLossesAsTeammate
+			tmGamesJ := matching[j].TotalWinsAsTeammate + matching[j].TotalLossesAsTeammate
+			rateI := 0.0
+			if tmGamesI > 0 {
+				rateI = float64(matching[i].TotalWinsAsTeammate) / float64(tmGamesI)
+			}
+			rateJ := 0.0
+			if tmGamesJ > 0 {
+				rateJ = float64(matching[j].TotalWinsAsTeammate) / float64(tmGamesJ)
+			}
+			if rateI != rateJ {
+				if isAsc {
+					return rateI < rateJ
+				}
+				return rateI > rateJ
+			}
+			if matching[i].TotalMatches != matching[j].TotalMatches {
+				if isAsc {
+					return matching[i].TotalMatches < matching[j].TotalMatches
+				}
+				return matching[i].TotalMatches > matching[j].TotalMatches
+			}
+		case "name":
+			nameI := strings.ToLower(matching[i].PlayerName)
+			nameJ := strings.ToLower(matching[j].PlayerName)
+			if nameI != nameJ {
+				if isAsc {
+					return nameI < nameJ
+				}
+				return nameI > nameJ
+			}
+		default: // "last_seen"
+			if !matching[i].LastSeenAt.Equal(matching[j].LastSeenAt) {
+				if isAsc {
+					return matching[i].LastSeenAt.Before(matching[j].LastSeenAt)
+				}
+				return matching[i].LastSeenAt.After(matching[j].LastSeenAt)
+			}
+		}
+
+		// Fallback tie-breaker: last_seen_at (respecting isAsc), player_id ASC
+		if !matching[i].LastSeenAt.Equal(matching[j].LastSeenAt) {
+			if isAsc {
+				return matching[i].LastSeenAt.Before(matching[j].LastSeenAt)
+			}
+			return matching[i].LastSeenAt.After(matching[j].LastSeenAt)
+		}
+		return matching[i].PlayerID < matching[j].PlayerID
+	})
+
+	end := total
+	if filter.Limit > 0 {
+		end = offset + filter.Limit
+		if end > total {
+			end = total
+		}
+	}
+
+	results := make([]*PlayerSummary, end-offset)
+	copy(results, matching[offset:end])
 	return results, total, nil
+}
+
+// SearchPlayerSummaries searches players matching query across player_name and player_id
+// (case-insensitive substring match), optionally filtered by platform (case-insensitive; "all" or "" means
+// all platforms), returning paginated PlayerSummary records and the total count of matching records across all pages.
+// Results are ordered by last_seen_at DESC, player_id ASC.
+func (s *JSONStore) SearchPlayerSummaries(ctx context.Context, query, platform string, limit, offset int) ([]*PlayerSummary, int, error) {
+	return s.FilterPlayerSummaries(ctx, PlayerDirectoryFilter{
+		Query:    query,
+		Platform: platform,
+		Role:     "all",
+		Sort:     "last_seen",
+		Order:    "desc",
+		Limit:    limit,
+		Offset:   offset,
+	})
+}
+
+// GetPlayerSpotlights computes dataset-wide global spotlights.
+func (s *JSONStore) GetPlayerSpotlights(ctx context.Context) (*GlobalSpotlights, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	candidates := make([]*PlayerSummary, 0)
+	for _, p := range s.players {
+		sum := &PlayerSummary{
+			PlayerRecord: *clonePlayerRecord(p),
+		}
+		if matchups, ok := s.playerMatchups[p.PlayerID]; ok {
+			for _, m := range matchups {
+				if m == nil {
+					continue
+				}
+				sum.TotalWinsAsTeammate += m.WinsAsTeammate
+				sum.TotalLossesAsTeammate += m.LossesAsTeammate
+				sum.TotalWinsAsOpponent += m.WinsAsOpponent
+				sum.TotalLossesAsOpponent += m.LossesAsOpponent
+				sum.TotalMatches += m.TotalMatches
+			}
+		}
+		if sum.TotalMatches > 0 {
+			candidates = append(candidates, sum)
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].PlayerID < candidates[j].PlayerID
+	})
+
+	return ComputeGlobalSpotlights(candidates), nil
+}
+
+// GetLocalPlayerIDs returns all known local player account and platform IDs from auth and match records.
+func (s *JSONStore) GetLocalPlayerIDs(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	idMap := make(map[string]bool)
+	for _, a := range s.auth {
+		if strings.TrimSpace(a.AccountID) != "" {
+			idMap[strings.TrimSpace(a.AccountID)] = true
+		}
+	}
+
+	for _, mps := range s.matchPlayers {
+		for _, mp := range mps {
+			if mp.IsLocal && strings.TrimSpace(mp.PlayerID) != "" {
+				idMap[strings.TrimSpace(mp.PlayerID)] = true
+			}
+		}
+	}
+
+	ids := make([]string, 0, len(idMap))
+	for id := range idMap {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // UpdatePlayerRanks updates the ranks_json payload and last_seen_at timestamp for a player.
@@ -1082,14 +1402,18 @@ func (s *JSONStore) UpdatePlayerRanks(ctx context.Context, playerID string, rank
 		ranksJSON = "{}"
 	}
 	rec.RanksJSON = ranksJSON
-	rec.LastSeenAt = time.Now().UTC()
+	now := time.Now().UTC()
+	if rec.LastSeenAt.IsZero() || now.After(rec.LastSeenAt) {
+		rec.LastSeenAt = now
+	}
 
 	return s.saveLocked()
 }
 
 // RecordMatchResults atomically records all player outcomes for a match and registers the match GUID
 // in processedMatches. If matchGUID was already processed, returns ErrMatchAlreadyProcessed.
-func (s *JSONStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []PlayerOutcome) error {
+// Optional matchTime preserves the original replay timestamp rather than wall-clock execution time.
+func (s *JSONStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []PlayerOutcome, matchTime ...time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1112,7 +1436,12 @@ func (s *JSONStore) RecordMatchResults(ctx context.Context, matchGUID string, pl
 		return ErrMatchAlreadyProcessed
 	}
 
-	now := time.Now().UTC()
+	matchTS := time.Now().UTC().Truncate(time.Second)
+	hasExplicitTime := false
+	if len(matchTime) > 0 && !matchTime[0].IsZero() {
+		matchTS = matchTime[0].UTC().Truncate(time.Second)
+		hasExplicitTime = true
+	}
 
 	for _, outcome := range outcomes {
 		if strings.TrimSpace(outcome.PlayerID) == "" {
@@ -1127,12 +1456,20 @@ func (s *JSONStore) RecordMatchResults(ctx context.Context, matchGUID string, pl
 				Platform:    outcome.Platform,
 				PlayerName:  outcome.PlayerName,
 				RanksJSON:   "{}",
-				FirstSeenAt: now,
-				LastSeenAt:  now,
+				Tags:        []string{},
+				FirstSeenAt: matchTS,
+				LastSeenAt:  matchTS,
 			}
 			s.players[outcome.PlayerID] = player
 		} else {
-			player.LastSeenAt = now
+			if hasExplicitTime {
+				if matchTS.Before(player.FirstSeenAt) {
+					player.FirstSeenAt = matchTS
+				}
+				if matchTS.After(player.LastSeenAt) {
+					player.LastSeenAt = matchTS
+				}
+			}
 			if outcome.Platform != "" {
 				player.Platform = outcome.Platform
 			}
@@ -1154,7 +1491,7 @@ func (s *JSONStore) RecordMatchResults(ctx context.Context, matchGUID string, pl
 			m = &PlayerMatchup{
 				PlayerID:     outcome.PlayerID,
 				PlaylistID:   playlistID,
-				LastPlayedAt: now,
+				LastPlayedAt: matchTS,
 			}
 			pMap[playlistID] = m
 		}
@@ -1174,11 +1511,13 @@ func (s *JSONStore) RecordMatchResults(ctx context.Context, matchGUID string, pl
 			}
 		}
 		m.TotalMatches++
-		m.LastPlayedAt = now
+		if matchTS.After(m.LastPlayedAt) {
+			m.LastPlayedAt = matchTS
+		}
 	}
 
 	// Record match in processed ledger
-	s.processedMatches[matchGUID] = now.Unix()
+	s.processedMatches[matchGUID] = matchTS.Unix()
 
 	return s.saveLocked()
 }
@@ -1252,7 +1591,30 @@ func (s *JSONStore) GetPlayerMatchups(ctx context.Context, playerID string) ([]*
 	return results, nil
 }
 
-// SyncReplayStats enriches or upserts a match record with end-of-game replay statistics.
+// cloneMatchPlayerRecord creates a deep copy of MatchPlayerRecord to prevent data races.
+func cloneMatchPlayerRecord(src *MatchPlayerRecord) *MatchPlayerRecord {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	if src.Won != nil {
+		w := *src.Won
+		dst.Won = &w
+	}
+	return &dst
+}
+
+// cloneMMRHistoryRecord creates a deep copy of MMRHistoryRecord to prevent data races.
+func cloneMMRHistoryRecord(src *MMRHistoryRecord) *MMRHistoryRecord {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	return &dst
+}
+
+// SyncReplayStats enriches or upserts a match record with end-of-game replay statistics,
+// keyed by MatchGUID, and populates player records and match_players.
 func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1277,7 +1639,7 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 	now := time.Now().UTC()
 	startTS := now.Unix()
 	if stats.Date != "" {
-		if t, err := time.Parse(time.RFC3339, stats.Date); err == nil {
+		if t, ok := ParseReplayDate(stats.Date); ok {
 			startTS = t.Unix()
 		}
 	}
@@ -1285,8 +1647,10 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 	rec, exists := s.matches[guid]
 	if !exists {
 		upStatus := UploadPending
+		syncStatus := StatsSyncPending
 		if stats.BallchasingID != "" {
 			upStatus = UploadUploaded
+			syncStatus = StatsSyncSynced
 		}
 		rec = &MatchRecord{
 			MatchGUID:            guid,
@@ -1302,11 +1666,16 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 			WinnerTeam:           stats.WinnerTeam,
 			ReplayStatsJSON:      string(statsJSON),
 			SyncedAt:             &now,
+			StatsSyncStatus:      syncStatus,
+			StatsRetryCount:      0,
 			CreatedAt:            now,
 			UpdatedAt:            now,
 		}
 		s.matches[guid] = rec
 	} else {
+		if rec.RecordStartTimestamp <= 0 {
+			rec.RecordStartTimestamp = startTS
+		}
 		if stats.MapName != "" {
 			rec.MapName = stats.MapName
 		}
@@ -1316,6 +1685,7 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 		if stats.BallchasingID != "" {
 			rec.BallchasingID = stats.BallchasingID
 			rec.UploadStatus = UploadUploaded
+			rec.StatsSyncStatus = StatsSyncSynced
 		}
 		if stats.BallchasingURL != "" {
 			rec.BallchasingURL = stats.BallchasingURL
@@ -1331,7 +1701,17 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 		}
 	}
 
-	// Upsert players
+	// Upsert players and match_players
+	localAccounts := make(map[string]bool)
+	for _, a := range s.auth {
+		if a.AccountID != "" {
+			localAccounts[strings.ToLower(a.AccountID)] = true
+		}
+	}
+
+	matchPlayers := make([]*MatchPlayerRecord, 0, len(stats.Players))
+	matchTime := time.Unix(startTS, 0).UTC()
+
 	for _, p := range stats.Players {
 		pid := strings.TrimSpace(p.OnlineID)
 		if pid == "" {
@@ -1346,21 +1726,57 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 			canonicalID = fmt.Sprintf("%s|%s|0", plat, pid)
 		}
 
+		isLocal := localAccounts[strings.ToLower(pid)] || localAccounts[strings.ToLower(canonicalID)]
+
+		var won *bool
+		if stats.WinnerTeam != nil && *stats.WinnerTeam >= 0 {
+			w := (*stats.WinnerTeam == p.Team)
+			won = &w
+		}
+
+		mp := &MatchPlayerRecord{
+			MatchGUID: guid,
+			PlayerID:  canonicalID,
+			TeamNum:   p.Team,
+			IsLocal:   isLocal,
+			Won:       won,
+			Score:     p.Score,
+			Goals:     p.Goals,
+			Assists:   p.Assists,
+			Saves:     p.Saves,
+			Shots:     p.Shots,
+			Demos:     p.Demos,
+		}
+		matchPlayers = append(matchPlayers, mp)
+
 		pRec, pExists := s.players[canonicalID]
 		if !pExists {
 			s.players[canonicalID] = &PlayerRecord{
 				PlayerID:    canonicalID,
 				Platform:    plat,
 				PlayerName:  strings.TrimSpace(p.Name),
-				FirstSeenAt: now,
-				LastSeenAt:  now,
+				RanksJSON:   "{}",
+				Tags:        []string{},
+				FirstSeenAt: matchTime,
+				LastSeenAt:  matchTime,
 			}
 		} else {
 			pRec.Platform = plat
 			pRec.PlayerName = strings.TrimSpace(p.Name)
-			pRec.LastSeenAt = now
+			if matchTime.Before(pRec.FirstSeenAt) {
+				pRec.FirstSeenAt = matchTime
+			}
+			if matchTime.After(pRec.LastSeenAt) {
+				pRec.LastSeenAt = matchTime
+			}
 		}
 	}
+
+	if len(matchPlayers) > 0 {
+		s.saveMatchPlayersLocked(guid, matchPlayers)
+	}
+
+	s.hydrateRanksFromStatsLocked(stats)
 
 	return s.saveLocked()
 }
@@ -1390,8 +1806,10 @@ func (s *JSONStore) ListHistoricalMatches(ctx context.Context, filter MatchFilte
 		offset = 0
 	}
 
-	var filtered []*MatchRecord
+	cleanResult := strings.ToLower(strings.TrimSpace(filter.Result))
 	q := strings.ToLower(strings.TrimSpace(filter.Query))
+
+	var filtered []*HistoricalMatchRecord
 
 	for _, m := range s.matches {
 		if filter.Playlist > 0 && m.Playlist != filter.Playlist {
@@ -1404,7 +1822,85 @@ func (s *JSONStore) ListHistoricalMatches(ctx context.Context, filter MatchFilte
 				continue
 			}
 		}
-		filtered = append(filtered, cloneMatchRecord(m))
+
+		localTeam := -1
+		if mps, ok := s.matchPlayers[m.MatchGUID]; ok {
+			for _, mp := range mps {
+				if mp.IsLocal {
+					localTeam = mp.TeamNum
+					break
+				}
+			}
+		}
+
+		outcome := "unknown"
+		if localTeam >= 0 {
+			if localTeam == 0 {
+				if m.BlueScore > m.OrangeScore {
+					outcome = "victory"
+				} else if m.OrangeScore > m.BlueScore {
+					outcome = "defeat"
+				} else if m.WinnerTeam != nil && *m.WinnerTeam != -1 {
+					if *m.WinnerTeam == 0 {
+						outcome = "victory"
+					} else {
+						outcome = "defeat"
+					}
+				} else if (m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0)) || (m.WinnerTeam != nil && *m.WinnerTeam == -1) {
+					outcome = "draw"
+				} else {
+					outcome = "draw"
+				}
+			} else if localTeam == 1 {
+				if m.OrangeScore > m.BlueScore {
+					outcome = "victory"
+				} else if m.BlueScore > m.OrangeScore {
+					outcome = "defeat"
+				} else if m.WinnerTeam != nil && *m.WinnerTeam != -1 {
+					if *m.WinnerTeam == 1 {
+						outcome = "victory"
+					} else {
+						outcome = "defeat"
+					}
+				} else if (m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0)) || (m.WinnerTeam != nil && *m.WinnerTeam == -1) {
+					outcome = "draw"
+				} else {
+					outcome = "draw"
+				}
+			}
+		} else {
+			if m.BlueScore > m.OrangeScore {
+				outcome = "victory"
+			} else if m.OrangeScore > m.BlueScore {
+				outcome = "defeat"
+			} else if m.WinnerTeam != nil && *m.WinnerTeam != -1 {
+				if *m.WinnerTeam == 0 {
+					outcome = "victory"
+				} else {
+					outcome = "defeat"
+				}
+			} else if (m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0)) || (m.WinnerTeam != nil && *m.WinnerTeam == -1) {
+				outcome = "draw"
+			} else {
+				outcome = "draw"
+			}
+		}
+
+		if cleanResult != "" && cleanResult != "all" && cleanResult != outcome {
+			continue
+		}
+
+		hist := &HistoricalMatchRecord{
+			MatchRecord: *cloneMatchRecord(m),
+			Result:      outcome,
+		}
+		if m.ReplayStatsJSON != "" {
+			var st ReplayMatchStats
+			if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err == nil {
+				hist.Stats = &st
+			}
+		}
+		filtered = append(filtered, hist)
 	}
 
 	sort.Slice(filtered, func(i, j int) bool {
@@ -1416,7 +1912,7 @@ func (s *JSONStore) ListHistoricalMatches(ctx context.Context, filter MatchFilte
 
 	total := len(filtered)
 	if offset >= total {
-		return []*HistoricalMatchRecord{}, total, nil
+		return make([]*HistoricalMatchRecord, 0), total, nil
 	}
 
 	end := offset + limit
@@ -1424,29 +1920,709 @@ func (s *JSONStore) ListHistoricalMatches(ctx context.Context, filter MatchFilte
 		end = total
 	}
 
-	sliced := filtered[offset:end]
-	results := make([]*HistoricalMatchRecord, len(sliced))
-	for i, m := range sliced {
-		hist := &HistoricalMatchRecord{
-			MatchRecord: *m,
-			Result:      "unknown",
-		}
-		if m.ReplayStatsJSON != "" {
-			var st ReplayMatchStats
-			if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err == nil {
-				hist.Stats = &st
-			}
-		}
-		if m.BlueScore > m.OrangeScore {
-			hist.Result = "victory"
-		} else if m.OrangeScore > m.BlueScore {
-			hist.Result = "defeat"
-		} else if m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0) {
-			hist.Result = "draw"
-		}
-		results[i] = hist
+	results := make([]*HistoricalMatchRecord, end-offset)
+	copy(results, filtered[offset:end])
+	return results, total, nil
+}
+
+// hydrateRanksFromStatsLocked attempts to parse rank metadata from replay raw JSON and update player ranks.
+// Must be called with s.mu held for writing.
+func (s *JSONStore) hydrateRanksFromStatsLocked(stats *ReplayMatchStats) {
+	if stats == nil || stats.RawJSON == "" || stats.Playlist <= 0 {
+		return
 	}
 
-	return results, total, nil
+	type bcPlayerRank struct {
+		ID       int    `json:"id"`
+		Tier     int    `json:"tier"`
+		Division int    `json:"division"`
+		Name     string `json:"name"`
+	}
+	type bcPlayer struct {
+		ID   interface{}   `json:"id"`
+		Rank *bcPlayerRank `json:"rank"`
+	}
+	type bcTeam struct {
+		Players []bcPlayer `json:"players"`
+	}
+	type bcDetail struct {
+		Blue   bcTeam `json:"blue"`
+		Orange bcTeam `json:"orange"`
+	}
+
+	var detail bcDetail
+	if err := json.Unmarshal([]byte(stats.RawJSON), &detail); err != nil {
+		return
+	}
+
+	allPlayers := append(detail.Blue.Players, detail.Orange.Players...)
+	for _, bp := range allPlayers {
+		if bp.Rank == nil || (bp.Rank.Tier == 0 && bp.Rank.ID == 0) {
+			continue
+		}
+
+		var idStr string
+		switch v := bp.ID.(type) {
+		case string:
+			idStr = v
+		case map[string]interface{}:
+			if idVal, ok := v["id"].(string); ok {
+				idStr = idVal
+			}
+		}
+		if idStr == "" {
+			continue
+		}
+
+		pRec, ok := s.players[idStr]
+		if !ok {
+			continue
+		}
+
+		ranks := make(map[string]map[string]interface{})
+		if pRec.RanksJSON != "" && pRec.RanksJSON != "{}" {
+			_ = json.Unmarshal([]byte(pRec.RanksJSON), &ranks)
+		}
+
+		rName := bp.Rank.Name
+		if rName == "" {
+			rName = formatRankName(bp.Rank.Tier, bp.Rank.Division)
+		}
+
+		pKey := strconv.Itoa(stats.Playlist)
+		ranks[pKey] = map[string]interface{}{
+			"playlist_id":    stats.Playlist,
+			"playlist_name":  formatPlaylistName(stats.Playlist),
+			"tier":           bp.Rank.Tier,
+			"division":       bp.Rank.Division,
+			"rank_name":      rName,
+			"mmr":            0.0,
+			"matches_played": 0,
+		}
+
+		if updatedData, err := json.Marshal(ranks); err == nil {
+			pRec.RanksJSON = string(updatedData)
+		}
+	}
+}
+
+// saveMatchPlayersLocked bulk upserts player match participation records for a match.
+// It strictly enforces composite primary key uniqueness on (match_guid, player_id):
+// - Any duplicates within incoming records or against existing records are merged by player_id.
+// - Later incoming records update earlier records for stats, won, team_num, and is_local.
+// - Existing non-empty car_name and stats_json are preserved if incoming values are empty
+//   (matching SQLiteStore's CASE WHEN excluded.car_name != '' THEN ... END).
+// - The resulting slice is ordered deterministically by team_num ASC, score DESC, player_id ASC.
+// Caller MUST hold s.mu for writing.
+func (s *JSONStore) saveMatchPlayersLocked(matchGUID string, players []*MatchPlayerRecord) {
+	if s.matchPlayers == nil {
+		s.matchPlayers = make(map[string][]*MatchPlayerRecord)
+	}
+
+	existing := s.matchPlayers[matchGUID]
+	byPID := make(map[string]*MatchPlayerRecord, len(existing)+len(players))
+	for _, mp := range existing {
+		if mp != nil && strings.TrimSpace(mp.PlayerID) != "" {
+			byPID[mp.PlayerID] = cloneMatchPlayerRecord(mp)
+		}
+	}
+
+	for _, p := range players {
+		if p == nil || strings.TrimSpace(p.PlayerID) == "" {
+			continue
+		}
+		canonicalID := strings.TrimSpace(p.PlayerID)
+		prev, exists := byPID[canonicalID]
+		if !exists {
+			cp := cloneMatchPlayerRecord(p)
+			cp.MatchGUID = matchGUID
+			cp.PlayerID = canonicalID
+			byPID[canonicalID] = cp
+		} else {
+			// Update existing record, preserving car_name and stats_json if empty in incoming record
+			prev.TeamNum = p.TeamNum
+			prev.IsLocal = p.IsLocal
+			if p.Won != nil {
+				w := *p.Won
+				prev.Won = &w
+			} else {
+				prev.Won = nil
+			}
+			prev.Score = p.Score
+			prev.Goals = p.Goals
+			prev.Assists = p.Assists
+			prev.Saves = p.Saves
+			prev.Shots = p.Shots
+			prev.Demos = p.Demos
+			if p.CarName != "" {
+				prev.CarName = p.CarName
+			}
+			if p.StatsJSON != "" {
+				prev.StatsJSON = p.StatsJSON
+			}
+		}
+	}
+
+	newList := make([]*MatchPlayerRecord, 0, len(byPID))
+	for _, mp := range byPID {
+		newList = append(newList, mp)
+	}
+	sort.Slice(newList, func(i, j int) bool {
+		if newList[i].TeamNum != newList[j].TeamNum {
+			return newList[i].TeamNum < newList[j].TeamNum
+		}
+		if newList[i].Score != newList[j].Score {
+			return newList[i].Score > newList[j].Score
+		}
+		return newList[i].PlayerID < newList[j].PlayerID
+	})
+
+	s.matchPlayers[matchGUID] = newList
+}
+
+// backfillMatchPlayersLocked populates matchPlayers from existing matches with replay_stats_json if missing.
+// Must be called with s.mu held for writing.
+func (s *JSONStore) backfillMatchPlayersLocked() {
+	if s.matchPlayers == nil {
+		s.matchPlayers = make(map[string][]*MatchPlayerRecord)
+	}
+
+	// Sanitize any existing in-memory/disk-loaded records to guarantee composite PK uniqueness
+	for guid, mps := range s.matchPlayers {
+		s.saveMatchPlayersLocked(guid, mps)
+	}
+
+	for guid, m := range s.matches {
+		if m == nil || m.ReplayStatsJSON == "" {
+			continue
+		}
+		if _, ok := s.matchPlayers[guid]; ok && len(s.matchPlayers[guid]) > 0 {
+			continue
+		}
+
+		var st ReplayMatchStats
+		if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err != nil {
+			continue
+		}
+
+		var players []*MatchPlayerRecord
+		for _, p := range st.Players {
+			pid := strings.TrimSpace(p.OnlineID)
+			if pid == "" {
+				continue
+			}
+			plat := strings.TrimSpace(p.Platform)
+			if plat == "" {
+				plat = "Unknown"
+			}
+			canonicalID := pid
+			if !strings.Contains(canonicalID, "|") {
+				canonicalID = fmt.Sprintf("%s|%s|0", plat, pid)
+			}
+
+			var won *bool
+			if m.WinnerTeam != nil && *m.WinnerTeam >= 0 {
+				w := (*m.WinnerTeam == p.Team)
+				won = &w
+			}
+
+			players = append(players, &MatchPlayerRecord{
+				MatchGUID: guid,
+				PlayerID:  canonicalID,
+				TeamNum:   p.Team,
+				IsLocal:   false,
+				Won:       won,
+				Score:     p.Score,
+				Goals:     p.Goals,
+				Assists:   p.Assists,
+				Saves:     p.Saves,
+				Shots:     p.Shots,
+				Demos:     p.Demos,
+			})
+		}
+		if len(players) > 0 {
+			s.saveMatchPlayersLocked(guid, players)
+		}
+	}
+}
+
+// SaveMatchPlayers bulk upserts player match participation records for a match.
+func (s *JSONStore) SaveMatchPlayers(ctx context.Context, matchGUID string, players []*MatchPlayerRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(matchGUID) == "" {
+		return ErrInvalidGUID
+	}
+	if len(players) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	s.saveMatchPlayersLocked(matchGUID, players)
+	return s.saveLocked()
+}
+
+// GetMatchPlayers retrieves all player records for a match GUID ordered by team_num ASC, score DESC.
+func (s *JSONStore) GetMatchPlayers(ctx context.Context, matchGUID string) ([]*MatchPlayerRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(matchGUID) == "" {
+		return nil, ErrInvalidGUID
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	list, ok := s.matchPlayers[matchGUID]
+	if !ok || len(list) == 0 {
+		return []*MatchPlayerRecord{}, nil
+	}
+
+	results := make([]*MatchPlayerRecord, len(list))
+	for i, mp := range list {
+		results[i] = cloneMatchPlayerRecord(mp)
+	}
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].TeamNum != results[j].TeamNum {
+			return results[i].TeamNum < results[j].TeamNum
+		}
+		return results[i].Score > results[j].Score
+	})
+
+	return results, nil
+}
+
+// ListPlayerMatches returns paginated match details for a player with role and result calculations.
+func (s *JSONStore) ListPlayerMatches(ctx context.Context, playerID string, filter PlayerMatchFilter) ([]*PlayerMatchDetail, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	if strings.TrimSpace(playerID) == "" {
+		return nil, 0, ErrPlayerNotFound
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, 0, ErrStoreClosed
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	cleanResult := strings.ToLower(strings.TrimSpace(filter.Result))
+	cleanRole := strings.ToLower(strings.TrimSpace(filter.Role))
+
+	var matchesList []*PlayerMatchDetail
+
+	for matchGUID, mPlayers := range s.matchPlayers {
+		m, ok := s.matches[matchGUID]
+		if !ok {
+			continue
+		}
+
+		if filter.Playlist > 0 && m.Playlist != filter.Playlist {
+			continue
+		}
+
+		var targetMP *MatchPlayerRecord
+		localTeam := -1
+		for _, mp := range mPlayers {
+			if mp.IsLocal {
+				localTeam = mp.TeamNum
+			}
+			if mp.PlayerID == playerID {
+				targetMP = mp
+			}
+		}
+
+		if targetMP == nil {
+			continue
+		}
+
+		role := "teammate"
+		if localTeam >= 0 {
+			if targetMP.TeamNum == localTeam {
+				role = "teammate"
+			} else {
+				role = "opponent"
+			}
+		}
+
+		if cleanRole != "" && cleanRole != "all" {
+			if cleanRole != role {
+				continue
+			}
+		}
+
+		result := "unknown"
+		if targetMP.Won != nil {
+			if *targetMP.Won {
+				result = "victory"
+			} else {
+				result = "defeat"
+			}
+		} else if m.WinnerTeam != nil {
+			if *m.WinnerTeam == -1 {
+				result = "draw"
+			} else if *m.WinnerTeam == targetMP.TeamNum {
+				result = "victory"
+			} else {
+				result = "defeat"
+			}
+		} else if m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0) {
+			result = "draw"
+		} else if (targetMP.TeamNum == 0 && m.BlueScore > m.OrangeScore) || (targetMP.TeamNum == 1 && m.OrangeScore > m.BlueScore) {
+			result = "victory"
+		} else if (targetMP.TeamNum == 0 && m.OrangeScore > m.BlueScore) || (targetMP.TeamNum == 1 && m.BlueScore > m.OrangeScore) {
+			result = "defeat"
+		}
+
+		if cleanResult != "" && cleanResult != "all" {
+			if cleanResult != result {
+				continue
+			}
+		}
+
+		var st *ReplayMatchStats
+		if m.ReplayStatsJSON != "" {
+			var parsed ReplayMatchStats
+			if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &parsed); err == nil {
+				st = &parsed
+			}
+		}
+
+		detail := &PlayerMatchDetail{
+			MatchRecord: *cloneMatchRecord(m),
+			PlayerStats: *cloneMatchPlayerRecord(targetMP),
+			Role:        role,
+			Result:      result,
+			Stats:       st,
+		}
+		matchesList = append(matchesList, detail)
+	}
+
+	sort.Slice(matchesList, func(i, j int) bool {
+		if matchesList[i].RecordStartTimestamp != matchesList[j].RecordStartTimestamp {
+			return matchesList[i].RecordStartTimestamp > matchesList[j].RecordStartTimestamp
+		}
+		return matchesList[i].MatchGUID < matchesList[j].MatchGUID
+	})
+
+	total := len(matchesList)
+	if offset >= total {
+		return []*PlayerMatchDetail{}, total, nil
+	}
+
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	return matchesList[offset:end], total, nil
+}
+
+// RecordMMR inserts a point-in-time competitive MMR history record.
+func (s *JSONStore) RecordMMR(ctx context.Context, record *MMRHistoryRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if record == nil {
+		return errors.New("record cannot be nil")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	rec := cloneMMRHistoryRecord(record)
+	if rec.RecordedAt.IsZero() {
+		rec.RecordedAt = time.Now().UTC()
+	}
+	rec.ID = int64(len(s.mmrHistory) + 1)
+	record.ID = rec.ID
+	record.RecordedAt = rec.RecordedAt
+
+	s.mmrHistory = append(s.mmrHistory, rec)
+	return s.saveLocked()
+}
+
+// ListMMRHistory returns competitive MMR history for a playlist ordered by recorded_at DESC, id DESC.
+func (s *JSONStore) ListMMRHistory(ctx context.Context, playlistID int, limit int) ([]*MMRHistoryRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	var filtered []*MMRHistoryRecord
+	for _, r := range s.mmrHistory {
+		if playlistID > 0 && r.PlaylistID != playlistID {
+			continue
+		}
+		filtered = append(filtered, cloneMMRHistoryRecord(r))
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		if !filtered[i].RecordedAt.Equal(filtered[j].RecordedAt) {
+			return filtered[i].RecordedAt.After(filtered[j].RecordedAt)
+		}
+		return filtered[i].ID > filtered[j].ID
+	})
+
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+
+	if filtered == nil {
+		filtered = make([]*MMRHistoryRecord, 0)
+	}
+	return filtered, nil
+}
+
+// UpdatePlayerNotesAndTags updates notes and custom tags for a player profile.
+func (s *JSONStore) UpdatePlayerNotesAndTags(ctx context.Context, playerID string, notes string, tags []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(playerID) == "" {
+		return ErrPlayerNotFound
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	p, ok := s.players[playerID]
+	if !ok {
+		return ErrPlayerNotFound
+	}
+
+	p.Notes = notes
+	if tags != nil {
+		p.Tags = make([]string, len(tags))
+		copy(p.Tags, tags)
+	} else {
+		p.Tags = []string{}
+	}
+
+	return s.saveLocked()
+}
+
+// ListPendingStatsSync returns matches requiring post-upload Ballchasing stats synchronization.
+func (s *JSONStore) ListPendingStatsSync(ctx context.Context, maxRetries int) ([]*MatchRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	now := time.Now().UTC()
+	effectiveMaxRetries := maxRetries
+	if effectiveMaxRetries <= 0 {
+		effectiveMaxRetries = s.maxRetries
+		if effectiveMaxRetries <= 0 {
+			effectiveMaxRetries = DefaultMaxRetries
+		}
+	}
+
+	var results []*MatchRecord
+	for _, m := range s.matches {
+		if (m.UploadStatus == UploadUploaded || m.UploadStatus == UploadDuplicate) && m.BallchasingID != "" {
+			if m.StatsSyncStatus == StatsSyncPending {
+				results = append(results, cloneMatchRecord(m))
+			} else if m.StatsSyncStatus == StatsSyncFailed && m.StatsRetryCount < effectiveMaxRetries {
+				delay := CalculateBackoff(m.StatsRetryCount, s.baseBackoff, s.maxBackoff)
+				if now.Sub(m.UpdatedAt) >= delay {
+					results = append(results, cloneMatchRecord(m))
+				}
+			}
+		}
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].RecordStartTimestamp < results[j].RecordStartTimestamp
+	})
+
+	if results == nil {
+		results = make([]*MatchRecord, 0)
+	}
+	return results, nil
+}
+
+// MarkStatsSyncing transitions a match's stats sync status to SYNCING.
+func (s *JSONStore) MarkStatsSyncing(ctx context.Context, matchGUID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(matchGUID) == "" {
+		return ErrInvalidGUID
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	m, ok := s.matches[matchGUID]
+	if !ok {
+		return ErrMatchNotFound
+	}
+
+	m.StatsSyncStatus = StatsSyncSyncing
+	m.UpdatedAt = time.Now().UTC()
+	return s.saveLocked()
+}
+
+// MarkStatsSynced transitions a match's stats sync status to SYNCED.
+func (s *JSONStore) MarkStatsSynced(ctx context.Context, matchGUID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(matchGUID) == "" {
+		return ErrInvalidGUID
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	m, ok := s.matches[matchGUID]
+	if !ok {
+		return ErrMatchNotFound
+	}
+
+	now := time.Now().UTC()
+	m.StatsSyncStatus = StatsSyncSynced
+	m.SyncedAt = &now
+	m.StatsRetryCount = 0
+	m.UpdatedAt = now
+	return s.saveLocked()
+}
+
+// MarkStatsSyncFailed increments retry count and sets stats_sync_status to FAILED.
+func (s *JSONStore) MarkStatsSyncFailed(ctx context.Context, matchGUID, errMsg string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(matchGUID) == "" {
+		return ErrInvalidGUID
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	m, ok := s.matches[matchGUID]
+	if !ok {
+		return ErrMatchNotFound
+	}
+
+	now := time.Now().UTC()
+	m.StatsSyncStatus = StatsSyncFailed
+	m.StatsRetryCount++
+	m.LastError = errMsg
+	m.UpdatedAt = now
+	return s.saveLocked()
+}
+
+// ResetMatchRetry resets error counters and resets failed download/upload/sync states to PENDING.
+func (s *JSONStore) ResetMatchRetry(ctx context.Context, matchGUID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(matchGUID) == "" {
+		return ErrInvalidGUID
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	m, ok := s.matches[matchGUID]
+	if !ok {
+		return ErrMatchNotFound
+	}
+
+	now := time.Now().UTC()
+	m.RetryCount = 0
+	m.StatsRetryCount = 0
+	m.LastError = ""
+	if m.DownloadStatus == DownloadFailed {
+		m.DownloadStatus = DownloadPending
+	}
+	if m.UploadStatus == UploadFailed {
+		m.UploadStatus = UploadPending
+	}
+	if m.StatsSyncStatus == StatsSyncFailed || m.StatsSyncStatus == StatsSyncSyncing {
+		m.StatsSyncStatus = StatsSyncPending
+	}
+	m.UpdatedAt = now
+	return s.saveLocked()
 }
 

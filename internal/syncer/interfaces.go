@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"time"
 
 	"github.com/dank/rl-api-utils/internal/ballchasing"
 	"github.com/dank/rl-api-utils/internal/psynet"
@@ -58,6 +59,16 @@ type StateStore interface {
 	MarkUploadFailed(ctx context.Context, matchGUID, errMsg string) error
 	RecoverInFlight(ctx context.Context) error
 	SyncReplayStats(ctx context.Context, stats *storage.ReplayMatchStats) error
+
+	// SPEC-01 / SPEC-02 / SPEC-04 additions:
+	ListPendingStatsSync(ctx context.Context, maxRetries int) ([]*storage.MatchRecord, error)
+	MarkStatsSyncing(ctx context.Context, matchGUID string) error
+	MarkStatsSynced(ctx context.Context, matchGUID string) error
+	MarkStatsSyncFailed(ctx context.Context, matchGUID, errMsg string) error
+	ResetMatchRetry(ctx context.Context, matchGUID string) error
+	RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []storage.PlayerOutcome, matchTime ...time.Time) error
+	SaveMatchPlayers(ctx context.Context, matchGUID string, players []*storage.MatchPlayerRecord) error
+	GetAuthState(ctx context.Context, provider string) (refreshToken, accountID, displayName string, err error)
 }
 
 // MatchHistoryProvider defines the match query contract for PsyNet or mock providers.
@@ -77,4 +88,10 @@ type ReplayDownloader interface {
 // Satisfied by *ballchasing.Client.
 type ReplayUploader interface {
 	UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error)
+}
+
+// ReplayStatsFetcher defines the capability to retrieve detailed replay telemetry.
+// Satisfied by *ballchasing.Client.
+type ReplayStatsFetcher interface {
+	GetReplay(ctx context.Context, id string) (*ballchasing.ReplayItem, error)
 }

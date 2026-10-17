@@ -28,9 +28,30 @@ type EventData struct {
 
 // StatsGame holds global match parameters from UpdateState.
 type StatsGame struct {
-	PlaylistId  int  `json:"PlaylistId,omitempty"`
-	TimeSeconds int  `json:"TimeSeconds,omitempty"`
-	Overtime    bool `json:"bOvertime,omitempty"`
+	PlaylistId    int  `json:"PlaylistId,omitempty"`
+	TimeSeconds   int  `json:"TimeSeconds,omitempty"`
+	TimeRemaining int  `json:"time_remaining,omitempty"`
+	Overtime      bool `json:"bOvertime,omitempty"`
+	IsOvertime    bool `json:"is_overtime,omitempty"`
+}
+
+// GetTimeRemaining returns the match time remaining in seconds.
+func (g *StatsGame) GetTimeRemaining() int {
+	if g == nil {
+		return 0
+	}
+	if g.TimeRemaining != 0 {
+		return g.TimeRemaining
+	}
+	return g.TimeSeconds
+}
+
+// GetIsOvertime returns whether the match is in overtime.
+func (g *StatsGame) GetIsOvertime() bool {
+	if g == nil {
+		return false
+	}
+	return g.Overtime || g.IsOvertime
 }
 
 // StatsPlayer represents an individual player within the lobby.

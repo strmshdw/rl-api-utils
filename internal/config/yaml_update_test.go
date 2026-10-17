@@ -86,3 +86,61 @@ polling_auth:
 		t.Errorf("expected Polling comment preserved in YAML, got:\n%s", updatedStr)
 	}
 }
+
+func TestAtomicWriteFile_PermissionsAndAtomicity(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "subdir", "test-config.yaml")
+	data := []byte("hello: world\nnumber: 42\n")
+
+	if err := config.AtomicWriteFile(targetPath, data, 0600); err != nil {
+		t.Fatalf("AtomicWriteFile failed: %v", err)
+	}
+
+	readBack, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("failed to read back file: %v", err)
+	}
+	if string(readBack) != string(data) {
+		t.Errorf("expected content %q, got %q", string(data), string(readBack))
+	}
+
+	// Verify overwrite
+	newData := []byte("hello: updated\n")
+	if err := config.AtomicWriteFile(targetPath, newData, 0600); err != nil {
+		t.Fatalf("AtomicWriteFile overwrite failed: %v", err)
+	}
+	readBack2, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("failed to read back overwritten file: %v", err)
+	}
+	if string(readBack2) != string(newData) {
+		t.Errorf("expected overwritten content %q, got %q", string(newData), string(readBack2))
+	}
+}
+
+func TestConfig_SaveConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "saved-config.yaml")
+
+	cfg := config.NewDefaultConfig()
+	cfg.Auth.Provider = "epic"
+	cfg.Auth.Epic.RefreshToken = "test-refresh-token"
+	cfg.Ballchasing.APIKey = "test-ballchasing-key"
+	cfg.PlayerTracking.LocalPlayerID = "Steam|76561198000000001|0"
+
+	if err := cfg.SaveConfig(targetPath); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	loaded, err := config.Load(config.CLIFlags{ConfigPath: targetPath})
+	if err != nil {
+		t.Fatalf("Load of saved config failed: %v", err)
+	}
+	if loaded.Auth.Provider != "epic" {
+		t.Errorf("expected Auth.Provider 'epic', got %q", loaded.Auth.Provider)
+	}
+	if loaded.PlayerTracking.LocalPlayerID != "Steam|76561198000000001|0" {
+		t.Errorf("expected LocalPlayerID 'Steam|76561198000000001|0', got %q", loaded.PlayerTracking.LocalPlayerID)
+	}
+}
+

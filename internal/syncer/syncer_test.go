@@ -11,31 +11,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dank/rl-api-utils/internal/ballchasing"
 	"github.com/dank/rl-api-utils/internal/storage"
 )
 
 // --- Mock Implementations ---
 
 type mockStore struct {
-	mu                  sync.Mutex
-	matches             map[string]*storage.MatchRecord
-	recoverCalls        int
-	upsertCalls         int
-	listDlCalls         int
-	listUpCalls         int
-	markDlFailedCalls   int
-	markUpFailedCalls   int
-	failRecover         bool
-	failUpsert          bool
-	failListDl          bool
-	failListUp          bool
-	failMarkDownloading bool
-	failMarkUploading   bool
+	mu                   sync.Mutex
+	matches              map[string]*storage.MatchRecord
+	recoverCalls         int
+	upsertCalls          int
+	listDlCalls          int
+	listUpCalls          int
+	listStatsCalls       int
+	markDlFailedCalls    int
+	markUpFailedCalls    int
+	markStatsFailedCalls int
+	failRecover          bool
+	failUpsert           bool
+	failListDl           bool
+	failListUp           bool
+	failListStats        bool
+	failMarkDownloading  bool
+	failMarkUploading    bool
+	recordedOutcomes     map[string][]storage.PlayerOutcome
+	matchTimes           map[string]time.Time
+	savedPlayers         map[string][]*storage.MatchPlayerRecord
+	authStates           map[string]struct{ token, accountID, displayName string }
+	syncedStats          map[string]*storage.ReplayMatchStats
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		matches: make(map[string]*storage.MatchRecord),
+		matches:          make(map[string]*storage.MatchRecord),
+		recordedOutcomes: make(map[string][]storage.PlayerOutcome),
+		matchTimes:       make(map[string]time.Time),
+		savedPlayers:     make(map[string][]*storage.MatchPlayerRecord),
+		authStates:       make(map[string]struct{ token, accountID, displayName string }),
+		syncedStats:      make(map[string]*storage.ReplayMatchStats),
 	}
 }
 
@@ -230,6 +244,10 @@ func (m *mockStore) RecoverInFlight(ctx context.Context) error {
 			rec.UploadStatus = storage.UploadPending
 			rec.UpdatedAt = now
 		}
+		if rec.StatsSyncStatus == storage.StatsSyncSyncing {
+			rec.StatsSyncStatus = storage.StatsSyncPending
+			rec.UpdatedAt = now
+		}
 	}
 	return nil
 }
@@ -237,7 +255,129 @@ func (m *mockStore) RecoverInFlight(ctx context.Context) error {
 func (m *mockStore) SyncReplayStats(ctx context.Context, stats *storage.ReplayMatchStats) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.syncedStats == nil {
+		m.syncedStats = make(map[string]*storage.ReplayMatchStats)
+	}
+	m.syncedStats[stats.MatchGUID] = stats
 	return nil
+}
+
+func (m *mockStore) ListPendingStatsSync(ctx context.Context, maxRetries int) ([]*storage.MatchRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listStatsCalls++
+	if m.failListStats {
+		return nil, errors.New("mock list stats error")
+	}
+	var res []*storage.MatchRecord
+	for _, rec := range m.matches {
+		isUploadedOrDup := rec.UploadStatus == storage.UploadUploaded || rec.UploadStatus == storage.UploadDuplicate
+		isPendingOrRetryable := rec.StatsSyncStatus == storage.StatsSyncPending ||
+			(rec.StatsSyncStatus == storage.StatsSyncFailed && rec.StatsRetryCount < maxRetries)
+		if isUploadedOrDup && rec.BallchasingID != "" && isPendingOrRetryable {
+			cp := *rec
+			res = append(res, &cp)
+		}
+	}
+	return res, nil
+}
+
+func (m *mockStore) MarkStatsSyncing(ctx context.Context, matchGUID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rec, ok := m.matches[matchGUID]; ok {
+		rec.StatsSyncStatus = storage.StatsSyncSyncing
+		rec.UpdatedAt = time.Now()
+		return nil
+	}
+	return storage.ErrMatchNotFound
+}
+
+func (m *mockStore) MarkStatsSynced(ctx context.Context, matchGUID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rec, ok := m.matches[matchGUID]; ok {
+		rec.StatsSyncStatus = storage.StatsSyncSynced
+		rec.UpdatedAt = time.Now()
+		return nil
+	}
+	return storage.ErrMatchNotFound
+}
+
+func (m *mockStore) MarkStatsSyncFailed(ctx context.Context, matchGUID, errMsg string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.markStatsFailedCalls++
+	if rec, ok := m.matches[matchGUID]; ok {
+		rec.StatsSyncStatus = storage.StatsSyncFailed
+		rec.LastError = errMsg
+		rec.StatsRetryCount++
+		rec.UpdatedAt = time.Now()
+		return nil
+	}
+	return storage.ErrMatchNotFound
+}
+
+func (m *mockStore) ResetMatchRetry(ctx context.Context, matchGUID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rec, ok := m.matches[matchGUID]; ok {
+		rec.RetryCount = 0
+		rec.StatsRetryCount = 0
+		if rec.DownloadStatus == storage.DownloadFailed {
+			rec.DownloadStatus = storage.DownloadPending
+		}
+		if rec.UploadStatus == storage.UploadFailed {
+			rec.UploadStatus = storage.UploadPending
+		}
+		if rec.StatsSyncStatus == storage.StatsSyncFailed || rec.StatsSyncStatus == storage.StatsSyncSyncing {
+			rec.StatsSyncStatus = storage.StatsSyncPending
+		}
+		rec.LastError = ""
+		rec.UpdatedAt = time.Now()
+		return nil
+	}
+	return storage.ErrMatchNotFound
+}
+
+func (m *mockStore) RecordMatchResults(ctx context.Context, matchGUID string, playlistID int, outcomes []storage.PlayerOutcome, matchTime ...time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.recordedOutcomes == nil {
+		m.recordedOutcomes = make(map[string][]storage.PlayerOutcome)
+	}
+	if _, ok := m.recordedOutcomes[matchGUID]; ok {
+		return storage.ErrMatchAlreadyProcessed
+	}
+	m.recordedOutcomes[matchGUID] = outcomes
+	if len(matchTime) > 0 {
+		if m.matchTimes == nil {
+			m.matchTimes = make(map[string]time.Time)
+		}
+		m.matchTimes[matchGUID] = matchTime[0]
+	}
+	return nil
+}
+
+func (m *mockStore) SaveMatchPlayers(ctx context.Context, matchGUID string, players []*storage.MatchPlayerRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.savedPlayers == nil {
+		m.savedPlayers = make(map[string][]*storage.MatchPlayerRecord)
+	}
+	m.savedPlayers[matchGUID] = players
+	return nil
+}
+
+func (m *mockStore) GetAuthState(ctx context.Context, provider string) (refreshToken, accountID, displayName string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.authStates != nil {
+		if st, ok := m.authStates[provider]; ok {
+			return st.token, st.accountID, st.displayName, nil
+		}
+	}
+	return "", "", "", nil
 }
 
 type mockHistoryProvider struct {
@@ -370,6 +510,34 @@ func (u *mockUploader) UploadReplay(ctx context.Context, matchGUID, filePath str
 		Location:    fmt.Sprintf("https://ballchasing.com/replay/bc-%s", matchGUID),
 		IsDuplicate: isDup,
 	}, nil
+}
+
+type mockStatsFetcher struct {
+	mu        sync.Mutex
+	replays   map[string]*ballchasing.ReplayItem
+	failForID map[string]error
+	calls     map[string]int
+}
+
+func newMockStatsFetcher() *mockStatsFetcher {
+	return &mockStatsFetcher{
+		replays:   make(map[string]*ballchasing.ReplayItem),
+		failForID: make(map[string]error),
+		calls:     make(map[string]int),
+	}
+}
+
+func (f *mockStatsFetcher) GetReplay(ctx context.Context, id string) (*ballchasing.ReplayItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls[id]++
+	if err, ok := f.failForID[id]; ok {
+		return nil, err
+	}
+	if item, ok := f.replays[id]; ok {
+		return item, nil
+	}
+	return nil, errors.New("mock replay not found")
 }
 
 // --- Unit Tests ---
@@ -815,5 +983,483 @@ func TestSyncer_StoreErrors(t *testing.T) {
 	_, err = s.RunCycle(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "list pending uploads failed") {
 		t.Fatalf("expected list uploads failure, got: %v", err)
+	}
+}
+
+func TestSyncer_PostUploadStatsPolling_Success(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStore()
+	store.matches["m101"] = &storage.MatchRecord{
+		MatchGUID:       "m101",
+		Playlist:        11,
+		UploadStatus:    storage.UploadUploaded,
+		BallchasingID:   "bc-101",
+		BallchasingURL:  "https://ballchasing.com/replay/bc-101",
+		StatsSyncStatus: storage.StatsSyncPending,
+	}
+
+	fetcher := newMockStatsFetcher()
+	fetcher.replays["bc-101"] = &ballchasing.ReplayItem{
+		ID:         "bc-101",
+		Status:     "ok",
+		PlaylistID: "ranked-doubles",
+		Duration:   300,
+		Overtime:   false,
+		Date:       "2026-10-16T18:00:00Z",
+		Blue: ballchasing.ReplayTeam{
+			Goals: 3,
+			Players: []ballchasing.ReplayPlayer{
+				{
+					Name: "LocalHero",
+					ID:   ballchasing.PlayerIdentity{Platform: "epic", ID: "epic-hero-id"},
+					Score: 500, Goals: 2, Assists: 1, Saves: 1, Shots: 4,
+					Demos: ballchasing.PlayerDemos{Inflicted: 1},
+				},
+				{
+					Name: "Teammate1",
+					ID:   ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000002"},
+					Score: 350, Goals: 1, Assists: 2, Saves: 2, Shots: 2,
+					Demos: ballchasing.PlayerDemos{Inflicted: 0},
+				},
+			},
+		},
+		Orange: ballchasing.ReplayTeam{
+			Goals: 1,
+			Players: []ballchasing.ReplayPlayer{
+				{
+					Name: "Opponent1",
+					ID:   ballchasing.PlayerIdentity{Platform: "steam", ID: "76561198000000003"},
+					Score: 400, Goals: 1, Assists: 0, Saves: 3, Shots: 3,
+					Demos: ballchasing.PlayerDemos{Inflicted: 2},
+				},
+				{
+					Name: "Opponent2",
+					ID:   ballchasing.PlayerIdentity{Platform: "xbox", ID: "xbox-opp-id"},
+					Score: 250, Goals: 0, Assists: 1, Saves: 1, Shots: 1,
+					Demos: ballchasing.PlayerDemos{Inflicted: 0},
+				},
+			},
+		},
+	}
+
+	provider := newMockHistoryProvider()
+	downloader := newMockDownloader()
+	uploader := newMockUploader()
+
+	s, err := New(store, provider, downloader, uploader,
+		WithStatsFetcher(fetcher),
+		WithLocalPlayerName("LocalHero"),
+		WithRateInterval(0),
+	)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	stats, err := s.RunCycle(ctx)
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+	if stats == nil {
+		t.Fatalf("expected stats return")
+	}
+
+	rec := store.matches["m101"]
+	if rec.StatsSyncStatus != storage.StatsSyncSynced {
+		t.Errorf("expected StatsSyncSynced, got %v", rec.StatsSyncStatus)
+	}
+
+	// Verify synced stats
+	st, ok := store.syncedStats["m101"]
+	if !ok {
+		t.Fatalf("expected syncedStats for m101")
+	}
+	if st.BlueScore != 3 || st.OrangeScore != 1 || *st.WinnerTeam != 0 {
+		t.Errorf("unexpected scores: %+v", st)
+	}
+
+	// Verify saved players
+	players, ok := store.savedPlayers["m101"]
+	if !ok || len(players) != 4 {
+		t.Fatalf("expected 4 saved players, got %d", len(players))
+	}
+
+	var localPlayerFound bool
+	for _, p := range players {
+		if p.IsLocal {
+			localPlayerFound = true
+			if p.Won == nil || !*p.Won {
+				t.Errorf("expected local player won=true")
+			}
+			if p.Goals != 2 || p.Demos != 1 {
+				t.Errorf("unexpected stats for local player: %+v", p)
+			}
+		}
+	}
+	if !localPlayerFound {
+		t.Errorf("expected local player to be flagged in saved players")
+	}
+
+	// Verify recorded outcomes
+	outcomes, ok := store.recordedOutcomes["m101"]
+	if !ok || len(outcomes) != 3 {
+		t.Fatalf("expected 3 recorded outcomes (excluding local), got %d", len(outcomes))
+	}
+
+	matchTime, ok := store.matchTimes["m101"]
+	if !ok {
+		t.Fatalf("expected matchTime to be preserved")
+	}
+	expectedTime, _ := storage.ParseReplayDate("2026-10-16T18:00:00Z")
+	if !matchTime.Equal(expectedTime) {
+		t.Errorf("expected matchTime %v, got %v", expectedTime, matchTime)
+	}
+}
+
+func TestSyncer_PostUploadStatsPolling_Duplicate(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStore()
+	store.matches["m-dup"] = &storage.MatchRecord{
+		MatchGUID:       "m-dup",
+		Playlist:        11,
+		UploadStatus:    storage.UploadDuplicate,
+		BallchasingID:   "bc-dup",
+		BallchasingURL:  "https://ballchasing.com/replay/bc-dup",
+		StatsSyncStatus: storage.StatsSyncPending,
+	}
+
+	fetcher := newMockStatsFetcher()
+	fetcher.replays["bc-dup"] = &ballchasing.ReplayItem{
+		ID:     "bc-dup",
+		Status: "ok",
+		Date:   "2026-10-16T17:00:00Z",
+		Blue: ballchasing.ReplayTeam{
+			Goals: 1,
+			Players: []ballchasing.ReplayPlayer{
+				{Name: "P1", ID: ballchasing.PlayerIdentity{Platform: "epic", ID: "id1"}},
+			},
+		},
+		Orange: ballchasing.ReplayTeam{
+			Goals: 0,
+			Players: []ballchasing.ReplayPlayer{
+				{Name: "P2", ID: ballchasing.PlayerIdentity{Platform: "steam", ID: "id2"}},
+			},
+		},
+	}
+
+	s, err := New(store, newMockHistoryProvider(), newMockDownloader(), newMockUploader(),
+		WithStatsFetcher(fetcher),
+		WithRateInterval(0),
+	)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	_, err = s.RunCycle(ctx)
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	rec := store.matches["m-dup"]
+	if rec.StatsSyncStatus != storage.StatsSyncSynced {
+		t.Errorf("expected duplicate replay to transition to StatsSyncSynced, got %v", rec.StatsSyncStatus)
+	}
+}
+
+func TestSyncer_PostUploadStatsPolling_StatusPending(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStore()
+	store.matches["m-pend"] = &storage.MatchRecord{
+		MatchGUID:       "m-pend",
+		Playlist:        11,
+		UploadStatus:    storage.UploadUploaded,
+		BallchasingID:   "bc-pend",
+		BallchasingURL:  "https://ballchasing.com/replay/bc-pend",
+		StatsSyncStatus: storage.StatsSyncPending,
+	}
+
+	fetcher := newMockStatsFetcher()
+	fetcher.replays["bc-pend"] = &ballchasing.ReplayItem{
+		ID:     "bc-pend",
+		Status: "pending",
+	}
+
+	s, _ := New(store, newMockHistoryProvider(), newMockDownloader(), newMockUploader(),
+		WithStatsFetcher(fetcher),
+		WithRateInterval(0),
+	)
+
+	// Cycle 1: Ballchasing status is pending
+	_, err := s.RunCycle(ctx)
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	rec := store.matches["m-pend"]
+	if rec.StatsSyncStatus != storage.StatsSyncPending {
+		t.Errorf("expected match to remain StatsSyncPending, got %v", rec.StatsSyncStatus)
+	}
+	if rec.StatsRetryCount != 0 {
+		t.Errorf("expected stats retry count 0 for pending status, got %d", rec.StatsRetryCount)
+	}
+
+	// Cycle 2: Ballchasing status is now ok
+	fetcher.replays["bc-pend"].Status = "ok"
+	_, err = s.RunCycle(ctx)
+	if err != nil {
+		t.Fatalf("RunCycle cycle 2 failed: %v", err)
+	}
+
+	rec = store.matches["m-pend"]
+	if rec.StatsSyncStatus != storage.StatsSyncSynced {
+		t.Errorf("expected match to transition to StatsSyncSynced, got %v", rec.StatsSyncStatus)
+	}
+}
+
+func TestSyncer_PostUploadStatsPolling_StatusFailed(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStore()
+	store.matches["m-fail"] = &storage.MatchRecord{
+		MatchGUID:       "m-fail",
+		Playlist:        11,
+		UploadStatus:    storage.UploadUploaded,
+		BallchasingID:   "bc-fail",
+		BallchasingURL:  "https://ballchasing.com/replay/bc-fail",
+		StatsSyncStatus: storage.StatsSyncPending,
+	}
+
+	fetcher := newMockStatsFetcher()
+	fetcher.replays["bc-fail"] = &ballchasing.ReplayItem{
+		ID:     "bc-fail",
+		Status: "failed",
+	}
+
+	s, _ := New(store, newMockHistoryProvider(), newMockDownloader(), newMockUploader(),
+		WithStatsFetcher(fetcher),
+		WithRateInterval(0),
+	)
+
+	_, err := s.RunCycle(ctx)
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	rec := store.matches["m-fail"]
+	if rec.StatsSyncStatus != storage.StatsSyncFailed {
+		t.Errorf("expected StatsSyncFailed, got %v", rec.StatsSyncStatus)
+	}
+	if rec.StatsRetryCount != 1 {
+		t.Errorf("expected StatsRetryCount=1, got %d", rec.StatsRetryCount)
+	}
+}
+
+func TestSyncer_PostUploadStatsPolling_RetryBounded(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStore()
+	store.matches["m-err"] = &storage.MatchRecord{
+		MatchGUID:       "m-err",
+		Playlist:        11,
+		UploadStatus:    storage.UploadUploaded,
+		BallchasingID:   "bc-err",
+		StatsSyncStatus: storage.StatsSyncPending,
+	}
+
+	fetcher := newMockStatsFetcher()
+	fetcher.failForID["bc-err"] = errors.New("500 internal server error")
+
+	s, _ := New(store, newMockHistoryProvider(), newMockDownloader(), newMockUploader(),
+		WithStatsFetcher(fetcher),
+		WithMaxRetries(2),
+		WithRateInterval(0),
+	)
+
+	// Attempt 1: fails
+	_, _ = s.RunCycle(ctx)
+	rec := store.matches["m-err"]
+	if rec.StatsSyncStatus != storage.StatsSyncFailed || rec.StatsRetryCount != 1 {
+		t.Fatalf("expected StatsSyncFailed with count 1, got status %v, count %d", rec.StatsSyncStatus, rec.StatsRetryCount)
+	}
+
+	// Attempt 2: still retryable (< 2)
+	_, _ = s.RunCycle(ctx)
+	if rec.StatsRetryCount != 2 {
+		t.Fatalf("expected StatsRetryCount=2, got %d", rec.StatsRetryCount)
+	}
+
+	// Attempt 3: reached maxRetries (2), should be excluded from ListPendingStatsSync
+	callsBefore := fetcher.calls["bc-err"]
+	_, _ = s.RunCycle(ctx)
+	if fetcher.calls["bc-err"] != callsBefore {
+		t.Errorf("expected no additional calls after reaching maxRetries")
+	}
+}
+
+func TestSyncer_PostUploadStatsPolling_InFlightRecovery(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStore()
+	store.matches["m-recov"] = &storage.MatchRecord{
+		MatchGUID:       "m-recov",
+		Playlist:        11,
+		UploadStatus:    storage.UploadUploaded,
+		BallchasingID:   "bc-recov",
+		StatsSyncStatus: storage.StatsSyncSyncing, // left in-flight by crash
+	}
+
+	fetcher := newMockStatsFetcher()
+	fetcher.replays["bc-recov"] = &ballchasing.ReplayItem{
+		ID:     "bc-recov",
+		Status: "ok",
+		Date:   "2026-10-16T18:00:00Z",
+	}
+
+	s, _ := New(store, newMockHistoryProvider(), newMockDownloader(), newMockUploader(),
+		WithStatsFetcher(fetcher),
+		WithRateInterval(0),
+	)
+
+	_, err := s.RunCycle(ctx)
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	rec := store.matches["m-recov"]
+	if rec.StatsSyncStatus != storage.StatsSyncSynced {
+		t.Errorf("expected recovered in-flight record to transition to StatsSyncSynced, got %v", rec.StatsSyncStatus)
+	}
+}
+
+func TestSyncer_ResolveLocalPlayer_AllTiers(t *testing.T) {
+	roster := []ReplayPlayerCandidate{
+		{Name: "PlayerTier1", Platform: "Epic", OnlineID: "epic-p1", CanonicalID: "Epic|epic-p1|0", Team: 0},
+		{Name: "PlayerTier2", Platform: "Steam", OnlineID: "76561198000000002", CanonicalID: "Steam|76561198000000002|0", Team: 1},
+		{Name: "PlayerTier3", Platform: "Steam", OnlineID: "76561198000000003", CanonicalID: "Steam|76561198000000003|0", Team: 0},
+		{Name: "PlayerTier4", Platform: "Xbox", OnlineID: "xbox-p4", CanonicalID: "Xbox|xbox-p4|0", Team: 1},
+		{Name: "PlayerTier5", Platform: "PlayStation", OnlineID: "ps-p5", CanonicalID: "PlayStation|ps-p5|0", Team: 0},
+		{Name: "PlayerTier6", Platform: "Switch", OnlineID: "sw-p6", CanonicalID: "Switch|sw-p6|0", Team: 1},
+	}
+
+	// Tier 1: Config LocalPlayerID
+	idx, team, found := ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		ConfigLocalPlayerID: "Epic|epic-p1|0",
+	})
+	if !found || idx != 0 || *team != 0 {
+		t.Errorf("Tier 1 resolution failed: idx=%d, team=%v, found=%v", idx, team, found)
+	}
+
+	// Tier 2: Auth Primary Account ID
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		AuthAccountID: "76561198000000002",
+	})
+	if !found || idx != 1 || *team != 1 {
+		t.Errorf("Tier 2 resolution failed: idx=%d, team=%v, found=%v", idx, team, found)
+	}
+
+	// Tier 3: Ping / Uploader SteamID
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		PingSteamID: "76561198000000003",
+	})
+	if !found || idx != 2 || *team != 0 {
+		t.Errorf("Tier 3 resolution failed: idx=%d, team=%v, found=%v", idx, team, found)
+	}
+
+	// Tier 4: Config LocalPlayerName
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		ConfigLocalPlayerName: "PlayerTier4",
+	})
+	if !found || idx != 3 || *team != 1 {
+		t.Errorf("Tier 4 resolution failed: idx=%d, team=%v, found=%v", idx, team, found)
+	}
+
+	// Tier 5: Auth Display Name
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		AuthDisplayName: "PlayerTier5",
+	})
+	if !found || idx != 4 || *team != 0 {
+		t.Errorf("Tier 5 resolution failed: idx=%d, team=%v, found=%v", idx, team, found)
+	}
+
+	// Tier 6: Replay Header PlayerName
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		ReplayPlayerName: "PlayerTier6",
+	})
+	if !found || idx != 5 || *team != 1 {
+		t.Errorf("Tier 6 resolution failed: idx=%d, team=%v, found=%v", idx, team, found)
+	}
+
+	// Tier 6 Fallback: ReplayLocalTeam known without player
+	localTeamNum := 0
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		ReplayLocalTeam: &localTeamNum,
+	})
+	if !found || idx != -1 || *team != 0 {
+		t.Errorf("Tier 6 team fallback failed: idx=%d, team=%v, found=%v", idx, team, found)
+	}
+
+	// No match
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		ConfigLocalPlayerName: "NoSuchPlayer",
+	})
+	if found || idx != -1 || team != nil {
+		t.Errorf("expected no match, got idx=%d, team=%v, found=%v", idx, team, found)
+	}
+}
+
+func TestSyncer_ResolveLocalPlayer_BotImmunity(t *testing.T) {
+	roster := []ReplayPlayerCandidate{
+		{Name: "Saltie", Platform: "Unknown", OnlineID: "bot-1", CanonicalID: "bot-1", Team: 0, IsBot: true},
+		{Name: "RealPlayer", Platform: "Epic", OnlineID: "real-id", CanonicalID: "Epic|real-id|0", Team: 1, IsBot: false},
+	}
+
+	// Config name conflicts with bot name
+	idx, team, found := ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		ConfigLocalPlayerName: "Saltie",
+	})
+	if found || idx != -1 || team != nil {
+		t.Errorf("bot immunity violated: bot was resolved as local player! idx=%d, team=%v", idx, team)
+	}
+
+	// Config ID conflicts with bot ID
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		ConfigLocalPlayerID: "bot-1",
+	})
+	if found || idx != -1 || team != nil {
+		t.Errorf("bot immunity violated for ID: bot was resolved as local player!")
+	}
+
+	// Real player match succeeds
+	idx, team, found = ResolveLocalPlayer(roster, LocalPlayerIdentity{
+		ConfigLocalPlayerName: "RealPlayer",
+	})
+	if !found || idx != 1 || *team != 1 {
+		t.Errorf("failed to resolve legitimate human player")
+	}
+}
+
+func TestSyncer_SyncDownloadedReplayStats_Idempotent(t *testing.T) {
+	files, err := filepath.Glob("../../replays/*.replay")
+	if err != nil || len(files) == 0 {
+		t.Skip("no replay files found")
+	}
+
+	store := newMockStore()
+	guid := "test-idempotent-guid"
+	store.matches[guid] = &storage.MatchRecord{
+		MatchGUID: guid,
+		Playlist:  11,
+	}
+
+	s, err := New(store, newMockHistoryProvider(), newMockDownloader(), newMockUploader())
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	ctx := context.Background()
+	// Call 1
+	if err := s.SyncDownloadedReplayStats(ctx, guid, files[0]); err != nil {
+		t.Fatalf("first call failed: %v", err)
+	}
+
+	// Call 2: RecordMatchResults will return ErrMatchAlreadyProcessed
+	if err := s.SyncDownloadedReplayStats(ctx, guid, files[0]); err != nil {
+		t.Fatalf("second call should ignore ErrMatchAlreadyProcessed, but failed with: %v", err)
 	}
 }

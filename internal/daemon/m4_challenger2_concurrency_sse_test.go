@@ -38,6 +38,7 @@ func TestChallenger2_SSE_50ConcurrentSubscribers_HalfAbruptSever_ZeroEventLossOn
 	defer masterCancel()
 
 	type clientHandle struct {
+		mu       sync.Mutex
 		cancel   context.CancelFunc
 		resp     *http.Response
 		received []int
@@ -67,7 +68,9 @@ func TestChallenger2_SSE_50ConcurrentSubscribers_HalfAbruptSever_ZeroEventLossOn
 			for attempt := 0; attempt < 5; attempt++ {
 				req, reqErr := http.NewRequestWithContext(clientCtx, http.MethodGet, server.URL+"/api/events", nil)
 				if reqErr != nil {
+					handle.mu.Lock()
 					handle.errs = append(handle.errs, reqErr)
+					handle.mu.Unlock()
 					return
 				}
 				resp, err = client.Do(req)
@@ -81,7 +84,9 @@ func TestChallenger2_SSE_50ConcurrentSubscribers_HalfAbruptSever_ZeroEventLossOn
 			}
 			if err != nil {
 				if clientCtx.Err() == nil {
+					handle.mu.Lock()
 					handle.errs = append(handle.errs, err)
+					handle.mu.Unlock()
 				}
 				return
 			}
@@ -105,7 +110,9 @@ func TestChallenger2_SSE_50ConcurrentSubscribers_HalfAbruptSever_ZeroEventLossOn
 					var payload map[string]interface{}
 					if err := json.Unmarshal([]byte(dataStr), &payload); err == nil {
 						if seqVal, ok := payload["seq"].(float64); ok {
+							handle.mu.Lock()
 							handle.received = append(handle.received, int(seqVal))
+							handle.mu.Unlock()
 						}
 					}
 					currentEvent = ""
@@ -126,8 +133,12 @@ func TestChallenger2_SSE_50ConcurrentSubscribers_HalfAbruptSever_ZeroEventLossOn
 	if count := st.Broadcaster().SubscriberCount(); count != numSubscribers {
 		// Inspect any client errors
 		for idx, h := range clients {
-			if len(h.errs) > 0 {
-				t.Logf("client %d encountered error: %v", idx, h.errs)
+			h.mu.Lock()
+			errCount := len(h.errs)
+			errsCopy := append([]error(nil), h.errs...)
+			h.mu.Unlock()
+			if errCount > 0 {
+				t.Logf("client %d encountered error: %v", idx, errsCopy)
 			}
 		}
 		t.Fatalf("expected exactly %d active subscribers, got %d", numSubscribers, count)
@@ -167,12 +178,15 @@ func TestChallenger2_SSE_50ConcurrentSubscribers_HalfAbruptSever_ZeroEventLossOn
 	// Verify the 25 surviving subscribers (indices 25..49)
 	for i := 25; i < numSubscribers; i++ {
 		h := clients[i]
-		if len(h.received) != numEvents {
-			t.Errorf("surviving client %d received %d events, expected exactly %d", i, len(h.received), numEvents)
+		h.mu.Lock()
+		rec := append([]int(nil), h.received...)
+		h.mu.Unlock()
+		if len(rec) != numEvents {
+			t.Errorf("surviving client %d received %d events, expected exactly %d", i, len(rec), numEvents)
 			continue
 		}
 		// Check strict sequence ordering and zero drops
-		for expectedSeq, actualSeq := range h.received {
+		for expectedSeq, actualSeq := range rec {
 			if actualSeq != expectedSeq {
 				t.Errorf("surviving client %d event mismatch at idx %d: got seq %d, expected %d",
 					i, expectedSeq, actualSeq, expectedSeq)

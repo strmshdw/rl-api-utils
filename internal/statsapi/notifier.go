@@ -30,6 +30,29 @@ func NewWindowsToastNotifier(logger *slog.Logger) *WindowsToastNotifier {
 	return &WindowsToastNotifier{logger: logger}
 }
 
+// escapeXML replaces XML special characters with predefined entity references.
+func escapeXML(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '&':
+			b.WriteString("&amp;")
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '"':
+			b.WriteString("&quot;")
+		case '\'':
+			b.WriteString("&apos;")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // ShowToast displays a native Windows desktop notification.
 func (n *WindowsToastNotifier) ShowToast(ctx context.Context, title, message string) error {
 	n.mu.Lock()
@@ -46,24 +69,26 @@ func (n *WindowsToastNotifier) ShowToast(ctx context.Context, title, message str
 		return nil
 	}
 
-	// Escape single quotes for PowerShell script
-	safeTitle := strings.ReplaceAll(title, "'", "''")
-	safeMessage := strings.ReplaceAll(message, "'", "''")
+	xmlPayload := fmt.Sprintf("<toast><visual><binding template='ToastGeneric'><text>%s</text><text>%s</text></binding></visual></toast>",
+		escapeXML(title),
+		escapeXML(message),
+	)
 
-	script := fmt.Sprintf(`
+	const staticToastScript = `
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-$xml = "<toast><visual><binding template='ToastGeneric'><text>%s</text><text>%s</text></binding></visual></toast>"
+$xml = $env:RL_SYNC_TOAST_XML
 $xmlDoc = [Windows.Data.Xml.Dom.XmlDocument]::new()
 $xmlDoc.LoadXml($xml)
 $toast = [Windows.UI.Notifications.ToastNotification]::new($xmlDoc)
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe").Show($toast)
-`, safeTitle, safeMessage)
+`
 
 	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", staticToastScript)
+	cmd.Env = append(cmd.Environ(), "RL_SYNC_TOAST_XML="+xmlPayload)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		n.logger.Warn("failed to show Windows toast notification",
 			slog.Any("error", err),

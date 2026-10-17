@@ -6,3 +6,10 @@ replays
 *.db-shm
 *.db-wal
 *.db-journal
+
+# Binaries and build artifacts
+*.exe
+*.exe~
+rl-sync
+dist/
+web/dist/

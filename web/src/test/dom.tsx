@@ -5,6 +5,19 @@ import { createRoot, Root } from 'react-dom/client';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = typeof input === 'string' ? input : input.toString();
+  if (url.includes('/api/mmr-history')) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ playlist_id: 0, history: [], total: 0 }),
+    } as Response;
+  }
+  return originalFetch ? originalFetch(input, init) : ({ ok: true, json: async () => ({}) } as Response);
+};
+
 export interface Mounted {
   container: HTMLDivElement;
   rerender: (ui: React.ReactElement) => Promise<void>;
@@ -58,5 +71,10 @@ export async function flush(ms = 0) {
 }
 
 export function setSearch(query: string) {
-  window.history.replaceState(null, '', `/${query}`);
+  if (!query) {
+    window.history.replaceState(null, '', '/');
+    return;
+  }
+  const search = query.startsWith('?') ? query : `?${query}`;
+  window.history.replaceState(null, '', `/${search}`);
 }

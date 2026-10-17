@@ -36,10 +36,12 @@ const byScore = (a: LobbyPlayer, b: LobbyPlayer) => (b.stats?.score || 0) - (a.s
 export const LiveGameView: React.FC<LiveGameViewProps> = ({ match, session, connection, columnsOpen, onCloseColumns, onShowSession }) => {
   const { config, toggleColumn, applyPreset, resetToDefault, activePreset } = useColumnConfig();
 
-  const lobby = useMemo(() => (match?.active_match ? lobbyPlayers(match) : []), [match]);
+  // Allow rendering if match is active OR match has ended, preventing sudden screen wipe to IdleStateView
+  const isDisplayable = !!match && (match.active_match || match.match_ended);
+  const lobby = useMemo(() => (isDisplayable && match ? lobbyPlayers(match) : []), [isDisplayable, match]);
   const leaders = useMemo(() => statLeaders(lobby), [lobby]);
 
-  if (!match || !match.active_match) {
+  if (!isDisplayable || !match) {
     return <IdleStateView session={session} connection={connection} onShowSession={onShowSession} />;
   }
 
@@ -50,6 +52,33 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({ match, session, conn
 
   return (
     <div data-testid="live-match">
+      {match.match_ended && (
+        <div data-testid="match-ended-banner" className="mb-4 bg-panel border-l-4 border-blue-ink px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3 font-display">
+            <span className="font-extrabold text-[15px] tracking-wider text-ink uppercase">
+              MATCH CONCLUDED · FINAL BOX SCORE
+            </span>
+            {match.result === 'victory' && (
+              <span className="bg-win/20 text-win border border-win/30 text-[12px] font-bold px-2 py-0.5 rounded tracking-wider uppercase">
+                VICTORY
+              </span>
+            )}
+            {match.result === 'defeat' && (
+              <span className="bg-loss/20 text-loss border border-loss/30 text-[12px] font-bold px-2 py-0.5 rounded tracking-wider uppercase">
+                DEFEAT
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onShowSession}
+            className="text-muted hover:text-ink text-[12px] font-bold tracking-wider uppercase transition-colors"
+          >
+            VIEW SESSION →
+          </button>
+        </div>
+      )}
+
       <Scorebug match={match} bluePlayers={teams[0]} orangePlayers={teams[1]} localTeam={localTeam} />
 
       <div className="grid grid-cols-2 gap-7">

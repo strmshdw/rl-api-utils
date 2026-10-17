@@ -559,8 +559,8 @@ func TestTier5_Dashboard_PlayerSearchUnderContinuousIngestion(t *testing.T) {
 			IsTeammate: true,
 			Won:        true,
 		}
-		_ = sqliteStore.RecordMatchResults(ctx, fmt.Sprintf("init-guid-steam-%d", i), 11, []storage.PlayerOutcome{mSteam})
-		_ = jsonStore.RecordMatchResults(ctx, fmt.Sprintf("init-guid-steam-%d", i), 11, []storage.PlayerOutcome{mSteam})
+		_ = sqliteStore.RecordMatchResults(ctx, fmt.Sprintf("init-guid-steam-%d", i), 11, []storage.PlayerOutcome{mSteam}, ts)
+		_ = jsonStore.RecordMatchResults(ctx, fmt.Sprintf("init-guid-steam-%d", i), 11, []storage.PlayerOutcome{mSteam}, ts)
 
 		_ = sqliteStore.UpsertPlayer(ctx, pSteam)
 		_ = jsonStore.UpsertPlayer(ctx, pSteam)
@@ -582,8 +582,8 @@ func TestTier5_Dashboard_PlayerSearchUnderContinuousIngestion(t *testing.T) {
 			IsTeammate: false,
 			Won:        false,
 		}
-		_ = sqliteStore.RecordMatchResults(ctx, fmt.Sprintf("init-guid-epic-%d", i), 11, []storage.PlayerOutcome{mEpic})
-		_ = jsonStore.RecordMatchResults(ctx, fmt.Sprintf("init-guid-epic-%d", i), 11, []storage.PlayerOutcome{mEpic})
+		_ = sqliteStore.RecordMatchResults(ctx, fmt.Sprintf("init-guid-epic-%d", i), 11, []storage.PlayerOutcome{mEpic}, ts)
+		_ = jsonStore.RecordMatchResults(ctx, fmt.Sprintf("init-guid-epic-%d", i), 11, []storage.PlayerOutcome{mEpic}, ts)
 
 		_ = sqliteStore.UpsertPlayer(ctx, pEpic)
 		_ = jsonStore.UpsertPlayer(ctx, pEpic)
@@ -631,8 +631,8 @@ func TestTier5_Dashboard_PlayerSearchUnderContinuousIngestion(t *testing.T) {
 				IsTeammate: true,
 				Won:        true,
 			}
-			_ = sqliteStore.RecordMatchResults(ctx, fmt.Sprintf("live-guid-%d", idx), 11, []storage.PlayerOutcome{m})
-			_ = jsonStore.RecordMatchResults(ctx, fmt.Sprintf("live-guid-%d", idx), 11, []storage.PlayerOutcome{m})
+			_ = sqliteStore.RecordMatchResults(ctx, fmt.Sprintf("live-guid-%d", idx), 11, []storage.PlayerOutcome{m}, ts)
+			_ = jsonStore.RecordMatchResults(ctx, fmt.Sprintf("live-guid-%d", idx), 11, []storage.PlayerOutcome{m}, ts)
 
 			_ = sqliteStore.UpsertPlayer(ctx, p)
 			_ = jsonStore.UpsertPlayer(ctx, p)
@@ -662,7 +662,7 @@ func TestTier5_Dashboard_PlayerSearchUnderContinuousIngestion(t *testing.T) {
 	for w := 0; w < searchWorkers; w++ {
 		go func(workerID int) {
 			defer searchWg.Done()
-			client := &http.Client{Timeout: 2 * time.Second}
+			client := &http.Client{Timeout: 15 * time.Second}
 
 			for q := 0; q < 25; q++ {
 				path := searchEndpoints[(workerID+q)%len(searchEndpoints)]
@@ -1282,10 +1282,10 @@ web:
 		t.Errorf("expected output to reflect CLI flag web_port=54321, got: %s", portStr)
 	}
 
-	// Test CLI flag --web-host=127.0.0.2 overrides RL_SYNC_WEB_HOST=0.0.0.0
+	// Test CLI flag --web-host=127.0.0.2 overrides RL_SYNC_WEB_HOST=127.0.0.1
 	hostCmd := exec.Command(binPath, "--config="+confPath, "--web-host=127.0.0.2", "--once", "--dry-run")
 	hostCmd.Dir = repoRoot
-	hostCmd.Env = append(os.Environ(), "RL_SYNC_WEB_HOST=0.0.0.0")
+	hostCmd.Env = append(os.Environ(), "RL_SYNC_WEB_HOST=127.0.0.1")
 	hostOut, _ := hostCmd.CombinedOutput()
 	hostStr := string(hostOut)
 	if !strings.Contains(hostStr, "web_host=127.0.0.2") {

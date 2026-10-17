@@ -35,7 +35,7 @@ func setupWebTestDaemon(t *testing.T) (*daemon.Daemon, *session.SessionTracker, 
 
 	cfg := config.NewDefaultConfig()
 	cfg.Web.Enabled = true
-	cfg.Web.Host = "0.0.0.0"
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Web.Port = 49125
 	cfg.PlayerTracking.Enabled = true
 

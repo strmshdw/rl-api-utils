@@ -20,6 +20,7 @@ import { formatDuration } from '../../utils/formatters';
 import { TeamBoxScore, sessionMatchRows } from '../common/BoxScore';
 import { EmptyLine, GhostButton, SectionLabel, StatusDot } from '../common/ui';
 import { PlaylistRows, SessionKpiStrip } from '../session/SessionKpis';
+import { useMMRHistory } from '../../hooks/useMMRHistory';
 
 interface IdleStateViewProps {
   session: SessionResponse | null;
@@ -96,6 +97,7 @@ const LastMatch: React.FC<{ match: SessionMatchDetail; onShowSession: () => void
 };
 
 export const IdleStateView: React.FC<IdleStateViewProps> = ({ session, connection, onShowSession }) => {
+  const { byPlaylist: mmrByPlaylist } = useMMRHistory();
   const summary = useMemo(() => summarizeSession(session), [session]);
   const matches = chronological(session?.matches);
   const lastMatch = matches.length ? matches[matches.length - 1] : null;
@@ -135,7 +137,7 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({ session, connectio
           {playlists.length > 0 && (
             <div className="flex flex-col gap-3.5 min-w-0">
               <SectionLabel>PLAYLISTS</SectionLabel>
-              <PlaylistRows playlists={playlists} />
+              <PlaylistRows playlists={playlists} mmrHistory={mmrByPlaylist} />
             </div>
           )}
         </div>
