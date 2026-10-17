@@ -48,8 +48,8 @@ func TestConfig_Defaults(t *testing.T) {
 	if !cfg.Web.Enabled {
 		t.Errorf("expected default web enabled true")
 	}
-	if cfg.Web.Host != "0.0.0.0" {
-		t.Errorf("expected default web host '0.0.0.0', got %q", cfg.Web.Host)
+	if cfg.Web.Host != "127.0.0.1" {
+		t.Errorf("expected default web host '127.0.0.1', got %q", cfg.Web.Host)
 	}
 	if cfg.Web.Port != 49125 {
 		t.Errorf("expected default web port 49125, got %d", cfg.Web.Port)
@@ -1165,7 +1165,7 @@ func TestConfig_Web_Validation(t *testing.T) {
 		{
 			name:        "valid default config",
 			enabled:     true,
-			host:        "0.0.0.0",
+			host:        "127.0.0.1",
 			port:        49125,
 			expectValid: true,
 		},
@@ -1188,7 +1188,7 @@ func TestConfig_Web_Validation(t *testing.T) {
 		{
 			name:        "port zero when enabled",
 			enabled:     true,
-			host:        "0.0.0.0",
+			host:        "127.0.0.1",
 			port:        0,
 			expectValid: false,
 			errSubstr:   "web: 'port' must be between 1 and 65535",
@@ -1196,7 +1196,7 @@ func TestConfig_Web_Validation(t *testing.T) {
 		{
 			name:        "negative port when enabled",
 			enabled:     true,
-			host:        "0.0.0.0",
+			host:        "127.0.0.1",
 			port:        -1,
 			expectValid: false,
 			errSubstr:   "web: 'port' must be between 1 and 65535",
@@ -1204,7 +1204,7 @@ func TestConfig_Web_Validation(t *testing.T) {
 		{
 			name:        "port too high when enabled",
 			enabled:     true,
-			host:        "0.0.0.0",
+			host:        "127.0.0.1",
 			port:        65536,
 			expectValid: false,
 			errSubstr:   "web: 'port' must be between 1 and 65535",

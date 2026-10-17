@@ -18,6 +18,8 @@ const (
 	EventMatchUpdate EventType = "match_update"
 	// EventMatchEnded is emitted when a match concludes and final scores are recorded.
 	EventMatchEnded EventType = "match_ended"
+	// EventClockUpdated is emitted when live game clock or overtime status changes.
+	EventClockUpdated EventType = "clock_updated"
 	// EventSessionUpdate is emitted when session-level statistics or history update.
 	EventSessionUpdate EventType = "session_update"
 )
@@ -162,6 +164,7 @@ type SessionResponse struct {
 	Playlists    map[string]*PlaylistSessionStats `json:"playlists"`
 	Matches      []*SessionMatchDetail            `json:"matches"`
 	ActiveMatch  *playertrack.CurrentMatchResponse `json:"active_match,omitempty"`
+	LocalPlayerIDs []string                         `json:"local_player_ids,omitempty"`
 }
 
 // DeepClone creates a fully isolated copy of SessionResponse for thread-safe concurrent reads.
@@ -184,6 +187,10 @@ func (r *SessionResponse) DeepClone() *SessionResponse {
 	}
 	if r.ActiveMatch != nil {
 		clone.ActiveMatch = r.ActiveMatch.DeepClone()
+	}
+	if r.LocalPlayerIDs != nil {
+		clone.LocalPlayerIDs = make([]string, len(r.LocalPlayerIDs))
+		copy(clone.LocalPlayerIDs, r.LocalPlayerIDs)
 	}
 	return &clone
 }

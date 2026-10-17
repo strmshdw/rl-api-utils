@@ -129,33 +129,33 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	fs.SetOutput(io.Discard)
 
 	var (
-		configPath   string
-		configShort  string
-		once         bool
-		dryRun       bool
-		logLevel     string
-		logFormat    string
-		pollInterval time.Duration
-		replayDir    string
-		dbPath       string
-		provider              string
-		triggerThreshold      int
-		forceSyncOnTrigger    bool
-		statsAPIEnabled       bool
-		playerTrackingEnabled bool
-		localPlayerID         string
-		localPlayerName       string
-		autoFetchRanks        bool
-		pollingAuthEnabled    bool
-		pollingAuthProvider   string
-		webHost               string
-		webPort               int
-		webEnabled            bool
+		configPath             string
+		configShort            string
+		once                   bool
+		dryRun                 bool
+		logLevel               string
+		logFormat              string
+		pollInterval           time.Duration
+		replayDir              string
+		dbPath                 string
+		provider               string
+		triggerThreshold       int
+		forceSyncOnTrigger     bool
+		statsAPIEnabled        bool
+		playerTrackingEnabled  bool
+		localPlayerID          string
+		localPlayerName        string
+		autoFetchRanks         bool
+		pollingAuthEnabled     bool
+		pollingAuthProvider    string
+		webHost                string
+		webPort                int
+		webEnabled             bool
 		syncBallchasingHistory bool
-		showVersion           bool
-		showVersionV          bool
-		showHelp              bool
-		showHelpH             bool
+		showVersion            bool
+		showVersionV           bool
+		showHelp               bool
+		showHelpH              bool
 	)
 
 	fs.StringVar(&configPath, "config", "", "Path to configuration file (YAML or JSON)")
@@ -177,7 +177,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	fs.BoolVar(&autoFetchRanks, "auto-fetch-ranks", true, "Automatically fetch competitive ranks via secondary account")
 	fs.BoolVar(&pollingAuthEnabled, "polling-auth", false, "Enable secondary account authentication for rank retrieval")
 	fs.StringVar(&pollingAuthProvider, "polling-provider", "", "Authentication provider for secondary account ('epic' or 'steam')")
-	fs.StringVar(&webHost, "web-host", "", "HTTP host binding for web dashboard (default '0.0.0.0')")
+	fs.StringVar(&webHost, "web-host", "", "HTTP host binding for web dashboard (default '127.0.0.1')")
 	fs.IntVar(&webPort, "web-port", 0, "HTTP port binding for web dashboard (default 49125)")
 	fs.BoolVar(&webEnabled, "web-enabled", true, "Enable embedded web dashboard and API server")
 	fs.BoolVar(&syncBallchasingHistory, "sync-ballchasing-history", false, "Synchronize all historical replays and player stats from Ballchasing.com and exit")
@@ -375,7 +375,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		Visibility:   cfg.Ballchasing.Visibility,
 		MaxRetries:   cfg.Ballchasing.MaxRetries,
 		Timeout:      cfg.Ballchasing.Timeout.Duration(),
-		StreamUpload: false,
+		StreamUpload: true,
 	})
 	if err != nil {
 		logger.Error("failed to initialize ballchasing client", slog.Any("error", err))
@@ -579,12 +579,6 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	if err != nil {
 		logger.Error("failed to initialize daemon engine", slog.Any("error", err))
 		return 1
-	}
-
-	if cfg.Web.Enabled && !cfg.Sync.Once {
-		lanIP, _ := daemon.DiscoverLANIPv4()
-		banner := daemon.FormatStartupBanner(cfg.Web.Host, cfg.Web.Port, lanIP)
-		logger.Info(banner)
 	}
 
 	// 11. Run Daemon and await completion / OS signal trap

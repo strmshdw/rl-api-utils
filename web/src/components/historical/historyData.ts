@@ -46,16 +46,29 @@ export function replayStatus(m: HistoricalMatchRecord): ReplayStatus {
   return { label: 'NO REPLAY', ink: 'text-faint' };
 }
 
-export function teamRows(players: ReplayPlayerStats[], team: number, localIds: Set<string>): BoxScoreRow[] {
+export function teamRows(
+  players: ReplayPlayerStats[],
+  team: number,
+  localIds: Set<string>,
+  inspectedIdOrName?: string,
+): BoxScoreRow[] {
   return players
     .filter((p) => p.team === team)
     .sort((a, b) => b.score - a.score)
     .map((p, i) => {
       const you = isLocal(p, localIds);
+      const isInspected = Boolean(
+        inspectedIdOrName &&
+          !you &&
+          (p.online_id?.toLowerCase() === inspectedIdOrName.toLowerCase() ||
+            p.name?.toLowerCase() === inspectedIdOrName.toLowerCase()),
+      );
       return {
         key: `${p.online_id || p.name}-${i}`,
+        playerId: p.online_id,
         name: you ? 'You' : p.name,
         you,
+        inspected: isInspected,
         score: p.score,
         goals: p.goals,
         assists: p.assists,

@@ -16,12 +16,19 @@ import (
 	"github.com/dank/rlapi"
 )
 
-// Ensure Tracker satisfies statsapi.PlayerEventHandler at compile time.
-var _ statsapi.PlayerEventHandler = (*Tracker)(nil)
+// Ensure Tracker satisfies statsapi.PlayerEventHandler and statsapi.GameStateEventHandler at compile time.
+var (
+	_ statsapi.PlayerEventHandler    = (*Tracker)(nil)
+	_ statsapi.GameStateEventHandler = (*Tracker)(nil)
+)
 
 const (
 	defaultRankCacheTTL = 15 * time.Minute
 	defaultBackoffTTL   = 60 * time.Second
+
+	maxRankCacheEntries    = 1000
+	maxMatchupCacheEntries = 1000
+	maxFailBackoffEntries  = 500
 )
 
 // PlayerClassification designates a player's relationship to the local user.
@@ -92,19 +99,22 @@ type ResolvedPlayer struct {
 
 // CurrentMatchResponse defines the complete JSON payload returned by GET /current-match.
 type CurrentMatchResponse struct {
-	ActiveMatch  bool          `json:"active_match"`
-	MatchEnded   bool          `json:"match_ended"`
-	MatchGUID    string        `json:"match_guid"`
-	PlaylistID   int           `json:"playlist_id"`
-	PlaylistName string        `json:"playlist_name"`
-	LocalTeam    *int          `json:"local_team,omitempty"`   // 0 = Blue, 1 = Orange, nil if unresolved/spectator
-	LocalPlayer  *LobbyPlayer  `json:"local_player,omitempty"` // Dedicated reference to the local user
-	Teammates    []LobbyPlayer `json:"teammates"`              // Other players on local player's team
-	Opponents    []LobbyPlayer `json:"opponents"`              // Players on opposing team
-	Spectators   []LobbyPlayer `json:"spectators,omitempty"`   // Spectators / unassigned
-	WinnerTeam   *int          `json:"winner_team,omitempty"`  // Populated once match concludes
-	Result       string        `json:"result,omitempty"`       // "victory", "defeat", or "" if in progress
-	UpdatedAt    time.Time     `json:"updated_at"`
+	ActiveMatch    bool          `json:"active_match"`
+	MatchEnded     bool          `json:"match_ended"`
+	MatchGUID      string        `json:"match_guid"`
+	PlaylistID     int           `json:"playlist_id"`
+	PlaylistName   string        `json:"playlist_name"`
+	TimeRemaining  int           `json:"time_remaining"`             // Ingested match time remaining in seconds (SPEC-09)
+	IsOvertime     bool          `json:"is_overtime"`                 // True if match in overtime (SPEC-09)
+	LocalTeam      *int          `json:"local_team,omitempty"`       // 0 = Blue, 1 = Orange, nil if unresolved/spectator
+	LocalPlayer    *LobbyPlayer  `json:"local_player,omitempty"`     // Dedicated reference to the local user
+	LocalPlayerIDs []string      `json:"local_player_ids,omitempty"` // Authenticated/known local user IDs (SPEC-03)
+	Teammates      []LobbyPlayer `json:"teammates"`                  // Other players on local player's team
+	Opponents      []LobbyPlayer `json:"opponents"`                  // Players on opposing team
+	Spectators     []LobbyPlayer `json:"spectators,omitempty"`       // Spectators / unassigned
+	WinnerTeam     *int          `json:"winner_team,omitempty"`      // Populated once match concludes
+	Result         string        `json:"result,omitempty"`           // "victory", "defeat", or "" if in progress
+	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
 // DeepClone creates a completely isolated copy of CurrentMatchResponse for safe concurrent reads.
@@ -114,13 +124,15 @@ func (s *CurrentMatchResponse) DeepClone() *CurrentMatchResponse {
 	}
 
 	clone := &CurrentMatchResponse{
-		ActiveMatch:  s.ActiveMatch,
-		MatchEnded:   s.MatchEnded,
-		MatchGUID:    s.MatchGUID,
-		PlaylistID:   s.PlaylistID,
-		PlaylistName: s.PlaylistName,
-		Result:       s.Result,
-		UpdatedAt:    s.UpdatedAt,
+		ActiveMatch:   s.ActiveMatch,
+		MatchEnded:    s.MatchEnded,
+		MatchGUID:     s.MatchGUID,
+		PlaylistID:    s.PlaylistID,
+		PlaylistName:  s.PlaylistName,
+		TimeRemaining: s.TimeRemaining,
+		IsOvertime:    s.IsOvertime,
+		Result:        s.Result,
+		UpdatedAt:     s.UpdatedAt,
 	}
 
 	if s.LocalTeam != nil {
@@ -134,6 +146,9 @@ func (s *CurrentMatchResponse) DeepClone() *CurrentMatchResponse {
 	if s.LocalPlayer != nil {
 		lp := s.LocalPlayer.DeepClone()
 		clone.LocalPlayer = &lp
+	}
+	if len(s.LocalPlayerIDs) > 0 {
+		clone.LocalPlayerIDs = append([]string(nil), s.LocalPlayerIDs...)
 	}
 
 	clone.Teammates = make([]LobbyPlayer, len(s.Teammates))
@@ -300,19 +315,167 @@ func (t *Tracker) GetCurrentMatch() *CurrentMatchResponse {
 
 	if t.currentMatch == nil {
 		return &CurrentMatchResponse{
-			ActiveMatch: false,
-			Teammates:   make([]LobbyPlayer, 0),
-			Opponents:   make([]LobbyPlayer, 0),
-			Spectators:  make([]LobbyPlayer, 0),
-			UpdatedAt:   time.Now().UTC(),
+			ActiveMatch:    false,
+			LocalPlayerIDs: t.getLocalPlayerIDsLocked(),
+			Teammates:      make([]LobbyPlayer, 0),
+			Opponents:      make([]LobbyPlayer, 0),
+			Spectators:     make([]LobbyPlayer, 0),
+			UpdatedAt:      time.Now().UTC(),
 		}
 	}
 
-	return t.currentMatch.DeepClone()
+	clone := t.currentMatch.DeepClone()
+	if len(clone.LocalPlayerIDs) == 0 {
+		clone.LocalPlayerIDs = t.getLocalPlayerIDsLocked()
+	}
+	return clone
+}
+
+// InvalidateRankCache purges cached rank, in-flight, and failure backoff states.
+// If playerID is empty, all cached rank entries are flushed.
+func (t *Tracker) InvalidateRankCache(playerID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	pid := strings.TrimSpace(playerID)
+	if pid == "" {
+		t.rankCache = make(map[string]cachedRankEntry)
+		t.inFlight = make(map[string]time.Time)
+		t.failBackoff = make(map[string]time.Time)
+		return
+	}
+	delete(t.rankCache, pid)
+	delete(t.inFlight, pid)
+	delete(t.failBackoff, pid)
+}
+
+func (t *Tracker) boundRankCacheLocked() {
+	if len(t.rankCache) <= maxRankCacheEntries {
+		return
+	}
+	now := time.Now().UTC()
+	for k, entry := range t.rankCache {
+		if now.Sub(entry.fetchedAt) >= t.rankCacheTTL {
+			delete(t.rankCache, k)
+		}
+	}
+	for len(t.rankCache) > maxRankCacheEntries {
+		var oldestKey string
+		var oldestTime time.Time
+		for k, entry := range t.rankCache {
+			if oldestKey == "" || entry.fetchedAt.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = entry.fetchedAt
+			}
+		}
+		if oldestKey != "" {
+			delete(t.rankCache, oldestKey)
+		} else {
+			break
+		}
+	}
+}
+
+func (t *Tracker) boundFailBackoffLocked() {
+	if len(t.failBackoff) <= maxFailBackoffEntries {
+		return
+	}
+	now := time.Now().UTC()
+	for k, failTime := range t.failBackoff {
+		if now.Sub(failTime) >= t.backoffTTL {
+			delete(t.failBackoff, k)
+		}
+	}
+	for len(t.failBackoff) > maxFailBackoffEntries {
+		var oldestKey string
+		var oldestTime time.Time
+		for k, failTime := range t.failBackoff {
+			if oldestKey == "" || failTime.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = failTime
+			}
+		}
+		if oldestKey != "" {
+			delete(t.failBackoff, oldestKey)
+		} else {
+			break
+		}
+	}
+}
+
+func (t *Tracker) boundMatchupCacheLocked() {
+	if len(t.matchupCache) <= maxMatchupCacheEntries {
+		return
+	}
+	count := 0
+	toEvict := len(t.matchupCache) - maxMatchupCacheEntries
+	for k := range t.matchupCache {
+		delete(t.matchupCache, k)
+		count++
+		if count >= toEvict {
+			break
+		}
+	}
+}
+
+func (t *Tracker) getLocalPlayerIDsLocked() []string {
+	seen := make(map[string]bool)
+	var ids []string
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+
+	if t.cfg.LocalPlayerID != "" {
+		add(t.cfg.LocalPlayerID)
+	}
+	if t.currentMatch != nil && t.currentMatch.LocalPlayer != nil {
+		add(t.currentMatch.LocalPlayer.PlayerID)
+	}
+	if t.authCfg.Epic.AccountID != "" {
+		add(fmt.Sprintf("Epic|%s|0", t.authCfg.Epic.AccountID))
+		add(t.authCfg.Epic.AccountID)
+	}
+	if t.authCfg.Steam.SteamID64 != "" {
+		add(fmt.Sprintf("Steam|%s|0", t.authCfg.Steam.SteamID64))
+		add(t.authCfg.Steam.SteamID64)
+	}
+	return ids
+}
+
+// GetLocalPlayerIDs returns all authenticated and discovered local player identifiers.
+func (t *Tracker) GetLocalPlayerIDs(ctx context.Context) []string {
+	t.mu.RLock()
+	ids := t.getLocalPlayerIDsLocked()
+	t.mu.RUnlock()
+
+	if t.store != nil {
+		if storeIDs, err := t.store.GetLocalPlayerIDs(ctx); err == nil {
+			seen := make(map[string]bool, len(ids)+len(storeIDs))
+			for _, id := range ids {
+				seen[id] = true
+			}
+			for _, sid := range storeIDs {
+				sid = strings.TrimSpace(sid)
+				if sid != "" && !seen[sid] {
+					seen[sid] = true
+					ids = append(ids, sid)
+				}
+			}
+		}
+	}
+	return ids
 }
 
 // OnUpdateState processes a real-time lobby state update from the Stats API Listener.
 func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistID int, players []statsapi.StatsPlayer) error {
+	return t.OnUpdateGameState(ctx, matchGUID, playlistID, players, nil)
+}
+
+// OnUpdateGameState processes a real-time lobby and match state update including clock telemetry.
+func (t *Tracker) OnUpdateGameState(ctx context.Context, matchGUID string, playlistID int, players []statsapi.StatsPlayer, game *statsapi.StatsGame) error {
 	trimmedGUID := strings.TrimSpace(matchGUID)
 	if trimmedGUID == "" || len(players) == 0 {
 		return nil
@@ -341,15 +504,18 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 	if !isSameMatch {
 		// New match detected: initialize new snapshot
 		t.currentMatch = &CurrentMatchResponse{
-			ActiveMatch:  true,
-			MatchEnded:   false,
-			MatchGUID:    trimmedGUID,
-			PlaylistID:   playlistID,
-			PlaylistName: FormatPlaylist(playlistID),
-			Teammates:    make([]LobbyPlayer, 0),
-			Opponents:    make([]LobbyPlayer, 0),
-			Spectators:   make([]LobbyPlayer, 0),
-			UpdatedAt:    now,
+			ActiveMatch:    true,
+			MatchEnded:     false,
+			MatchGUID:      trimmedGUID,
+			PlaylistID:     playlistID,
+			PlaylistName:   FormatPlaylist(playlistID),
+			TimeRemaining:  game.GetTimeRemaining(),
+			IsOvertime:     game.GetIsOvertime(),
+			LocalPlayerIDs: t.getLocalPlayerIDsLocked(),
+			Teammates:      make([]LobbyPlayer, 0),
+			Opponents:      make([]LobbyPlayer, 0),
+			Spectators:     make([]LobbyPlayer, 0),
+			UpdatedAt:      now,
 		}
 		// Reset frame upsert cache and in-flight matchup queries for new match
 		t.upsertedProfiles = make(map[string]string)
@@ -370,6 +536,13 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 		if playlistID != 0 {
 			t.currentMatch.PlaylistID = playlistID
 			t.currentMatch.PlaylistName = FormatPlaylist(playlistID)
+		}
+		if game != nil {
+			t.currentMatch.TimeRemaining = game.GetTimeRemaining()
+			t.currentMatch.IsOvertime = game.GetIsOvertime()
+		}
+		if len(t.currentMatch.LocalPlayerIDs) == 0 {
+			t.currentMatch.LocalPlayerIDs = t.getLocalPlayerIDsLocked()
 		}
 		t.currentMatch.UpdatedAt = now
 		// If match was already marked ended, keep ActiveMatch=false and MatchEnded=true
@@ -611,6 +784,7 @@ func (t *Tracker) OnUpdateState(ctx context.Context, matchGUID string, playlistI
 			delete(t.matchupInFlight, mKey)
 			if err == nil && matchup != nil {
 				t.matchupCache[mKey] = matchup
+				t.boundMatchupCacheLocked()
 				if t.currentMatch != nil && t.currentMatch.MatchGUID == trimmedGUID {
 					t.updateLobbyPlayerMatchupLocked(p.PrimaryId, matchup)
 					updatedSnapshot = t.currentMatch.DeepClone()
@@ -715,6 +889,37 @@ func (t *Tracker) OnMatchEnded(ctx context.Context, matchGUID string, winnerTeam
 		matchState.Result = "victory"
 	} else {
 		matchState.Result = "defeat"
+	}
+
+	// SPEC-03: Invalidate local player's rank cache and fetch fresh rank telemetry immediately
+	// so concludedSnapshot captures updated post-match MMR and ConcludeMatch computes an accurate non-zero delta.
+	if localPlayer != nil {
+		pid := strings.TrimSpace(localPlayer.PlayerID)
+		delete(t.rankCache, pid)
+		delete(t.inFlight, pid)
+		delete(t.failBackoff, pid)
+
+		if t.cfg.AutoFetchRanks && t.rankClient != nil && t.rankClient.IsEnabled() {
+			t.mu.Unlock()
+			fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			skills, err := t.rankClient.GetPlayersSkills(fetchCtx, []rlapi.PlayerID{rlapi.PlayerID(pid)})
+			cancel()
+			t.mu.Lock()
+			if err == nil && len(skills) > 0 {
+				snapshot := BuildRanksSnapshot(skills[0].Skills)
+				t.rankCache[pid] = cachedRankEntry{
+					snapshot:  snapshot,
+					fetchedAt: time.Now().UTC(),
+				}
+				t.boundRankCacheLocked()
+				if r, ok := snapshot.GetRank(playlistID); ok {
+					if matchState.LocalPlayer != nil {
+						matchState.LocalPlayer.CurrentRank = &r
+						matchState.LocalPlayer.Ranks = snapshot
+					}
+				}
+			}
+		}
 	}
 
 	// Snapshot all participants
@@ -962,6 +1167,7 @@ func (t *Tracker) fetchRanksBatch(ctx context.Context, playerIDs []rlapi.PlayerI
 				delete(t.inFlight, idStr)
 				t.failBackoff[idStr] = now
 			}
+			t.boundFailBackoffLocked()
 		} else {
 			for _, pid := range playerIDs {
 				delete(t.inFlight, string(pid))
@@ -996,6 +1202,7 @@ func (t *Tracker) fetchRanksBatch(ctx context.Context, playerIDs []rlapi.PlayerI
 			snapshot:  snapshot,
 			fetchedAt: now,
 		}
+		t.boundRankCacheLocked()
 
 		if t.currentMatch != nil {
 			t.updateLobbyPlayerRanksLocked(idStr, snapshot)

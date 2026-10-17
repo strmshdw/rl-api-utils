@@ -1,16 +1,18 @@
 import React from 'react';
-import { PlaylistSessionStats } from '../../types/api';
+import { MMRHistoryEntry, PlaylistSessionStats } from '../../types/api';
 import { SessionKpi, deltaInk, formatMmr, formatRecord, formatSigned, playlistLabels } from '../../utils/broadcast';
 import { PANEL_LABEL } from '../common/ui';
+import { Sparkline } from '../common/Sparkline';
 
 interface SessionKpiStripProps {
   kpis: SessionKpi[];
   /** 'idle' = Live tab strip (48px values); 'page' = Session page strip (52px) with a playlists cell. */
   variant: 'idle' | 'page';
   playlists?: PlaylistSessionStats[];
+  mmrHistory?: Record<number, MMRHistoryEntry[]>;
 }
 
-export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({ kpis, variant, playlists = [] }) => {
+export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({ kpis, variant, playlists = [], mmrHistory }) => {
   const page = variant === 'page';
   return (
     <div
@@ -35,14 +37,19 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({ kpis, variant,
           <span className={PANEL_LABEL}>PLAYLISTS</span>
           {playlists.length === 0 && <span className="font-semibold text-[15px] tracking-t4 text-faint">—</span>}
           {playlists.map((pl) => (
-            <div key={pl.playlist_id} className="flex justify-between items-baseline gap-3 font-semibold text-[17px] tracking-t4">
+            <div key={pl.playlist_id} className="flex justify-between items-center gap-3 font-semibold text-[17px] tracking-t4">
               <span className="min-w-0 truncate">
                 {playlistLabels(pl.playlist_id, pl.playlist_name).name}{' '}
                 <span className="text-muted">{formatRecord(pl.wins, pl.losses)}</span>
               </span>
-              <span className="text-muted whitespace-nowrap">
-                {formatMmr(pl.current_mmr)} <span className={deltaInk(pl.mmr_delta)}>{formatSigned(pl.mmr_delta)}</span>
-              </span>
+              <div className="flex items-center gap-2.5 shrink-0">
+                {mmrHistory?.[pl.playlist_id] && mmrHistory[pl.playlist_id].length > 0 && (
+                  <Sparkline data={mmrHistory[pl.playlist_id]} width={64} height={20} />
+                )}
+                <span className="text-muted whitespace-nowrap">
+                  {formatMmr(pl.current_mmr)} <span className={deltaInk(pl.mmr_delta)}>{formatSigned(pl.mmr_delta)}</span>
+                </span>
+              </div>
             </div>
           ))}
         </div>
@@ -52,7 +59,10 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({ kpis, variant,
 };
 
 /** Playlist rows for the idle Live view: name, record, MMR path and delta. */
-export const PlaylistRows: React.FC<{ playlists: PlaylistSessionStats[] }> = ({ playlists }) => (
+export const PlaylistRows: React.FC<{
+  playlists: PlaylistSessionStats[];
+  mmrHistory?: Record<number, MMRHistoryEntry[]>;
+}> = ({ playlists, mmrHistory }) => (
   <>
     {playlists.map((pl) => (
       <div key={pl.playlist_id} className="bg-panel px-[22px] py-4 flex items-center justify-between gap-4 font-display">
@@ -62,7 +72,12 @@ export const PlaylistRows: React.FC<{ playlists: PlaylistSessionStats[] }> = ({ 
             {formatRecord(pl.wins, pl.losses)} · {formatMmr(pl.initial_mmr)} → {formatMmr(pl.current_mmr)}
           </span>
         </div>
-        <span className={`font-extrabold text-[30px] ${deltaInk(pl.mmr_delta)}`}>{formatSigned(pl.mmr_delta)}</span>
+        <div className="flex items-center gap-4 shrink-0">
+          {mmrHistory?.[pl.playlist_id] && mmrHistory[pl.playlist_id].length > 0 && (
+            <Sparkline data={mmrHistory[pl.playlist_id]} width={84} height={26} />
+          )}
+          <span className={`font-extrabold text-[30px] ${deltaInk(pl.mmr_delta)}`}>{formatSigned(pl.mmr_delta)}</span>
+        </div>
       </div>
     ))}
   </>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SessionResponse, SessionMatchDetail } from '../types/api';
+import { sharedSSEManager } from '../context/SSEContext';
 
 export function useSession() {
   const [session, setSession] = useState<SessionResponse | null>(null);
@@ -34,25 +35,24 @@ export function useSession() {
   useEffect(() => {
     fetchSession();
 
-    // Listen to SSE /api/events for instant updates
-    let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource('/api/events');
-      eventSource.addEventListener('session_update', () => {
+    // Listen to shared SSE stream for instant updates without extra round-trip HTTP requests
+    const unsubSessionUpdate = sharedSSEManager.subscribe('session_update', (data: SessionResponse) => {
+      if (data && typeof data === 'object') {
+        setSession(data);
+        setError(null);
+        setIsLoading(false);
+      } else {
         fetchSession();
-      });
-      eventSource.addEventListener('match_ended', () => {
-        fetchSession();
-      });
-      eventSource.onerror = () => {
-        // SSE reconnect handles itself
-      };
-    } catch (e) {
-      console.warn('SSE not supported or failed to connect:', e);
-    }
+      }
+    });
+
+    const unsubMatchEnded = sharedSSEManager.subscribe('match_ended', () => {
+      fetchSession();
+    });
 
     return () => {
-      if (eventSource) eventSource.close();
+      unsubSessionUpdate();
+      unsubMatchEnded();
     };
   }, [fetchSession]);
 

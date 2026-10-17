@@ -6,7 +6,9 @@ import { TEAM_SLAB_BORDER, formatMmr, formatRecord, localTeamOf, recordInk, zero
 export interface BoxScoreRow {
   key: string;
   name: string;
+  playerId?: string;
   you?: boolean;
+  inspected?: boolean;
   mvp?: boolean;
   disconnected?: boolean;
   rank?: string;
@@ -21,7 +23,7 @@ export interface BoxScoreRow {
   h2h?: { wins: number; losses: number };
 }
 
-interface TeamBoxScoreProps {
+export interface TeamBoxScoreProps {
   team: 0 | 1;
   label: string;
   rows: BoxScoreRow[];
@@ -29,6 +31,8 @@ interface TeamBoxScoreProps {
   withRanks?: boolean;
   /** Adds an H2H record column. */
   withH2H?: boolean;
+  /** Optional click callback for player navigation */
+  onPlayerClick?: (playerId: string, playerName?: string) => void;
 }
 
 /** Box score rows for one team of a session match, top scorer first. */
@@ -47,6 +51,7 @@ export function sessionMatchRows(match: SessionMatchDetail, team: number, mvpId?
           : undefined;
       return {
         key: p.player_id,
+        playerId: p.player_id,
         name: p.is_local ? 'You' : p.name,
         you: p.is_local,
         mvp: p.player_id === mvpId,
@@ -68,7 +73,7 @@ const WITH_RANKS = 'minmax(90px,1fr) minmax(0,.9fr) 52px repeat(6,36px)';
 const STATS_ONLY = 'minmax(90px,1fr) repeat(6,36px)';
 
 /** One team's box score panel with a 3px rule in the team slab colour. */
-export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({ team, label, rows, withRanks = false, withH2H = false }) => {
+export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({ team, label, rows, withRanks = false, withH2H = false, onPlayerClick }) => {
   const gridTemplateColumns = `${withRanks ? WITH_RANKS : STATS_ONLY}${withH2H ? ' 64px' : ''}`;
   return (
     <div
@@ -96,12 +101,35 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({ team, label, rows, w
           style={{ gridTemplateColumns }}
         >
           <span className="flex items-center gap-2 min-w-0">
-            <span
-              title={p.name}
-              className={`tracking-t4 uppercase whitespace-nowrap overflow-hidden text-ellipsis ${p.you ? 'text-blue-ink' : 'text-ink'}`}
-            >
-              {p.name}
-            </span>
+            {onPlayerClick && !p.you && (p.playerId || p.key) ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPlayerClick(p.playerId || p.key, p.name);
+                }}
+                title={`View profile for ${p.name}`}
+                className={`tracking-t4 uppercase whitespace-nowrap overflow-hidden text-ellipsis hover:underline text-left cursor-pointer transition-colors duration-120 ${
+                  p.inspected ? 'text-amber-400 font-extrabold' : p.you ? 'text-blue-ink' : 'text-ink hover:text-blue-ink'
+                }`}
+              >
+                {p.name}
+              </button>
+            ) : (
+              <span
+                title={p.name}
+                className={`tracking-t4 uppercase whitespace-nowrap overflow-hidden text-ellipsis ${
+                  p.inspected ? 'text-amber-400 font-extrabold' : p.you ? 'text-blue-ink' : 'text-ink'
+                }`}
+              >
+                {p.name}
+              </span>
+            )}
+            {p.inspected && (
+              <span className="font-display font-bold text-[10px] tracking-t14 bg-amber-500/20 text-amber-300 px-1 py-px border border-amber-500/30">
+                INSPECTED
+              </span>
+            )}
             {p.mvp && <MvpChip />}
           </span>
           {withRanks && (

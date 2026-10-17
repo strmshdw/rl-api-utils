@@ -78,7 +78,7 @@ func saveTokensToYAML(filePath string, data []byte, updates TokenUpdates) error 
 	}
 	_ = enc.Close()
 
-	if err := os.WriteFile(filePath, buf.Bytes(), 0644); err != nil {
+	if err := AtomicWriteFile(filePath, buf.Bytes(), 0600); err != nil {
 		return fmt.Errorf("writing updated YAML config %s: %w", filePath, err)
 	}
 
@@ -185,7 +185,7 @@ func saveTokensToJSON(filePath string, data []byte, updates TokenUpdates) error 
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filePath, append(out, '\n'), 0644)
+	return AtomicWriteFile(filePath, append(out, '\n'), 0600)
 }
 
 func applyJSONMapUpdates(root map[string]interface{}, sectionKey string, update AuthTokenUpdate) {

@@ -208,13 +208,13 @@ func TestChallenger2_Network_AddrErrorHandling(t *testing.T) {
 // TestChallenger2_Network_FormatStartupBanner verifies all permutation scenarios of startup banner.
 func TestChallenger2_Network_FormatStartupBanner(t *testing.T) {
 	tests := []struct {
-		name            string
-		host            string
-		port            int
-		lanIP           string
-		expectLocal     string
-		expectNetwork   string
-		expectOverlay   string
+		name          string
+		host          string
+		port          int
+		lanIP         string
+		expectLocal   string
+		expectNetwork string
+		expectOverlay string
 	}{
 		{
 			name:          "default_0_0_0_0_with_lan",

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 // ReplayPlayerStats contains per-player statistics extracted from a .replay file.
@@ -20,6 +21,7 @@ type ReplayPlayerStats struct {
 	Assists  int    `json:"assists"`
 	Saves    int    `json:"saves"`
 	Shots    int    `json:"shots"`
+	Demos    int    `json:"demos,omitempty"`
 	IsBot    bool   `json:"is_bot"`
 }
 
@@ -320,8 +322,11 @@ func populateMetadata(meta *ReplayMetadata, props map[string]*propertyValue) {
 	if v, ok := props["bForfeit"]; ok {
 		meta.Forfeit = v.boolVal
 	}
-	if v, ok := props["Date"]; ok {
-		meta.Date = v.strVal
+	meta.Overtime = extractOvertime(meta, props)
+	if v, ok := props["Date"]; ok && strings.TrimSpace(v.strVal) != "" {
+		meta.Date = normalizeReplayDate(v.strVal)
+	} else if v, ok := props["MatchStartEpoch"]; ok && v.int64Val > 0 {
+		meta.Date = time.Unix(v.int64Val, 0).UTC().Format(time.RFC3339)
 	}
 	if v, ok := props["PrimaryPlayerTeam"]; ok {
 		t := v.intVal
@@ -351,6 +356,12 @@ func populateMetadata(meta *ReplayMetadata, props map[string]*propertyValue) {
 			}
 			if sh, ok := sp["Shots"]; ok {
 				p.Shots = sh.intVal
+			}
+			for _, key := range []string{"Demos", "Demolitions", "Demolition", "demos"} {
+				if d, ok := sp[key]; ok {
+					p.Demos = d.intVal
+					break
+				}
 			}
 			if tm, ok := sp["Team"]; ok {
 				p.Team = tm.intVal
@@ -411,3 +422,60 @@ func cleanPlatformName(raw string) string {
 		return raw
 	}
 }
+
+// normalizeReplayDate parses various Rocket League replay header date layouts
+// and normalizes them into canonical UTC RFC3339 format.
+func normalizeReplayDate(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	layouts := []string{
+		"2006-01-02 15-04-05", // Standard Psyonix replay header format
+		"2006-01-02:15-04",    // Older / PsyNet match history format
+		"2006-01-02 15:04:05", // Standard space-separated datetime
+		"2006-01-02T15:04:05", // ISO-8601 without offset
+		time.RFC3339,          // Canonical RFC3339
+		time.RFC3339Nano,      // RFC3339 with nanoseconds
+		"2006-01-02",          // Date-only fallback
+	}
+	for _, l := range layouts {
+		if t, err := time.Parse(l, raw); err == nil {
+			return t.UTC().Format(time.RFC3339)
+		}
+	}
+	return raw // Defensive fallback: retain raw string if unrecognized
+}
+
+// extractOvertime determines whether a match went into overtime based on explicit
+// header properties or telemetry indicator heuristics.
+func extractOvertime(meta *ReplayMetadata, props map[string]*propertyValue) bool {
+	// 1. Explicit boolean properties
+	for _, key := range []string{"bOvertime", "bOverTime", "Overtime", "overtime"} {
+		if v, ok := props[key]; ok {
+			return v.boolVal
+		}
+	}
+
+	// 2. Explicit OvertimeSeconds property
+	if v, ok := props["OvertimeSeconds"]; ok {
+		if v.intVal > 0 || v.floatVal > 0 {
+			return true
+		}
+	}
+
+	// 3. Telemetry indicator heuristic
+	// Regulation is 300s. Zero-second play can extend duration up to ~310s.
+	// Overtime is sudden death, requiring score difference of exactly 1 and no forfeit.
+	scoreDiff := meta.Team0Score - meta.Team1Score
+	if scoreDiff < 0 {
+		scoreDiff = -scoreDiff
+	}
+
+	if meta.TotalSeconds >= 315.0 && !meta.Forfeit && scoreDiff == 1 {
+		return true
+	}
+
+	return false
+}
+

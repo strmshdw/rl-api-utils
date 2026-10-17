@@ -36,6 +36,12 @@ func (d *Daemon) handleResetSession(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
+	if !isAllowedMutatingOrigin(r) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
+		return
+	}
+
 	if d.sessionTracker != nil {
 		d.sessionTracker.Reset()
 	}

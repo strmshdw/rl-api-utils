@@ -1,77 +1,83 @@
-# BRIEFING — 2026-10-06T09:59:00Z
+# BRIEFING — 2026-10-17T03:48:00Z
 
 ## Mission
-Implement Milestone M3: Live Game UI Revamp & Zero-Scroll Viewport Optimization across React components, eliminate superfluous elements, prioritize player stats, and deliver the comprehensive Vitest/Happy DOM layout test suite.
+Complete Milestone M3: Implement all REST/SSE endpoints and filtering, live clock, local outcomes, post-match MMR delta, and security/concurrency/operational hardening across rl-api-utils daemon and modules.
 
 ## 🔒 My Identity
 - Archetype: implementer
 - Roles: implementer, qa, specialist
 - Working directory: d:\code\rl-api-utils\.agents\teamwork\m3_worker_1
-- Original parent: f26416a7-29be-4b99-8406-d28bf983644d
-- Milestone: Milestone M3 (Requirement R1: Live Game UI Revamp & Zero-Scroll Viewport Optimization)
+- Original parent: 048a592a-b159-4ea3-a5c3-e619b708dd31 (orchestrator_9)
+- Milestone: M3
 
 ## 🔒 Key Constraints
-- DO NOT CHEAT: Genuine implementation only. No hardcoded mock assertions or facade logic.
-- File ownership:
-  - web/src/components/live/PlayerRow.tsx
-  - web/src/components/live/RosterTable.tsx
-  - web/src/components/live/ScoreboardBanner.tsx
-  - web/src/components/live/LiveGameView.tsx
-  - web/src/components/layout/Header.tsx
-  - web/src/App.tsx
-  - web/src/components/live/LiveGameView.layout.test.tsx
-- Zero regressions across existing 112 frontend Vitest tests and all Go packages.
-- Zero vertical scrolling guaranteed on standard desktop viewports (1080p, innerHeight ~920px).
+- Exclusive write ownership files:
+  - internal/daemon/*
+  - internal/storage/* (sqlite.go, jsonstore.go, store.go, m3_endpoints_test.go)
+  - internal/statsapi/* (listener.go, types.go, notifier.go, listener_test.go, notifier_test.go)
+  - internal/playertrack/* (tracker.go, tracker_test.go)
+  - internal/session/* (models.go, session.go, session_test.go)
+  - internal/config/* (config.go, yaml_update.go, yaml_update_test.go)
+  - internal/auth/* (steam_generator.go, steam_test.go)
+  - cmd/rl-sync/main.go
+  - .gitignore
+- Integrity mandate: No shortcuts, no hardcoded values/facades, all implementations genuine.
+- Verify with `go vet ./...` and `go test -v -race ./...`.
+- Handoff report to handoff.md and send_message to orchestrator_9.
 
 ## Current Parent
-- Conversation ID: f26416a7-29be-4b99-8406-d28bf983644d
-- Updated: 2026-10-06T09:59:00Z
+- Conversation ID: 048a592a-b159-4ea3-a5c3-e619b708dd31
+- Updated: 2026-10-17T03:48:00Z
 
 ## Task Summary
-- **What to build**:
-  1. Revamped PlayerRow.tsx & RosterTable.tsx: column sequence (Player -> Score -> Goals -> Assists -> Saves -> Shots -> Demos -> Rank -> MMR -> H2H -> Platform), enlarged typography, amber/cyan/emerald/rose accents, data-testid attributes.
-  2. Optimized viewport & eliminated superfluous UI: ScoreboardBanner.tsx (mb-3, py-2.5 px-5, remove player counts, w-9 h-9 icons), Header.tsx (remove Port 49125 & Uptime, hide playlist carousel during match), App.tsx (pass inMatch to Header, hide static footer during active match), LiveGameView.tsx (space-y-3, gap-4).
-  3. Programmatic DOM layout test suite: web/src/components/live/LiveGameView.layout.test.tsx (19 tests).
-- **Success criteria**:
-  - `npm test` in web/ passes (131/131 tests pass).
-  - `npm run build` in web/ succeeds (clean embedded dist generated).
-  - `go test ./...` passes (all 14 Go packages pass).
-  - `go build ./cmd/rl-sync` succeeds.
-- **Interface contracts**: `d:\code\rl-api-utils\PROJECT.md`, `m3_explorer_1/handoff.md`, `m3_explorer_2/handoff.md`, `m3_explorer_3/handoff.md`
-- **Code layout**: `web/src/components/live/`, `web/src/components/layout/`, `web/src/`
+- **What to build**: Full M3 feature set covering REST/SSE endpoints & filtering, live clock & post-match MMR invalidation/telemetry fetch, security/concurrency fixes, and operational hardening.
+- **Success criteria**: All specified endpoints functional and tested with race detector passing; zero regressions; strict compliance with requirements.
+- **Interface contracts**: PROJECT.md, SPEC-02 through SPEC-09.
+- **Code layout**: internal/daemon, internal/storage, internal/statsapi, internal/playertrack, internal/session, internal/config, internal/auth, cmd/rl-sync.
 
 ## Key Decisions Made
-- Prioritized performance stat columns (Score, Goals, Assists, Saves, Shots, Demos) ahead of static skill metadata (Rank, MMR, H2H, Platform).
-- Applied 3-tier visual hierarchy for stats (18px Hero, 16px Key, 14px Supporting) with color coding when positive and muted slate when zero.
-- Reordered columns consistently in both `PlayerRow.tsx` and `RosterTable.tsx` headers.
-- Eliminated static footer and playlist carousel conditionally during active matches to satisfy <= 500px vertical layout budget.
-- Maintained consistent asset bundle names in `vite.config.ts` so embedded daemon tests and production builds run seamlessly.
+- Implemented `FilterPlayerSummaries` with role filtering (`all`, `frequent`, `teammate`, `opponent`, `synergy`), multi-field sorting, accurate counting across SQLiteStore and JSONStore with 100% parity.
+- Implemented `GetPlayerSpotlights` computing dataset-wide spotlights (`BestTeammate`, `MostFaced`, `ToughestRival`) with proper tie-breaking and < 2 games fallback across both stores.
+- Implemented `GetLocalPlayerIDs` resolving from auth and match players across both stores.
+- Implemented `POST /api/matches/{guid}/retry`, `GET /api/players/{id}/matches`, `GET /api/players/{id}` (with `recent_matches`), `GET /api/players` (server-side filters & spotlights), `PATCH /api/players/{id}` (notes/tags update & CSRF origin validation), `GET /api/matches` (local-relative victory/defeat filtering & `local_player_ids`), `GET /api/mmr-history` (chronological progression), `GET /api/session/state`, and enforced `POST` on `/sync` (405 for GET).
+- Ingested `time_remaining`, `is_overtime` in `types.go`, `listener.go`, and propagated clock events to Session Tracker and SSE.
+- Hardened security: XML escaping in notifier toast, atomic 0600 config file writes, Steam credentials passed via `cmd.Env`, mutating Origin/Host validation.
+- Bounded caches in `tracker.go` (rankCache 1000, matchupCache 1000, failBackoff 500).
+- Fixed operational concerns: `StreamUpload: true` in main.go, removed duplicate banner logging, untracked `rl-sync.exe`, fixed test race conditions.
 
 ## Artifact Index
-- `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\DISPATCH.md` — assignment & instructions
-- `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\skills\modern-web-guidance\SKILL.md` — local skill reference
-- `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\progress.md` — liveness heartbeat
-- `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\handoff.md` — final handoff report
+- DISPATCH.md — Assignment instructions
+- BRIEFING.md — Persistent memory
+- progress.md — Liveness heartbeat and milestone checklist
+- handoff.md — 5-component handoff report
 
 ## Change Tracker
 - **Files modified**:
-  - `web/src/components/live/PlayerRow.tsx`: Reordered stat columns, enlarged typography, colored accents, added testids.
-  - `web/src/components/live/RosterTable.tsx`: Reordered thead columns, compressed padding, added th testids.
-  - `web/src/components/live/ScoreboardBanner.tsx`: Compressed to mb-3, py-2.5 px-5, w-9 h-9 icons, removed player counts, added testid.
-  - `web/src/components/layout/Header.tsx`: Removed Port 49125 and Uptime, added inMatch prop to hide playlist carousel during live matches.
-  - `web/src/App.tsx`: Passed inMatch to Header, compressed main padding to py-2 in live mode, hid footer during live match.
-  - `web/src/components/live/LiveGameView.tsx`: Reduced vertical spacing to space-y-3 and roster grid gap to gap-4.
-  - `web/src/components/live/LiveGameView.layout.test.tsx`: Implemented 19 automated layout & structure tests.
-  - `web/vite.config.ts`: Configured rollupOptions for embedded bundle outputs.
-- **Build status**: PASS (npm run build & go build ./cmd/rl-sync clean)
-- **Pending issues**: None
+  - `internal/daemon/handlers_players.go`: Implemented server-side player filtering, spotlights, `recent_matches`, `handleGetPlayerMatches`, `handlePatchPlayer`, and origin validation.
+  - `internal/daemon/handlers_matches.go`: Implemented `handleRetryMatch`, `handleListMMRHistory`, outcome filtering, and `local_player_ids`.
+  - `internal/daemon/daemon.go`: Added new route registrations, `isAllowedMutatingOrigin`, and enforced POST on `/sync`.
+  - `internal/daemon/m3_endpoints_test.go`: Added comprehensive test suite for all M3 daemon endpoints and CSRF checks.
+  - `internal/storage/sqlite.go`: Added `FilterPlayerSummaries`, `GetPlayerSpotlights`, `GetLocalPlayerIDs`, local-relative `ListHistoricalMatches`, and `PlayerMatchDetail.Stats` population.
+  - `internal/storage/jsonstore.go`: Added matching implementations for all M3 storage extensions with 100% parity.
+  - `internal/storage/m3_endpoints_test.go`: Added comprehensive cross-store tests for filtering, spotlights, and local player IDs.
+  - `internal/session/session.go`: Added `EventClockUpdated`, `local_player_ids` tracking, and local-relative victory/defeat evaluation in `ConcludeMatch`.
+  - `internal/session/models.go`: Added `EventClockUpdated` and `LocalPlayerIDs` fields with deep-cloning.
+  - `internal/session/broadcaster_adversarial_test.go`: Adjusted test yield timing under parallel race detection.
+  - `internal/statsapi/listener.go`: Ingested `time_remaining`, `is_overtime`, and `GameStateEventHandler`.
+  - `internal/statsapi/types.go`: Added clock fields to `StatsGame`.
+  - `internal/statsapi/notifier.go`: Added XML escaping and `RL_SYNC_TOAST_XML` env var support.
+  - `internal/config/config.go` & `yaml_update.go`: Enforced atomic 0600 config writes via `AtomicWriteFile`.
+  - `internal/auth/steam_generator.go`: Passed Steam credentials via `cmd.Env`.
+  - `internal/playertrack/tracker.go`: Bounded caches, `InvalidateRankCache`, post-match telemetry refresh, and `LocalPlayerIDs`.
+  - `cmd/rl-sync/main.go`: Configured `StreamUpload: true` and removed redundant banner logging.
+  - `.gitignore`: Untracked `rl-sync.exe` and added `*.exe`, `*.exe~`, `rl-sync`, `dist/`, `web/dist/`.
+- **Build status**: PASS (`go vet ./...` clean; all tests pass under `-race`).
+- **Pending issues**: None.
 
 ## Quality Status
-- **Build/test result**: PASS (131/131 web tests pass; all 14 Go packages pass)
-- **Lint status**: Clean (tsc -b passed with zero errors)
-- **Tests added/modified**: `LiveGameView.layout.test.tsx` (19 new tests added)
+- **Build/test result**: PASS 100% across all 15 packages.
+- **Lint status**: Clean (no vet errors).
+- **Tests added/modified**: `internal/storage/m3_endpoints_test.go`, `internal/daemon/m3_endpoints_test.go`, and updated existing tests for compatibility.
 
 ## Loaded Skills
-- **Source**: `C:\Users\strms\.gemini\config\plugins\modern-web-guidance\skills\modern-web-guidance\SKILL.md`
-- **Local copy**: `d:\code\rl-api-utils\.agents\teamwork\m3_worker_1\skills\modern-web-guidance\SKILL.md`
-- **Core methodology**: Modern web best practices, zero-scroll layout budgeting, responsive CSS grids, and clean component isolation.
+- None

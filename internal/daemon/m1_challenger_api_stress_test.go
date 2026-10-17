@@ -211,8 +211,8 @@ func TestChallenger_Stress_API_ConcurrentRequestsUnderLoad(t *testing.T) {
 
 				bodyStr := string(body)
 
-				// Assert that no raw TrueSkill decimals like 47.5 exist in any response
-				if strings.Contains(bodyStr, "47.5") {
+				// Assert that no raw TrueSkill decimals like 47.5 exist in any response (avoid matching timestamps with :47.5xxZ)
+				if strings.Contains(bodyStr, "\"mmr\":47.5") || strings.Contains(bodyStr, "\"mmr\": 47.5") || strings.Contains(bodyStr, "\"rating\":47.5") || strings.Contains(bodyStr, "\"rating\": 47.5") {
 					atomic.AddInt64(&errCount, 1)
 					t.Errorf("Worker %d: GET %s contained raw rating 47.5: %s", workerID, ep, bodyStr)
 				}

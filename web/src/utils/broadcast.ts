@@ -372,3 +372,15 @@ export function summarizeSession(session: SessionResponse | null): SessionSummar
 
   return { wins, losses, netMmr, goalsFor, goalsAgainst, streakType, streakCount, bestWinStreak, highScore, kpis };
 }
+
+/**
+ * Formats match clock: countdown MM:SS during regulation, +MM:SS during overtime.
+ */
+export function formatMatchClock(timeRemaining: number | undefined | null, isOvertime?: boolean): string {
+  const seconds = Math.max(0, Math.floor(timeRemaining ?? 0));
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  const padded = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  return isOvertime ? `+${padded}` : padded;
+}
+
