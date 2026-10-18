@@ -48,6 +48,8 @@ export const App: React.FC = () => {
   const localPlayerIds = useMemo(() => {
     const ids = new Set<string>();
     if (match?.local_player?.player_id) ids.add(onlineIdOf(match.local_player.player_id));
+    match?.local_player_ids?.forEach((id) => ids.add(onlineIdOf(id)));
+    session?.local_player_ids?.forEach((id) => ids.add(onlineIdOf(id)));
     session?.matches?.forEach((m) => m.players?.forEach((p) => p.is_local && ids.add(onlineIdOf(p.player_id))));
     ids.delete('');
     return ids;
@@ -87,7 +89,7 @@ export const App: React.FC = () => {
           <SessionView session={session} isLoading={sessionLoading} error={sessionError} onResetSession={resetSession} />
         )}
         {activeTab === 'history' && <HistoryView localPlayerIds={localPlayerIds} />}
-        {activeTab === 'players' && <PlayersView />}
+        {activeTab === 'players' && <PlayersView localPlayerIds={localPlayerIds} />}
       </main>
     </div>
   );

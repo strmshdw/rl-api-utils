@@ -32,6 +32,12 @@ type Syncer interface {
 	RunCycle(ctx context.Context) (*syncer.SyncStats, error)
 }
 
+// StatsPoller is an optional interface implemented by Syncer to poll pending Ballchasing stats
+// independently of full PsyNet discovery cycles (safe to run while Rocket League is active).
+type StatsPoller interface {
+	PollAndSyncPendingStats(ctx context.Context) error
+}
+
 // PlayerDetailResponse represents the composite response for GET /players/{id}.
 type PlayerDetailResponse struct {
 	*storage.PlayerRecord
@@ -348,6 +354,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	statusTicker := time.NewTicker(2 * time.Second)
 	defer statusTicker.Stop()
+	statsPollTicks := 0
 
 	for {
 		select {
@@ -387,6 +394,17 @@ func (d *Daemon) Start(ctx context.Context) error {
 				d.prevConnected = connected
 			}
 
+			// Every 10 seconds (5 status ticks), poll Ballchasing for any uploaded replays whose
+			// online stats processing was still pending at upload time. This only talks to Ballchasing
+			// (never PsyNet), so it is safe while Rocket League is running.
+			statsPollTicks++
+			if statsPollTicks >= 5 {
+				statsPollTicks = 0
+				if poller, ok := d.syncer.(StatsPoller); ok {
+					_ = d.executeStatsPoll(ctx, poller)
+				}
+			}
+
 		case <-ticker.C:
 			// Routine scheduled tick
 			if d.statsListener != nil && d.statsListener.IsConnected() {
@@ -404,6 +422,26 @@ func (d *Daemon) Start(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (d *Daemon) executeStatsPoll(ctx context.Context, poller StatsPoller) error {
+	d.mu.Lock()
+	if d.inFlight {
+		d.mu.Unlock()
+		return nil
+	}
+	d.inFlight = true
+	d.wg.Add(1)
+	d.mu.Unlock()
+
+	defer func() {
+		d.mu.Lock()
+		d.inFlight = false
+		d.wg.Done()
+		d.mu.Unlock()
+	}()
+
+	return poller.PollAndSyncPendingStats(ctx)
 }
 
 // executeCycle runs a single synchronization cycle, tracking in-flight status,

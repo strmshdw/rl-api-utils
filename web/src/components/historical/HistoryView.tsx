@@ -162,6 +162,7 @@ const EMPTY_IDS = new Set<string>();
 export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY_IDS }) => {
   const [matches, setMatches] = useState<HistoricalMatchRecord[]>([]);
   const [total, setTotal] = useState(0);
+  const [serverLocalIds, setServerLocalIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -180,6 +181,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
   const [retryingGuids, setRetryingGuids] = useState<Set<string>>(new Set());
   const [profilePlayerId, setProfilePlayerId] = useState<string | null>(null);
   const [profilePlayerName, setProfilePlayerName] = useState<string | undefined>(undefined);
+
+  const effectiveLocalIds = useMemo(() => {
+    if (serverLocalIds.length === 0) return localPlayerIds;
+    const merged = new Set<string>(localPlayerIds);
+    serverLocalIds.forEach((id) => {
+      if (id) {
+        const lower = id.toLowerCase();
+        merged.add(lower);
+        const parts = lower.split('|');
+        if (parts.length >= 2 && parts[1]) merged.add(parts[1]);
+      }
+    });
+    return merged;
+  }, [localPlayerIds, serverLocalIds]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -203,6 +218,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
       const res = await fetch(`/api/matches?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       const data: MatchesResponse = await res.json();
+
+      if (data.local_player_ids?.length) {
+        setServerLocalIds(data.local_player_ids);
+      }
 
       if (data.matches.length === 0 && isDemoMode() && !debouncedQuery && playlistId === 0) {
         setMatches(SAMPLE_HISTORICAL_MATCHES);
@@ -314,8 +333,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
 
   const rows = useMemo(() => {
     if (outcomeFilter === 'all') return matches;
-    return matches.filter((m) => historyOutcome(m, localPlayerIds) === outcomeFilter);
-  }, [matches, outcomeFilter, localPlayerIds]);
+    return matches.filter((m) => historyOutcome(m, effectiveLocalIds) === outcomeFilter);
+  }, [matches, outcomeFilter, effectiveLocalIds]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const hasFilters = debouncedQuery !== '' || playlistFilter !== 'all' || outcomeFilter !== 'all';
@@ -394,7 +413,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
             <HistoryRow
               key={m.match_guid}
               match={m}
-              localIds={localPlayerIds}
+              localIds={effectiveLocalIds}
               open={openMatchGuid === m.match_guid}
               onToggle={() => setOpenMatchGuid((cur) => (cur === m.match_guid ? null : m.match_guid))}
               onDetail={() => setDetailMatch(m)}
@@ -433,7 +452,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
         <HistoricalMatchDetailModal
           match={detailMatch}
           onClose={() => setDetailMatch(null)}
-          localPlayerIds={localPlayerIds}
+          localPlayerIds={effectiveLocalIds}
           onPlayerClick={(pId, pName) => {
             setProfilePlayerId(pId);
             setProfilePlayerName(pName);
@@ -446,7 +465,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
           playerId={profilePlayerId}
           playerName={profilePlayerName}
           onClose={() => setProfilePlayerId(null)}
-          localPlayerIds={localPlayerIds}
+          localPlayerIds={effectiveLocalIds}
         />
       )}
     </div>

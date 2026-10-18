@@ -100,7 +100,27 @@ describe('history data helpers', () => {
       },
     });
     expect(historyOutcome(m, new Set(['me_id']))).toBe('L');
+    expect(historyOutcome(m, new Set(['Steam|ME_ID|0']))).toBe('L');
     expect(historyOutcome(m, new Set())).toBe('W');
+  });
+
+  it('excludes bots with online_id "0" from matching canonical Steam|...|0 IDs and normalizes /api/replays/ URLs', () => {
+    const m = record({
+      blue_score: 1,
+      orange_score: 3,
+      ballchasing_url: 'https://ballchasing.com/api/replays/abc-123',
+      upload_status: 'UPLOADED',
+      result: 'defeat',
+      stats: {
+        match_guid: 'g2', map_name: '', playlist: 11, blue_score: 1, orange_score: 3, duration: 300, overtime: false, date: '',
+        players: [
+          { name: 'Bot', platform: 'Unknown', online_id: '0', is_bot: true, team: 1, score: 100, goals: 1, assists: 0, saves: 0, shots: 1, demos: 0 },
+          { name: 'LocalUser', platform: 'Steam', online_id: '76561198816594023', team: 0, score: 400, goals: 1, assists: 0, saves: 2, shots: 3, demos: 1 },
+        ],
+      },
+    });
+    expect(historyOutcome(m, new Set(['Steam|76561198816594023|0']))).toBe('L');
+    expect(replayStatus(m).href).toBe('https://ballchasing.com/replay/abc-123');
   });
 });
 
