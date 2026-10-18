@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dank/rl-api-utils/internal/ballchasing"
 )
 
 // jsonStatePayload defines the serialized on-disk format for the structured JSON state store.
@@ -661,9 +663,13 @@ func (s *JSONStore) MarkUploaded(ctx context.Context, matchGUID, ballchasingID, 
 	now := time.Now().UTC()
 	rec.UploadStatus = UploadUploaded
 	rec.BallchasingID = ballchasingID
-	rec.BallchasingURL = ballchasingURL
+	rec.BallchasingURL = NormalizeBallchasingURL(ballchasingID, ballchasingURL)
 	rec.UploadedAt = &now
 	rec.LastError = ""
+	if ballchasingID != "" && !strings.Contains(rec.ReplayStatsJSON, `"boost":`) {
+		rec.StatsSyncStatus = StatsSyncPending
+		rec.StatsRetryCount = 0
+	}
 	rec.UpdatedAt = now
 
 	return s.saveLocked()
@@ -697,9 +703,13 @@ func (s *JSONStore) MarkDuplicate(ctx context.Context, matchGUID, ballchasingID,
 	now := time.Now().UTC()
 	rec.UploadStatus = UploadDuplicate
 	rec.BallchasingID = ballchasingID
-	rec.BallchasingURL = ballchasingURL
+	rec.BallchasingURL = NormalizeBallchasingURL(ballchasingID, ballchasingURL)
 	rec.UploadedAt = &now
 	rec.LastError = ""
+	if ballchasingID != "" && !strings.Contains(rec.ReplayStatsJSON, `"boost":`) {
+		rec.StatsSyncStatus = StatsSyncPending
+		rec.StatsRetryCount = 0
+	}
 	rec.UpdatedAt = now
 
 	return s.saveLocked()
@@ -979,6 +989,70 @@ func (s *JSONStore) UpsertPlayer(ctx context.Context, player *PlayerRecord) erro
 	return s.saveLocked()
 }
 
+// resolveCanonicalPlayerIDLocked resolves a raw online_id or case-variant player ID to the stored canonical key.
+// Must be called with s.mu held (RLock or Lock).
+func (s *JSONStore) resolveCanonicalPlayerIDLocked(playerID string) string {
+	playerID = strings.TrimSpace(playerID)
+	if playerID == "" {
+		return ""
+	}
+	if _, ok := s.players[playerID]; ok {
+		return playerID
+	}
+	if _, ok := s.playerMatchups[playerID]; ok {
+		return playerID
+	}
+	lowerTarget := strings.ToLower(playerID)
+	lookupSeg := lowerTarget
+	if strings.Contains(lowerTarget, "|") {
+		parts := strings.Split(lowerTarget, "|")
+		if len(parts) >= 2 && strings.TrimSpace(parts[1]) != "" {
+			lookupSeg = strings.TrimSpace(parts[1])
+		}
+	}
+	suffixPipe0 := "|" + lookupSeg + "|0"
+	suffixPipe := "|" + lookupSeg
+	var bestID string
+	var bestSeen time.Time
+	for id, p := range s.players {
+		lowerID := strings.ToLower(id)
+		if lowerID == lowerTarget || (lookupSeg != "0" && (strings.HasSuffix(lowerID, suffixPipe0) || strings.HasSuffix(lowerID, suffixPipe))) {
+			if bestID == "" || p.LastSeenAt.After(bestSeen) {
+				bestID = id
+				bestSeen = p.LastSeenAt
+			}
+		}
+	}
+	if bestID != "" {
+		return bestID
+	}
+	if !strings.Contains(playerID, "|") {
+		for id, p := range s.players {
+			if strings.EqualFold(strings.TrimSpace(p.PlayerName), playerID) {
+				if bestID == "" || p.LastSeenAt.After(bestSeen) {
+					bestID = id
+					bestSeen = p.LastSeenAt
+				}
+			}
+		}
+		if bestID != "" {
+			return bestID
+		}
+	}
+	for _, mps := range s.matchPlayers {
+		for _, mp := range mps {
+			if mp == nil {
+				continue
+			}
+			lowerID := strings.ToLower(mp.PlayerID)
+			if lowerID == lowerTarget || (lookupSeg != "0" && (strings.HasSuffix(lowerID, suffixPipe0) || strings.HasSuffix(lowerID, suffixPipe))) {
+				return mp.PlayerID
+			}
+		}
+	}
+	return playerID
+}
+
 // GetPlayer retrieves a single player profile by PlayerID. Returns ErrPlayerNotFound if missing.
 func (s *JSONStore) GetPlayer(ctx context.Context, playerID string) (*PlayerRecord, error) {
 	if err := ctx.Err(); err != nil {
@@ -995,7 +1069,8 @@ func (s *JSONStore) GetPlayer(ctx context.Context, playerID string) (*PlayerReco
 		return nil, ErrStoreClosed
 	}
 
-	rec, ok := s.players[playerID]
+	resolvedID := s.resolveCanonicalPlayerIDLocked(playerID)
+	rec, ok := s.players[resolvedID]
 	if !ok {
 		return nil, ErrPlayerNotFound
 	}
@@ -1141,7 +1216,7 @@ func (s *JSONStore) FilterPlayerSummaries(ctx context.Context, filter PlayerDire
 	// 1. In-memory filter with full matchup aggregations
 	matching := make([]*PlayerSummary, 0)
 	for _, p := range s.players {
-		if hasPlatform && strings.ToLower(p.Platform) != cleanPlatform {
+		if hasPlatform && !MatchesPlatformFilter(p.Platform, cleanPlatform) {
 			continue
 		}
 		if hasQuery {
@@ -1393,7 +1468,8 @@ func (s *JSONStore) UpdatePlayerRanks(ctx context.Context, playerID string, rank
 		return ErrStoreClosed
 	}
 
-	rec, ok := s.players[playerID]
+	resolvedID := s.resolveCanonicalPlayerIDLocked(playerID)
+	rec, ok := s.players[resolvedID]
 	if !ok {
 		return ErrPlayerNotFound
 	}
@@ -1539,10 +1615,11 @@ func (s *JSONStore) GetPlayerMatchup(ctx context.Context, playerID string, playl
 		return nil, ErrStoreClosed
 	}
 
-	pMap, ok := s.playerMatchups[playerID]
+	resolvedID := s.resolveCanonicalPlayerIDLocked(playerID)
+	pMap, ok := s.playerMatchups[resolvedID]
 	if !ok {
 		return &PlayerMatchup{
-			PlayerID:   playerID,
+			PlayerID:   resolvedID,
 			PlaylistID: playlistID,
 		}, nil
 	}
@@ -1550,7 +1627,7 @@ func (s *JSONStore) GetPlayerMatchup(ctx context.Context, playerID string, playl
 	m, ok := pMap[playlistID]
 	if !ok {
 		return &PlayerMatchup{
-			PlayerID:   playerID,
+			PlayerID:   resolvedID,
 			PlaylistID: playlistID,
 		}, nil
 	}
@@ -1574,7 +1651,8 @@ func (s *JSONStore) GetPlayerMatchups(ctx context.Context, playerID string) ([]*
 		return nil, ErrStoreClosed
 	}
 
-	pMap, ok := s.playerMatchups[playerID]
+	resolvedID := s.resolveCanonicalPlayerIDLocked(playerID)
+	pMap, ok := s.playerMatchups[resolvedID]
 	if !ok || len(pMap) == 0 {
 		return []*PlayerMatchup{}, nil
 	}
@@ -1624,6 +1702,36 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 	}
 
 	guid := strings.TrimSpace(stats.MatchGUID)
+
+	// If team scores are 0-0, compute fallback scores from player goal counts
+	if stats.BlueScore == 0 && stats.OrangeScore == 0 && len(stats.Players) > 0 {
+		bGoals, oGoals := 0, 0
+		for _, p := range stats.Players {
+			if p.Team == 0 {
+				bGoals += p.Goals
+			} else if p.Team == 1 {
+				oGoals += p.Goals
+			}
+		}
+		if bGoals > 0 || oGoals > 0 {
+			stats.BlueScore = bGoals
+			stats.OrangeScore = oGoals
+		}
+	}
+
+	// Ensure WinnerTeam is consistent with scores when unset or previously -1 on a non-tied game
+	if (stats.WinnerTeam == nil || *stats.WinnerTeam == -1) && stats.BlueScore != stats.OrangeScore {
+		wt := 0
+		if stats.OrangeScore > stats.BlueScore {
+			wt = 1
+		}
+		stats.WinnerTeam = &wt
+	}
+
+	if strings.Contains(stats.BallchasingURL, "/api/replays/") && stats.BallchasingID != "" {
+		stats.BallchasingURL = "https://ballchasing.com/replay/" + stats.BallchasingID
+	}
+
 	statsJSON, err := json.Marshal(stats)
 	if err != nil {
 		return fmt.Errorf("failed to marshal replay stats: %w", err)
@@ -1734,6 +1842,13 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 			won = &w
 		}
 
+		var pStatsJSON string
+		if p.Core != nil || p.Boost != nil || p.Movement != nil || p.Positioning != nil || p.Demo != nil || p.Camera != nil || p.Rank != nil {
+			if b, err := json.Marshal(p); err == nil {
+				pStatsJSON = string(b)
+			}
+		}
+
 		mp := &MatchPlayerRecord{
 			MatchGUID: guid,
 			PlayerID:  canonicalID,
@@ -1746,28 +1861,32 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 			Saves:     p.Saves,
 			Shots:     p.Shots,
 			Demos:     p.Demos,
+			CarName:   p.CarName,
+			StatsJSON: pStatsJSON,
 		}
 		matchPlayers = append(matchPlayers, mp)
 
-		pRec, pExists := s.players[canonicalID]
-		if !pExists {
-			s.players[canonicalID] = &PlayerRecord{
-				PlayerID:    canonicalID,
-				Platform:    plat,
-				PlayerName:  strings.TrimSpace(p.Name),
-				RanksJSON:   "{}",
-				Tags:        []string{},
-				FirstSeenAt: matchTime,
-				LastSeenAt:  matchTime,
-			}
-		} else {
-			pRec.Platform = plat
-			pRec.PlayerName = strings.TrimSpace(p.Name)
-			if matchTime.Before(pRec.FirstSeenAt) {
-				pRec.FirstSeenAt = matchTime
-			}
-			if matchTime.After(pRec.LastSeenAt) {
-				pRec.LastSeenAt = matchTime
+		if !isLocal {
+			pRec, pExists := s.players[canonicalID]
+			if !pExists {
+				s.players[canonicalID] = &PlayerRecord{
+					PlayerID:    canonicalID,
+					Platform:    plat,
+					PlayerName:  strings.TrimSpace(p.Name),
+					RanksJSON:   "{}",
+					Tags:        []string{},
+					FirstSeenAt: matchTime,
+					LastSeenAt:  matchTime,
+				}
+			} else {
+				pRec.Platform = plat
+				pRec.PlayerName = strings.TrimSpace(p.Name)
+				if matchTime.Before(pRec.FirstSeenAt) {
+					pRec.FirstSeenAt = matchTime
+				}
+				if matchTime.After(pRec.LastSeenAt) {
+					pRec.LastSeenAt = matchTime
+				}
 			}
 		}
 	}
@@ -1925,18 +2044,85 @@ func (s *JSONStore) ListHistoricalMatches(ctx context.Context, filter MatchFilte
 	return results, total, nil
 }
 
-// hydrateRanksFromStatsLocked attempts to parse rank metadata from replay raw JSON and update player ranks.
+// hydrateRanksFromStatsLocked attempts to parse rank metadata from replay stats or raw JSON and update player ranks.
 // Must be called with s.mu held for writing.
 func (s *JSONStore) hydrateRanksFromStatsLocked(stats *ReplayMatchStats) {
-	if stats == nil || stats.RawJSON == "" || stats.Playlist <= 0 {
+	if stats == nil || stats.Playlist <= 0 {
+		return
+	}
+
+	applyRank := func(idStr string, r *ballchasing.PlayerRank) {
+		if idStr == "" || r == nil || (r.Tier == 0 && (r.ID == "" || r.ID == "0")) {
+			return
+		}
+		resolvedID := s.resolveCanonicalPlayerIDLocked(idStr)
+		pRec, ok := s.players[resolvedID]
+		if !ok {
+			return
+		}
+
+		ranks := make(map[string]map[string]interface{})
+		if pRec.RanksJSON != "" && pRec.RanksJSON != "{}" {
+			_ = json.Unmarshal([]byte(pRec.RanksJSON), &ranks)
+		}
+
+		rName := r.Name
+		if rName == "" {
+			rName = formatRankName(r.Tier, r.Division)
+		}
+
+		pKey := strconv.Itoa(stats.Playlist)
+		existingMMR := 0.0
+		existingMatches := 0
+		if existing, ok := ranks[pKey]; ok && existing != nil {
+			if mmrVal, ok := existing["mmr"].(float64); ok && mmrVal > 0 {
+				existingMMR = mmrVal
+			}
+			if mpVal, ok := existing["matches_played"].(float64); ok && mpVal > 0 {
+				existingMatches = int(mpVal)
+			}
+		}
+
+		ranks[pKey] = map[string]interface{}{
+			"playlist_id":    stats.Playlist,
+			"playlist_name":  formatPlaylistName(stats.Playlist),
+			"tier":           r.Tier,
+			"division":       r.Division,
+			"rank_name":      rName,
+			"mmr":            existingMMR,
+			"matches_played": existingMatches,
+		}
+
+		if updatedData, err := json.Marshal(ranks); err == nil {
+			pRec.RanksJSON = string(updatedData)
+		}
+	}
+
+	for _, p := range stats.Players {
+		if p.Rank == nil {
+			continue
+		}
+		pid := strings.TrimSpace(p.OnlineID)
+		plat := strings.TrimSpace(p.Platform)
+		if plat == "" {
+			plat = "Unknown"
+		}
+		canonicalID := pid
+		if pid != "" && !strings.Contains(canonicalID, "|") {
+			canonicalID = fmt.Sprintf("%s|%s|0", plat, pid)
+		}
+		applyRank(canonicalID, p.Rank)
+	}
+
+	if stats.RawJSON == "" {
 		return
 	}
 
 	type bcPlayerRank struct {
-		ID       int    `json:"id"`
-		Tier     int    `json:"tier"`
-		Division int    `json:"division"`
-		Name     string `json:"name"`
+		ID       interface{} `json:"id"`
+		Tier     int         `json:"tier"`
+		Division int         `json:"division"`
+		Name     string      `json:"name"`
 	}
 	type bcPlayer struct {
 		ID   interface{}   `json:"id"`
@@ -1957,7 +2143,11 @@ func (s *JSONStore) hydrateRanksFromStatsLocked(stats *ReplayMatchStats) {
 
 	allPlayers := append(detail.Blue.Players, detail.Orange.Players...)
 	for _, bp := range allPlayers {
-		if bp.Rank == nil || (bp.Rank.Tier == 0 && bp.Rank.ID == 0) {
+		if bp.Rank == nil {
+			continue
+		}
+		idStrVal := fmt.Sprintf("%v", bp.Rank.ID)
+		if bp.Rank.Tier == 0 && (bp.Rank.ID == nil || idStrVal == "" || idStrVal == "0") {
 			continue
 		}
 
@@ -1974,35 +2164,12 @@ func (s *JSONStore) hydrateRanksFromStatsLocked(stats *ReplayMatchStats) {
 			continue
 		}
 
-		pRec, ok := s.players[idStr]
-		if !ok {
-			continue
-		}
-
-		ranks := make(map[string]map[string]interface{})
-		if pRec.RanksJSON != "" && pRec.RanksJSON != "{}" {
-			_ = json.Unmarshal([]byte(pRec.RanksJSON), &ranks)
-		}
-
-		rName := bp.Rank.Name
-		if rName == "" {
-			rName = formatRankName(bp.Rank.Tier, bp.Rank.Division)
-		}
-
-		pKey := strconv.Itoa(stats.Playlist)
-		ranks[pKey] = map[string]interface{}{
-			"playlist_id":    stats.Playlist,
-			"playlist_name":  formatPlaylistName(stats.Playlist),
-			"tier":           bp.Rank.Tier,
-			"division":       bp.Rank.Division,
-			"rank_name":      rName,
-			"mmr":            0.0,
-			"matches_played": 0,
-		}
-
-		if updatedData, err := json.Marshal(ranks); err == nil {
-			pRec.RanksJSON = string(updatedData)
-		}
+		applyRank(idStr, &ballchasing.PlayerRank{
+			ID:       idStrVal,
+			Tier:     bp.Rank.Tier,
+			Division: bp.Rank.Division,
+			Name:     bp.Rank.Name,
+		})
 	}
 }
 
@@ -2096,12 +2263,42 @@ func (s *JSONStore) backfillMatchPlayersLocked() {
 		if m == nil || m.ReplayStatsJSON == "" {
 			continue
 		}
-		if _, ok := s.matchPlayers[guid]; ok && len(s.matchPlayers[guid]) > 0 {
-			continue
-		}
 
 		var st ReplayMatchStats
 		if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err != nil {
+			continue
+		}
+
+		// Repair 0-0 score if player goals exist
+		if m.BlueScore == 0 && m.OrangeScore == 0 && len(st.Players) > 0 {
+			bGoals, oGoals := 0, 0
+			for _, p := range st.Players {
+				if p.Team == 0 {
+					bGoals += p.Goals
+				} else if p.Team == 1 {
+					oGoals += p.Goals
+				}
+			}
+			if bGoals > 0 || oGoals > 0 {
+				m.BlueScore = bGoals
+				m.OrangeScore = oGoals
+				st.BlueScore = bGoals
+				st.OrangeScore = oGoals
+				wt := -1
+				if bGoals > oGoals {
+					wt = 0
+				} else if oGoals > bGoals {
+					wt = 1
+				}
+				m.WinnerTeam = &wt
+				st.WinnerTeam = &wt
+				if b, err := json.Marshal(&st); err == nil {
+					m.ReplayStatsJSON = string(b)
+				}
+			}
+		}
+
+		if _, ok := s.matchPlayers[guid]; ok && len(s.matchPlayers[guid]) > 0 {
 			continue
 		}
 
@@ -2138,6 +2335,7 @@ func (s *JSONStore) backfillMatchPlayersLocked() {
 				Saves:     p.Saves,
 				Shots:     p.Shots,
 				Demos:     p.Demos,
+				CarName:   p.CarName,
 			})
 		}
 		if len(players) > 0 {
@@ -2223,6 +2421,8 @@ func (s *JSONStore) ListPlayerMatches(ctx context.Context, playerID string, filt
 		return nil, 0, ErrStoreClosed
 	}
 
+	resolvedID := s.resolveCanonicalPlayerIDLocked(playerID)
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -2256,7 +2456,7 @@ func (s *JSONStore) ListPlayerMatches(ctx context.Context, playerID string, filt
 			if mp.IsLocal {
 				localTeam = mp.TeamNum
 			}
-			if mp.PlayerID == playerID {
+			if mp.PlayerID == resolvedID {
 				targetMP = mp
 			}
 		}
@@ -2442,7 +2642,8 @@ func (s *JSONStore) UpdatePlayerNotesAndTags(ctx context.Context, playerID strin
 		return ErrStoreClosed
 	}
 
-	p, ok := s.players[playerID]
+	resolvedID := s.resolveCanonicalPlayerIDLocked(playerID)
+	p, ok := s.players[resolvedID]
 	if !ok {
 		return ErrPlayerNotFound
 	}

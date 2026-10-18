@@ -4,7 +4,20 @@ import { HistoricalMatchRecord, ReplayPlayerStats } from '../../types/api';
 import { Outcome, outcomeOf } from '../../utils/broadcast';
 import { BoxScoreRow } from '../common/BoxScore';
 
-export const isLocal = (p: ReplayPlayerStats, ids: Set<string>) => !!p.online_id && ids.has(p.online_id.toLowerCase());
+export const isLocal = (p: ReplayPlayerStats, ids: Set<string>): boolean => {
+  if (p.is_bot || !p.online_id || p.online_id === '0') return false;
+  const onlineId = p.online_id.toLowerCase();
+  if (ids.has(onlineId)) return true;
+  for (const raw of ids) {
+    const lower = raw.toLowerCase();
+    if (lower === onlineId) return true;
+    if (lower.includes('|')) {
+      const parts = lower.split('|');
+      if (parts[1] === onlineId) return true;
+    }
+  }
+  return false;
+};
 
 /** W/L from the local player's side when we can find them in the replay, else the stored result. */
 export function historyOutcome(m: HistoricalMatchRecord, localIds: Set<string>): Outcome {
@@ -14,6 +27,8 @@ export function historyOutcome(m: HistoricalMatchRecord, localIds: Set<string>):
     const them = local.team === 0 ? m.orange_score : m.blue_score;
     if (us > them) return 'W';
     if (us < them) return 'L';
+    if (m.winner_team === local.team) return 'W';
+    if (m.winner_team !== undefined && m.winner_team !== null && m.winner_team >= 0 && m.winner_team !== local.team) return 'L';
     return us || them ? 'D' : null;
   }
   if (m.result) return outcomeOf(m.result);
@@ -30,7 +45,12 @@ export interface ReplayStatus {
 }
 
 export function replayStatus(m: HistoricalMatchRecord): ReplayStatus {
-  const url = m.ballchasing_url || m.stats?.ballchasing_url;
+  let url = m.ballchasing_url || m.stats?.ballchasing_url;
+  if (url && url.includes('/api/replays/')) {
+    url = url.replace('https://ballchasing.com/api/replays/', 'https://ballchasing.com/replay/');
+  } else if (!url && m.ballchasing_id) {
+    url = `https://ballchasing.com/replay/${m.ballchasing_id}`;
+  }
   const upload = (m.upload_status || '').toUpperCase();
   const download = (m.download_status || '').toUpperCase();
   if (url || upload === 'UPLOADED' || upload === 'DUPLICATE') {
@@ -52,20 +72,23 @@ export function teamRows(
   localIds: Set<string>,
   inspectedIdOrName?: string,
 ): BoxScoreRow[] {
+  const inspectedLower = inspectedIdOrName?.toLowerCase();
+  const inspectedOnlineId = inspectedLower?.includes('|') ? inspectedLower.split('|')[1] : inspectedLower;
   return players
     .filter((p) => p.team === team)
     .sort((a, b) => b.score - a.score)
     .map((p, i) => {
       const you = isLocal(p, localIds);
       const isInspected = Boolean(
-        inspectedIdOrName &&
+        inspectedLower &&
           !you &&
-          (p.online_id?.toLowerCase() === inspectedIdOrName.toLowerCase() ||
-            p.name?.toLowerCase() === inspectedIdOrName.toLowerCase()),
+          (p.online_id?.toLowerCase() === inspectedLower ||
+            p.online_id?.toLowerCase() === inspectedOnlineId ||
+            p.name?.toLowerCase() === inspectedLower),
       );
       return {
         key: `${p.online_id || p.name}-${i}`,
-        playerId: p.online_id,
+        playerId: p.online_id && p.online_id !== '0' ? p.online_id : p.name,
         name: you ? 'You' : p.name,
         you,
         inspected: isInspected,

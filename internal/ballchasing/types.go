@@ -472,6 +472,34 @@ func (p *ReplayPlayer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// UnmarshalJSON implements json.Unmarshaler for ReplayTeam, hydrating top-level
+// Goals from nested stats.core.goals or the sum of player goals when top-level
+// goals is omitted (as in Ballchasing's single replay detail endpoint).
+func (t *ReplayTeam) UnmarshalJSON(data []byte) error {
+	type Alias ReplayTeam
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(t),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if t.Goals == 0 && t.Stats != nil && t.Stats.Core != nil && t.Stats.Core.Goals > 0 {
+		t.Goals = t.Stats.Core.Goals
+	}
+	if t.Goals == 0 && len(t.Players) > 0 {
+		sum := 0
+		for _, p := range t.Players {
+			sum += p.Goals
+		}
+		if sum > 0 {
+			t.Goals = sum
+		}
+	}
+	return nil
+}
+
 // UnmarshalJSON bridges field differences between list and detail replay objects.
 func (r *ReplayItem) UnmarshalJSON(data []byte) error {
 	type Alias ReplayItem
@@ -496,6 +524,14 @@ func (r *ReplayItem) UnmarshalJSON(data []byte) error {
 		r.MatchGUID = r.RocketLeagueID
 	} else if r.RocketLeagueID == "" && r.MatchGUID != "" {
 		r.RocketLeagueID = r.MatchGUID
+	}
+
+	// Cross-check team goals from opponent's goals_against if still zero
+	if r.Blue.Goals == 0 && r.Orange.Stats != nil && r.Orange.Stats.Core != nil && r.Orange.Stats.Core.GoalsAgainst > 0 {
+		r.Blue.Goals = r.Orange.Stats.Core.GoalsAgainst
+	}
+	if r.Orange.Goals == 0 && r.Blue.Stats != nil && r.Blue.Stats.Core != nil && r.Blue.Stats.Core.GoalsAgainst > 0 {
+		r.Orange.Goals = r.Blue.Stats.Core.GoalsAgainst
 	}
 
 	return nil

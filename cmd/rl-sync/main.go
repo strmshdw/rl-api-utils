@@ -421,10 +421,12 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 
 	// 9. Initialize Syncer Domain Engine
 	syncerConfig := syncer.Config{
-		ReplayDir:      cfg.Sync.ReplayDir,
-		DryRun:         cfg.Sync.DryRun,
-		KeepLocalFiles: cfg.Sync.KeepLocalFiles,
-		Logger:         logger,
+		ReplayDir:       cfg.Sync.ReplayDir,
+		DryRun:          cfg.Sync.DryRun,
+		KeepLocalFiles:  cfg.Sync.KeepLocalFiles,
+		LocalPlayerID:   cfg.PlayerTracking.LocalPlayerID,
+		LocalPlayerName: cfg.PlayerTracking.LocalPlayerName,
+		Logger:          logger,
 	}
 	syncerEngine := r.NewSyncer(store, psyClient, downloader, bcClient, syncerConfig)
 

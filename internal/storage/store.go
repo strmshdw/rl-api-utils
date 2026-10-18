@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/dank/rl-api-utils/internal/ballchasing"
 )
 
 // Sentinel errors for the storage layer.
@@ -136,17 +138,29 @@ type PlayerMatchDetail struct {
 
 // ReplayPlayerStats contains per-player statistics extracted from a replay or ballchasing record.
 type ReplayPlayerStats struct {
-	Name     string `json:"name"`
-	Platform string `json:"platform"`
-	OnlineID string `json:"online_id"`
-	Team     int    `json:"team"` // 0 = Blue, 1 = Orange
-	Score    int    `json:"score"`
-	Goals    int    `json:"goals"`
-	Assists  int    `json:"assists"`
-	Saves    int    `json:"saves"`
-	Shots    int    `json:"shots"`
-	Demos    int    `json:"demos,omitempty"`
-	IsBot    bool   `json:"is_bot"`
+	Name                string                        `json:"name"`
+	Platform            string                        `json:"platform"`
+	OnlineID            string                        `json:"online_id"`
+	Team                int                           `json:"team"` // 0 = Blue, 1 = Orange
+	Score               int                           `json:"score"`
+	Goals               int                           `json:"goals"`
+	Assists             int                           `json:"assists"`
+	Saves               int                           `json:"saves"`
+	Shots               int                           `json:"shots"`
+	Demos               int                           `json:"demos,omitempty"`
+	IsBot               bool                          `json:"is_bot"`
+	CarID               int                           `json:"car_id,omitempty"`
+	CarName             string                        `json:"car_name,omitempty"`
+	MVP                 bool                          `json:"mvp,omitempty"`
+	Camera              *ballchasing.CameraSettings   `json:"camera,omitempty"`
+	SteeringSensitivity float64                       `json:"steering_sensitivity,omitempty"`
+	Rank                *ballchasing.PlayerRank       `json:"rank,omitempty"`
+	Core                *ballchasing.CoreStats        `json:"core,omitempty"`
+	Boost               *ballchasing.BoostStats       `json:"boost,omitempty"`
+	Movement            *ballchasing.MovementStats    `json:"movement,omitempty"`
+	Positioning         *ballchasing.PositioningStats `json:"positioning,omitempty"`
+	Demo                *ballchasing.DemoStats        `json:"demo,omitempty"`
+	Ball                *ballchasing.BallStats        `json:"ball,omitempty"`
 }
 
 // ReplayMatchStats holds end-of-game replay statistics to enrich local match records.
@@ -281,6 +295,48 @@ func ParseReplayDate(raw string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// NormalizeBallchasingURL converts Ballchasing API location URLs (/api/replays/<id>) to web URLs (/replay/<id>).
+func NormalizeBallchasingURL(ballchasingID, ballchasingURL string) string {
+	id := strings.TrimSpace(ballchasingID)
+	u := strings.TrimSpace(ballchasingURL)
+	if id != "" && (u == "" || strings.Contains(u, "/api/replays/")) {
+		return "https://ballchasing.com/replay/" + id
+	}
+	return u
+}
+
+// MatchesPlatformFilter reports whether playerPlatform matches filterPlatform, accounting for platform aliases
+// across Psyonix Stats API (PS4, XboxOne, PsyNet), local replay headers (PlayStation, Xbox), and Ballchasing.
+func MatchesPlatformFilter(playerPlatform, filterPlatform string) bool {
+	fp := strings.ToLower(strings.TrimSpace(filterPlatform))
+	if fp == "" || fp == "all" {
+		return true
+	}
+	pp := strings.ToLower(strings.TrimSpace(playerPlatform))
+	if pp == fp {
+		return true
+	}
+	switch fp {
+	case "playstation", "ps4", "psn", "psynet":
+		return pp == "playstation" || pp == "ps4" || pp == "psn" || pp == "psynet"
+	case "xbox", "xboxone":
+		return pp == "xbox" || pp == "xboxone"
+	case "switch", "nintendo":
+		return pp == "switch" || pp == "nintendo"
+	}
+	return false
+}
+
+// SamePlatformFamily reports whether two platform strings belong to the same platform family.
+func SamePlatformFamily(platA, platB string) bool {
+	a := strings.ToLower(strings.TrimSpace(platA))
+	b := strings.ToLower(strings.TrimSpace(platB))
+	if a == "" || b == "" || a == "unknown" || b == "unknown" {
+		return true
+	}
+	return MatchesPlatformFilter(a, b)
 }
 
 // StateStore defines the persistence interface required by the syncer and daemon.

@@ -106,7 +106,11 @@ const DirectoryRow: React.FC<{ player: PlayerSummary; onOpen: () => void }> = ({
   );
 };
 
-export const PlayersView: React.FC = () => {
+interface PlayersViewProps {
+  localPlayerIds?: Set<string>;
+}
+
+export const PlayersView: React.FC<PlayersViewProps> = ({ localPlayerIds }) => {
   const {
     query,
     setQuery,
@@ -289,6 +293,7 @@ export const PlayersView: React.FC = () => {
         playerId={selected?.player_id ?? null}
         playerName={selected?.player_name}
         onClose={() => setSelected(null)}
+        localPlayerIds={localPlayerIds}
       />
     </div>
   );

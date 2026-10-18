@@ -516,8 +516,13 @@ export interface ReplayPlayerStats {
   saves: number;
   shots: number;
   demos: number;
+  is_bot?: boolean;
+  car_id?: number;
   car_name?: string;
   mvp?: boolean;
+  camera?: CameraSettings;
+  steering_sensitivity?: number;
+  rank?: { id?: string; tier?: number; division?: number; name?: string; mmr?: number };
   core?: CoreStats;
   boost?: BoostStats;
   movement?: MovementStats;

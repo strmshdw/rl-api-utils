@@ -196,14 +196,14 @@ func TestChallenger_HTTP409_DuplicateTransitionsAndStatsPolled(t *testing.T) {
 		t.Fatalf("expected 2 match players, got %d", len(players))
 	}
 
-	// Verify head-to-head outcome was recorded for RivalOpponent (Orange lost to Blue -> LossesAsOpponent = 1)
+	// Verify head-to-head outcome was recorded for RivalOpponent (LocalHero on Blue beat RivalOpponent on Orange -> WinsAsOpponent = 1)
 	matchup, err := store.GetPlayerMatchup(ctx, "Epic|epic_rival_1|0", 11) // ranked-doubles = 11
 	if err != nil {
 		t.Fatalf("GetPlayerMatchup failed: %v", err)
 	}
-	if matchup.TotalMatches != 1 || matchup.LossesAsOpponent != 1 {
-		t.Fatalf("expected 1 match against RivalOpponent (LossesAsOpponent=1), got Total=%d, Losses=%d",
-			matchup.TotalMatches, matchup.LossesAsOpponent)
+	if matchup.TotalMatches != 1 || matchup.WinsAsOpponent != 1 {
+		t.Fatalf("expected 1 match against RivalOpponent (WinsAsOpponent=1), got Total=%d, Wins=%d",
+			matchup.TotalMatches, matchup.WinsAsOpponent)
 	}
 	t.Logf("HTTP 409 duplicate replay verified: marked DUPLICATE, stats polled and SYNCED, H2H recorded!")
 }

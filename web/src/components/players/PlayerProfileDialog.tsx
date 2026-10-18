@@ -411,7 +411,7 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
             </div>
 
             {/* Paginated Chronological Match History with Level 1 Accordion */}
-            {matches.length > 0 && (
+            {(matches.length > 0 || isLoadingMatches || roleFilter !== 'all' || playlistFilter !== 0) && (
               <div className="px-8 pt-6 pb-2 flex flex-col gap-3">
                 <div className="flex justify-between items-center">
                   <SectionLabel>MATCH HISTORY ({totalMatches})</SectionLabel>
@@ -448,7 +448,17 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
                   ) : (
                     matches.map((m) => {
                     const isExpanded = openMatchGuid === m.match_guid;
-                    const outcome = m.result === 'victory' ? 'W' : m.result === 'defeat' ? 'L' : null;
+                    const isOpponent = m.role === 'opponent';
+                    const outcome =
+                      m.result === 'victory'
+                        ? isOpponent
+                          ? 'L'
+                          : 'W'
+                        : m.result === 'defeat'
+                          ? isOpponent
+                            ? 'W'
+                            : 'L'
+                          : null;
                     return (
                       <div key={m.match_guid} className="bg-panel border border-line flex flex-col">
                         <div
@@ -478,7 +488,7 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
                             <span className={`text-[12px] font-bold px-2 py-0.5 rounded ${m.role === 'teammate' ? 'bg-win/15 text-win' : 'bg-orange-slab/20 text-orange-ink'}`}>
                               {m.role === 'teammate' ? 'WITH YOU' : 'VS YOU'}
                             </span>
-                            <span className="text-muted text-[13px]">{formatAgo(m.created_at)}</span>
+                            <span className="text-muted text-[13px]">{formatAgo(m.stats?.date || m.created_at)}</span>
                             <span className="text-muted text-[14px]">{isExpanded ? '▲' : '▼'}</span>
                           </div>
                         </div>

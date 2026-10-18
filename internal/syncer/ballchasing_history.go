@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -96,16 +97,39 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 		slog.Duration("rate_interval", b.rateInterval),
 	)
 
-	// Auto-detect local player identity from Ballchasing API ping if not provided
+	// Auto-detect local player identity from Ballchasing API ping and store auth if not provided
 	localPID := b.localPlayerID
 	localPName := b.localPlayerName
-	if localPID == "" || localPName == "" {
-		if ping, err := b.client.PingInfo(ctx); err == nil && ping != nil {
-			if localPName == "" && ping.Name != "" {
-				localPName = ping.Name
+	var pingSteamID, pingName string
+	if ping, err := b.client.PingInfo(ctx); err == nil && ping != nil {
+		pingSteamID = strings.TrimSpace(ping.SteamID)
+		pingName = strings.TrimSpace(ping.Name)
+		if localPName == "" && pingName != "" {
+			localPName = pingName
+		}
+		if localPID == "" && pingSteamID != "" {
+			localPID = fmt.Sprintf("Steam|%s|0", pingSteamID)
+		}
+	}
+
+	var authAccountID, authDisplayName, authPlatform string
+	if b.store != nil {
+		if _, accID, disp, err := b.store.GetAuthState(ctx, "epic"); err == nil {
+			if accID != "" && authAccountID == "" {
+				authAccountID = accID
+				authPlatform = "epic"
 			}
-			if localPID == "" && ping.SteamID != "" {
-				localPID = fmt.Sprintf("Steam|%s|0", ping.SteamID)
+			if disp != "" && authDisplayName == "" {
+				authDisplayName = disp
+			}
+		}
+		if _, accID, disp, err := b.store.GetAuthState(ctx, "steam"); err == nil {
+			if accID != "" && authAccountID == "" {
+				authAccountID = accID
+				authPlatform = "steam"
+			}
+			if disp != "" && authDisplayName == "" {
+				authDisplayName = disp
 			}
 		}
 	}
@@ -154,6 +178,21 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 				continue
 			}
 
+			if candidateGUID := strings.TrimSpace(listItem.MatchGUID); candidateGUID != "" {
+				if existing, err := b.store.GetMatch(ctx, candidateGUID); err == nil && existing != nil &&
+					existing.BallchasingID != "" &&
+					(existing.BlueScore > 0 || existing.OrangeScore > 0) &&
+					strings.Contains(existing.ReplayStatsJSON, `"boost":`) {
+					syncedMatches++
+					b.mu.Lock()
+					b.progress.TotalReplays = totalReplays
+					b.progress.SyncedMatches = syncedMatches
+					b.progress.SyncedPlayers = syncedPlayers
+					b.mu.Unlock()
+					continue
+				}
+			}
+
 			// Strictly respect rate limits before each individual replay query
 			b.mu.RLock()
 			interval := b.rateInterval
@@ -191,19 +230,40 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			}
 
 			playlistID := ballchasing.MapPlaylistSlugToID(detail.PlaylistID)
+			if playlistID == 0 {
+				playlistID = ballchasing.MapPlaylistSlugToID(listItem.PlaylistID)
+			}
+
+			blueGoals := detail.Blue.Goals
+			orangeGoals := detail.Orange.Goals
+			if blueGoals == 0 && orangeGoals == 0 && (listItem.Blue.Goals > 0 || listItem.Orange.Goals > 0) {
+				blueGoals = listItem.Blue.Goals
+				orangeGoals = listItem.Orange.Goals
+			}
+			if blueGoals == 0 && orangeGoals == 0 {
+				for _, p := range detail.Blue.Players {
+					blueGoals += p.Goals
+				}
+				for _, p := range detail.Orange.Players {
+					orangeGoals += p.Goals
+				}
+			}
 
 			var winnerTeam *int
-			if detail.Blue.Goals > detail.Orange.Goals {
+			if blueGoals > orangeGoals {
 				w := 0
 				winnerTeam = &w
-			} else if detail.Orange.Goals > detail.Blue.Goals {
+			} else if orangeGoals > blueGoals {
 				w := 1
 				winnerTeam = &w
 			}
 
-			var playerStats []storage.ReplayPlayerStats
-			var matchOutcomes []storage.PlayerOutcome
-			var localTeam *int
+			var (
+				candidates    []ReplayPlayerCandidate
+				playerStats   []storage.ReplayPlayerStats
+				matchPlayers  []*storage.MatchPlayerRecord
+				matchOutcomes []storage.PlayerOutcome
+			)
 
 			type replayPlayerEntry struct {
 				team int
@@ -219,36 +279,22 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			}
 
 			for _, entry := range allReplayPlayers {
-				plat := normalizePlatform(entry.p.ID.Platform)
-				onlineID := entry.p.ID.ID
-				canonicalID := onlineID
-				if onlineID != "" && !strings.Contains(canonicalID, "|") {
-					canonicalID = fmt.Sprintf("%s|%s|0", plat, onlineID)
+				rps := buildReplayPlayerStats(entry.team, entry.p)
+				canonicalID := rps.OnlineID
+				if canonicalID != "" && !strings.Contains(canonicalID, "|") {
+					canonicalID = fmt.Sprintf("%s|%s|0", rps.Platform, canonicalID)
 				}
 
-				// Check if local player
-				if localTeam == nil {
-					if localPID != "" && (canonicalID == localPID || onlineID == localPID) {
-						t := entry.team
-						localTeam = &t
-					} else if localPName != "" && strings.EqualFold(entry.p.Name, localPName) {
-						t := entry.team
-						localTeam = &t
-					}
-				}
-
-				playerStats = append(playerStats, storage.ReplayPlayerStats{
-					Name:     entry.p.Name,
-					Platform: plat,
-					OnlineID: onlineID,
-					Team:     entry.team,
-					Score:    entry.p.Score,
-					Goals:    entry.p.Goals,
-					Assists:  entry.p.Assists,
-					Saves:    entry.p.Saves,
-					Shots:    entry.p.Shots,
-					Demos:    entry.p.Demos.Inflicted,
+				candidates = append(candidates, ReplayPlayerCandidate{
+					Name:        entry.p.Name,
+					Platform:    rps.Platform,
+					OnlineID:    rps.OnlineID,
+					CanonicalID: canonicalID,
+					Team:        entry.team,
+					IsBot:       false,
 				})
+
+				playerStats = append(playerStats, rps)
 
 				if canonicalID != "" && !uniquePlayers[canonicalID] {
 					uniquePlayers[canonicalID] = true
@@ -256,30 +302,81 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 				}
 			}
 
+			identity := LocalPlayerIdentity{
+				ConfigLocalPlayerID:   localPID,
+				ConfigLocalPlayerName: localPName,
+				AuthAccountID:         authAccountID,
+				AuthDisplayName:       authDisplayName,
+				AuthPlatform:          authPlatform,
+				PingSteamID:           pingSteamID,
+				PingName:              pingName,
+			}
+			if detail.Uploader != nil {
+				identity.UploaderSteamID = strings.TrimSpace(detail.Uploader.SteamID)
+				identity.UploaderName = strings.TrimSpace(detail.Uploader.Name)
+			} else if listItem.Uploader != nil {
+				identity.UploaderSteamID = strings.TrimSpace(listItem.Uploader.SteamID)
+				identity.UploaderName = strings.TrimSpace(listItem.Uploader.Name)
+			}
+
+			localIdx, localTeam, found := ResolveLocalPlayer(candidates, identity)
+
+			for i, entry := range allReplayPlayers {
+				c := candidates[i]
+				playerID := c.CanonicalID
+				if playerID == "" {
+					playerID = c.Name
+				}
+
+				isLocal := (found && i == localIdx) || (localTeam != nil && c.Team == *localTeam && localPName != "" && strings.EqualFold(c.Name, localPName))
+
+				var won *bool
+				if winnerTeam != nil {
+					w := (c.Team == *winnerTeam)
+					won = &w
+				}
+
+				var pStatsJSON string
+				if b, err := json.Marshal(playerStats[i]); err == nil {
+					pStatsJSON = string(b)
+				}
+
+				matchPlayers = append(matchPlayers, &storage.MatchPlayerRecord{
+					MatchGUID: guid,
+					PlayerID:  playerID,
+					TeamNum:   c.Team,
+					IsLocal:   isLocal,
+					Won:       won,
+					Score:     entry.p.Score,
+					Goals:     entry.p.Goals,
+					Assists:   entry.p.Assists,
+					Saves:     entry.p.Saves,
+					Shots:     entry.p.Shots,
+					Demos:     playerStats[i].Demos,
+					CarName:   entry.p.CarName,
+					StatsJSON: pStatsJSON,
+				})
+			}
+
 			// Second pass: if local team identified, build head-to-head outcomes
 			if localTeam != nil && winnerTeam != nil {
-				for _, entry := range allReplayPlayers {
-					plat := normalizePlatform(entry.p.ID.Platform)
-					onlineID := entry.p.ID.ID
-					canonicalID := onlineID
-					if onlineID != "" && !strings.Contains(canonicalID, "|") {
-						canonicalID = fmt.Sprintf("%s|%s|0", plat, onlineID)
+				for i, c := range candidates {
+					if c.IsBot || c.CanonicalID == "" {
+						continue
 					}
-					if canonicalID == "" {
+					if found && i == localIdx {
+						continue
+					}
+					if (localPID != "" && strings.EqualFold(c.CanonicalID, localPID)) || (localPName != "" && strings.EqualFold(c.Name, localPName)) {
 						continue
 					}
 
-					// Skip local player themselves in head-to-head records
-					if (localPID != "" && canonicalID == localPID) || (localPName != "" && strings.EqualFold(entry.p.Name, localPName)) {
-						continue
-					}
-
-					isTeammate := (entry.team == *localTeam)
-					won := (entry.team == *winnerTeam)
+					isTeammate := (c.Team == *localTeam)
+					won := (*localTeam == *winnerTeam)
 					matchOutcomes = append(matchOutcomes, storage.PlayerOutcome{
-						PlayerID:   canonicalID,
-						Platform:   plat,
-						PlayerName: entry.p.Name,
+						PlayerID:   c.CanonicalID,
+						Platform:   c.Platform,
+						PlayerName: c.Name,
 						IsTeammate: isTeammate,
 						Won:        won,
 					})
@@ -291,12 +388,16 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			if dateStr == "" {
 				dateStr = detail.Created
 			}
+			if dateStr == "" {
+				dateStr = listItem.Date
+			}
+			matchTime, hasDate := storage.ParseReplayDate(dateStr)
 
 			bcLink := detail.Link
 			if bcLink == "" {
 				bcLink = listItem.Link
 			}
-			if bcLink == "" {
+			if bcLink == "" || strings.Contains(bcLink, "/api/replays/") {
 				bcLink = fmt.Sprintf("https://ballchasing.com/replay/%s", replayID)
 			}
 
@@ -304,10 +405,11 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 				MatchGUID:      guid,
 				MapName:        detail.MapName,
 				Playlist:       playlistID,
-				BlueScore:      detail.Blue.Goals,
-				OrangeScore:    detail.Orange.Goals,
+				BlueScore:      blueGoals,
+				OrangeScore:    orangeGoals,
 				WinnerTeam:     winnerTeam,
 				Duration:       detail.Duration,
+				Overtime:       detail.Overtime,
 				Date:           dateStr,
 				Players:        playerStats,
 				BallchasingID:  replayID,
@@ -322,9 +424,17 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 				continue
 			}
 
+			if len(matchPlayers) > 0 {
+				_ = b.store.SaveMatchPlayers(ctx, guid, matchPlayers)
+			}
+
 			// Record match outcomes for player matchups if local team was present
 			if len(matchOutcomes) > 0 {
-				_ = b.store.RecordMatchResults(ctx, guid, playlistID, matchOutcomes)
+				var matchTimes []time.Time
+				if hasDate {
+					matchTimes = []time.Time{matchTime}
+				}
+				_ = b.store.RecordMatchResults(ctx, guid, playlistID, matchOutcomes, matchTimes...)
 			}
 
 			syncedMatches++

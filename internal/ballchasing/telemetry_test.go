@@ -486,3 +486,53 @@ func TestMapPlaylistSlugToID_NumericFallback(t *testing.T) {
 		}
 	}
 }
+
+func TestReplayDetail_Unmarshal_OmittedTopLevelTeamGoals(t *testing.T) {
+	// Ballchasing GET /api/replays/{id} omits top-level blue.goals and orange.goals,
+	// providing them only inside stats.core.goals and players[*].stats.core.goals.
+	raw := `{
+		"id": "bc-detail-no-top-goals",
+		"rocket_league_id": "guid-no-top-goals",
+		"playlist_id": "ranked-doubles",
+		"blue": {
+			"color": "blue",
+			"stats": {
+				"core": { "shots": 8, "goals": 4, "goals_against": 2, "saves": 5, "assists": 2, "score": 920 }
+			},
+			"players": [
+				{
+					"name": "BlueP1",
+					"id": { "platform": "steam", "id": "76561198000000001" },
+					"stats": { "core": { "goals": 3, "assists": 1, "saves": 3, "shots": 5, "score": 580 } }
+				},
+				{
+					"name": "BlueP2",
+					"id": { "platform": "epic", "id": "epic_b2" },
+					"stats": { "core": { "goals": 1, "assists": 1, "saves": 2, "shots": 3, "score": 340 } }
+				}
+			]
+		},
+		"orange": {
+			"color": "orange",
+			"players": [
+				{
+					"name": "OrangeP1",
+					"id": { "platform": "steam", "id": "76561198000000002" },
+					"stats": { "core": { "goals": 2, "assists": 0, "saves": 2, "shots": 4, "score": 410 } }
+				}
+			]
+		}
+	}`
+
+	var detail ReplayItem
+	if err := json.Unmarshal([]byte(raw), &detail); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if detail.Blue.Goals != 4 {
+		t.Errorf("detail.Blue.Goals = %d; want 4", detail.Blue.Goals)
+	}
+	if detail.Orange.Goals != 2 {
+		t.Errorf("detail.Orange.Goals = %d; want 2", detail.Orange.Goals)
+	}
+}
+

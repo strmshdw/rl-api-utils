@@ -211,4 +211,51 @@ describe('PlayerProfileDialog', () => {
     await clickText(container, 'EDIT NOTES & TAGS');
     expect(container.textContent).toContain('EDIT SCOUTING NOTES & TAGS');
   });
+
+  it('displays WIN badge from local perspective when opponent lost (role=opponent, result=defeat)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/players/player-test-01/matches')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              matches: [
+                {
+                  ...MOCK_MATCHES_RESPONSE.matches[0],
+                  role: 'opponent',
+                  result: 'defeat', // Opponent lost -> You won!
+                },
+              ],
+              total: 1,
+              limit: 10,
+              offset: 0,
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => MOCK_PROFILE,
+        } as Response;
+      })
+    );
+
+    const { container } = await mount(
+      <PlayerProfileDialog
+        playerId="player-test-01"
+        playerName="TargetPlayer"
+        onClose={vi.fn()}
+      />
+    );
+    await flush(10);
+
+    const matchRow = container.querySelector('[data-testid="profile-match-row"]');
+    expect(matchRow).toBeTruthy();
+    expect(matchRow?.textContent).toContain('WIN');
+    expect(matchRow?.textContent).toContain('VS YOU');
+  });
 });
+
