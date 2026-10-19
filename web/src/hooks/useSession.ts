@@ -1,12 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
-import { SessionResponse, SessionMatchDetail } from '../types/api';
+import { SessionResponse, SessionMatchDetail, SessionListResponse } from '../types/api';
 import { sharedSSEManager } from '../context/SSEContext';
 
 export function useSession() {
   const [session, setSession] = useState<SessionResponse | null>(null);
+  const [pastSessions, setPastSessions] = useState<SessionResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
+
+  const fetchPastSessions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sessions?limit=50&offset=0');
+      if (!res || !res.ok) return;
+      const data: SessionListResponse = await res.json();
+      if (data && Array.isArray(data.sessions)) {
+        setPastSessions(data.sessions);
+      }
+    } catch {
+      // Ignore past sessions fetch errors so primary session state is unaffected
+    }
+  }, []);
 
   const fetchSession = useCallback(async () => {
     try {
@@ -15,12 +29,13 @@ export function useSession() {
       const data: SessionResponse = await res.json();
       setSession(data);
       setError(null);
+      void fetchPastSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load session');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fetchPastSessions]);
 
   const resetSession = useCallback(async () => {
     try {
@@ -32,6 +47,46 @@ export function useSession() {
     }
   }, [fetchSession]);
 
+  const continueSession = useCallback(
+    async (sessionId?: string): Promise<SessionResponse | null> => {
+      try {
+        const res = await fetch('/api/session/continue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sessionId ? { session_id: sessionId } : {}),
+        });
+        if (!res.ok) throw new Error(`Failed to continue session: HTTP ${res.status}`);
+        const data: SessionResponse = await res.json();
+        setSession(data);
+        setError(null);
+        void fetchPastSessions();
+        return data;
+      } catch (err) {
+        console.error('Session continue error:', err);
+        return null;
+      }
+    },
+    [fetchPastSessions],
+  );
+
+  const dismissContinueSession = useCallback(
+    async (sessionId?: string) => {
+      try {
+        const res = await fetch('/api/session/dismiss', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sessionId ? { session_id: sessionId } : {}),
+        });
+        if (!res.ok) throw new Error(`Failed to dismiss session continuation: HTTP ${res.status}`);
+        const data: SessionResponse = await res.json();
+        setSession(data);
+      } catch (err) {
+        console.error('Session dismiss error:', err);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     fetchSession();
 
@@ -41,6 +96,7 @@ export function useSession() {
         setSession(data);
         setError(null);
         setIsLoading(false);
+        void fetchPastSessions();
       } else {
         fetchSession();
       }
@@ -54,15 +110,20 @@ export function useSession() {
       unsubSessionUpdate();
       unsubMatchEnded();
     };
-  }, [fetchSession]);
+  }, [fetchSession, fetchPastSessions]);
 
   return {
     session,
+    pastSessions,
     isLoading,
     error,
     refreshSession: fetchSession,
+    refreshPastSessions: fetchPastSessions,
     resetSession,
+    continueSession,
+    dismissContinueSession,
     selectedMatch,
     setSelectedMatch,
   };
 }
+

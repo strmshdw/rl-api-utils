@@ -6,6 +6,7 @@ import { Scorebug } from './Scorebug';
 import { LivePlayerCard, statLeaders } from './LivePlayerCard';
 import { IdleStateView } from './IdleStateView';
 import { ColumnConfigModal } from './ColumnConfigModal';
+import { ContinueSessionBanner } from '../session/SessionView';
 
 interface LiveGameViewProps {
   match: CurrentMatchResponse | null;
@@ -14,6 +15,8 @@ interface LiveGameViewProps {
   columnsOpen: boolean;
   onCloseColumns: () => void;
   onShowSession: () => void;
+  onContinueSession?: (sessionId?: string) => void;
+  onDismissContinueSession?: (sessionId?: string) => void;
 }
 
 /** Local player, teammates and opponents, de-duplicated; spectators are excluded. */
@@ -33,7 +36,16 @@ export function lobbyPlayers(match: CurrentMatchResponse): LobbyPlayer[] {
 
 const byScore = (a: LobbyPlayer, b: LobbyPlayer) => (b.stats?.score || 0) - (a.stats?.score || 0);
 
-export const LiveGameView: React.FC<LiveGameViewProps> = ({ match, session, connection, columnsOpen, onCloseColumns, onShowSession }) => {
+export const LiveGameView: React.FC<LiveGameViewProps> = ({
+  match,
+  session,
+  connection,
+  columnsOpen,
+  onCloseColumns,
+  onShowSession,
+  onContinueSession,
+  onDismissContinueSession,
+}) => {
   const { config, toggleColumn, applyPreset, resetToDefault, activePreset } = useColumnConfig();
 
   // Allow rendering if match is active OR match has ended, preventing sudden screen wipe to IdleStateView
@@ -42,7 +54,15 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({ match, session, conn
   const leaders = useMemo(() => statLeaders(lobby), [lobby]);
 
   if (!isDisplayable || !match) {
-    return <IdleStateView session={session} connection={connection} onShowSession={onShowSession} />;
+    return (
+      <IdleStateView
+        session={session}
+        connection={connection}
+        onShowSession={onShowSession}
+        onContinueSession={onContinueSession}
+        onDismissContinueSession={onDismissContinueSession}
+      />
+    );
   }
 
   const localId = match.local_player?.player_id;
@@ -52,6 +72,15 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({ match, session, conn
 
   return (
     <div data-testid="live-match">
+      {session?.continuable_session && (
+        <div className="mb-4">
+          <ContinueSessionBanner
+            continuableSession={session.continuable_session}
+            onContinue={(id) => onContinueSession?.(id)}
+            onDismiss={(id) => onDismissContinueSession?.(id)}
+          />
+        </div>
+      )}
       {match.match_ended && (
         <div data-testid="match-ended-banner" className="mb-4 bg-panel border-l-4 border-blue-ink px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3 font-display">

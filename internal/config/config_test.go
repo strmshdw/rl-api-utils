@@ -1304,3 +1304,60 @@ func TestConfig_Web_CLIOverrides(t *testing.T) {
 		t.Errorf("expected CLI web port 49199, got %d", cfg.Web.Port)
 	}
 }
+
+func TestConfig_SessionContinueWindow(t *testing.T) {
+	t.Run("default_is_2h", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		if cfg.EffectiveSessionContinueWindow() != 2*time.Hour {
+			t.Fatalf("expected default continue window 2h, got %v", cfg.EffectiveSessionContinueWindow())
+		}
+	})
+
+	t.Run("env_and_cli_overrides", func(t *testing.T) {
+		t.Setenv("RL_SYNC_EPIC_REFRESH_TOKEN", "token")
+		t.Setenv("RL_SYNC_BALLCHASING_API_KEY", "key")
+		t.Setenv("RL_SYNC_SESSION_CONTINUE_WINDOW", "90m")
+
+		cfgEnv, err := config.Load(config.CLIFlags{})
+		if err != nil {
+			t.Fatalf("unexpected error loading env override: %v", err)
+		}
+		if cfgEnv.EffectiveSessionContinueWindow() != 90*time.Minute {
+			t.Fatalf("expected env continue window 90m, got %v", cfgEnv.EffectiveSessionContinueWindow())
+		}
+
+		cliWin := 45 * time.Minute
+		cfgCLI, err := config.Load(config.CLIFlags{
+			SessionContinueWindow: &cliWin,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error loading CLI override: %v", err)
+		}
+		if cfgCLI.EffectiveSessionContinueWindow() != 45*time.Minute {
+			t.Fatalf("expected CLI continue window 45m, got %v", cfgCLI.EffectiveSessionContinueWindow())
+		}
+
+		zeroWin := time.Duration(0)
+		cfgZero, err := config.Load(config.CLIFlags{
+			SessionContinueWindow: &zeroWin,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error loading 0s CLI override: %v", err)
+		}
+		if cfgZero.EffectiveSessionContinueWindow() != 0 {
+			t.Fatalf("expected 0 continue window when disabled, got %v", cfgZero.EffectiveSessionContinueWindow())
+		}
+	})
+
+	t.Run("negative_continue_window_rejected", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		cfg.Auth.Epic.RefreshToken = "token"
+		cfg.Ballchasing.APIKey = "key"
+		cfg.Session.ContinueWindow = config.Duration(-10 * time.Minute)
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "session: 'continue_window' cannot be negative") {
+			t.Fatalf("expected negative continue_window validation error, got: %v", err)
+		}
+	})
+}
+

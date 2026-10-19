@@ -133,6 +133,25 @@ CREATE TABLE IF NOT EXISTS mmr_history (
 CREATE INDEX IF NOT EXISTS idx_mmr_history_playlist ON mmr_history(playlist_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mmr_history_recorded ON mmr_history(recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mmr_history_match ON mmr_history(match_guid);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id TEXT PRIMARY KEY,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    last_match_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    total_matches INTEGER NOT NULL DEFAULT 0,
+    total_wins INTEGER NOT NULL DEFAULT 0,
+    total_losses INTEGER NOT NULL DEFAULT 0,
+    win_rate REAL NOT NULL DEFAULT 0,
+    playlists_json TEXT NOT NULL DEFAULT '{}',
+    matches_json TEXT NOT NULL DEFAULT '[]',
+    local_player_ids TEXT NOT NULL DEFAULT '[]',
+    dismissed INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_last_match_at ON sessions(last_match_at DESC);
 `
 
 // SQLiteStore implements StateStore backed by pure Go modernc.org/sqlite.
@@ -220,6 +239,11 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	if _, err := db.ExecContext(ctx, schemaDDL); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+	}
+
+	if err := migrateSessionsTable(ctx, db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to migrate sessions schema: %w", err)
 	}
 
 	// Run startup backfill migration for match_players
@@ -3313,6 +3337,303 @@ func (s *SQLiteStore) ResetMatchRetry(ctx context.Context, matchGUID string) err
 		return fmt.Errorf("failed to reset match retry for %s: %w", matchGUID, err)
 	}
 	return checkRowsAffected(res)
+}
+
+func encodeSessionTime(t time.Time) int64 {
+	return t.UTC().UnixNano()
+}
+
+func decodeSessionTime(val int64) time.Time {
+	if val == 0 {
+		return time.Time{}
+	}
+	// Support Unix seconds, milliseconds, and nanoseconds seamlessly.
+	if val > -1e11 && val < 1e11 {
+		return time.Unix(val, 0).UTC()
+	}
+	if val > -1e14 && val < 1e14 {
+		return time.UnixMilli(val).UTC()
+	}
+	return time.Unix(0, val).UTC()
+}
+
+// SaveSession inserts or updates a persistent play session record.
+func (s *SQLiteStore) SaveSession(ctx context.Context, session *SessionRecord) error {
+	if err := ctx.Err(); err != nil {
+		return wrapContextErr(err)
+	}
+	if session == nil || strings.TrimSpace(session.SessionID) == "" {
+		return errors.New("session ID cannot be empty")
+	}
+
+	sessionID := strings.TrimSpace(session.SessionID)
+	now := time.Now().UTC()
+	updatedAt := session.UpdatedAt.UTC()
+	if updatedAt.IsZero() {
+		updatedAt = now
+	}
+	startedAt := session.StartedAt.UTC()
+	if startedAt.IsZero() {
+		startedAt = updatedAt
+	}
+
+	var endedAtVal interface{}
+	if session.EndedAt != nil && !session.EndedAt.IsZero() {
+		endedAtVal = encodeSessionTime(*session.EndedAt)
+	}
+
+	var lastMatchAtVal interface{}
+	if session.LastMatchAt != nil && !session.LastMatchAt.IsZero() {
+		lastMatchAtVal = encodeSessionTime(*session.LastMatchAt)
+	}
+
+	playlistsJSON := session.PlaylistsJSON
+	if strings.TrimSpace(playlistsJSON) == "" {
+		playlistsJSON = "{}"
+	}
+	matchesJSON := session.MatchesJSON
+	if strings.TrimSpace(matchesJSON) == "" {
+		matchesJSON = "[]"
+	}
+	localIDs := session.LocalPlayerIDs
+	if localIDs == nil {
+		localIDs = []string{}
+	}
+	localIDsBytes, err := json.Marshal(localIDs)
+	if err != nil {
+		localIDsBytes = []byte("[]")
+	}
+
+	dismissedInt := 0
+	if session.Dismissed {
+		dismissedInt = 1
+	}
+
+	const query = `
+	INSERT INTO sessions (
+		session_id, started_at, ended_at, last_match_at, updated_at,
+		total_matches, total_wins, total_losses, win_rate,
+		playlists_json, matches_json, local_player_ids, dismissed
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(session_id) DO UPDATE SET
+		started_at = excluded.started_at,
+		ended_at = excluded.ended_at,
+		last_match_at = excluded.last_match_at,
+		updated_at = excluded.updated_at,
+		total_matches = excluded.total_matches,
+		total_wins = excluded.total_wins,
+		total_losses = excluded.total_losses,
+		win_rate = excluded.win_rate,
+		playlists_json = excluded.playlists_json,
+		matches_json = excluded.matches_json,
+		local_player_ids = excluded.local_player_ids,
+		dismissed = excluded.dismissed;
+	`
+
+	_, err = s.db.ExecContext(ctx, query,
+		sessionID,
+		encodeSessionTime(startedAt),
+		endedAtVal,
+		lastMatchAtVal,
+		encodeSessionTime(updatedAt),
+		session.TotalMatches,
+		session.TotalWins,
+		session.TotalLosses,
+		session.WinRate,
+		playlistsJSON,
+		matchesJSON,
+		string(localIDsBytes),
+		dismissedInt,
+	)
+	if err != nil {
+		return wrapContextErr(fmt.Errorf("failed to save session %s: %w", sessionID, err))
+	}
+	return nil
+}
+
+// GetSession retrieves a persistent play session by its ID.
+func (s *SQLiteStore) GetSession(ctx context.Context, sessionID string) (*SessionRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, wrapContextErr(err)
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, ErrSessionNotFound
+	}
+
+	const query = `
+	SELECT session_id, started_at, ended_at, last_match_at, updated_at,
+	       total_matches, total_wins, total_losses, win_rate,
+	       playlists_json, matches_json, local_player_ids, dismissed
+	FROM sessions
+	WHERE session_id = ?;
+	`
+
+	row := s.db.QueryRowContext(ctx, query, sessionID)
+	rec, err := scanSessionRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, wrapContextErr(fmt.Errorf("failed to get session %s: %w", sessionID, err))
+	}
+	return rec, nil
+}
+
+// ListSessions returns a paginated list of persisted play sessions ordered most recent first.
+func (s *SQLiteStore) ListSessions(ctx context.Context, limit, offset int) ([]*SessionRecord, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, wrapContextErr(err)
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions;").Scan(&total); err != nil {
+		return nil, 0, wrapContextErr(fmt.Errorf("failed to count sessions: %w", err))
+	}
+
+	const query = `
+	SELECT session_id, started_at, ended_at, last_match_at, updated_at,
+	       total_matches, total_wins, total_losses, win_rate,
+	       playlists_json, matches_json, local_player_ids, dismissed
+	FROM sessions
+	ORDER BY COALESCE(last_match_at, started_at) DESC, started_at DESC, session_id ASC
+	LIMIT ? OFFSET ?;
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, wrapContextErr(fmt.Errorf("failed to list sessions: %w", err))
+	}
+	defer rows.Close()
+
+	var records []*SessionRecord
+	for rows.Next() {
+		rec, scanErr := scanSessionRow(rows)
+		if scanErr != nil {
+			return nil, 0, wrapContextErr(fmt.Errorf("failed to scan session row: %w", scanErr))
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, wrapContextErr(fmt.Errorf("rows error in list sessions: %w", err))
+	}
+	if records == nil {
+		records = make([]*SessionRecord, 0)
+	}
+	return records, total, nil
+}
+
+// DeleteSession deletes a play session record by ID.
+func (s *SQLiteStore) DeleteSession(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return wrapContextErr(err)
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+
+	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE session_id = ?;", sessionID)
+	if err != nil {
+		return wrapContextErr(fmt.Errorf("failed to delete session %s: %w", sessionID, err))
+	}
+	return nil
+}
+
+type sessionRowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanSessionRow(scanner sessionRowScanner) (*SessionRecord, error) {
+	var (
+		rec          SessionRecord
+		startedAtRaw int64
+		endedAtRaw   sql.NullInt64
+		lastMatchRaw sql.NullInt64
+		updatedAtRaw int64
+		localIDsRaw  string
+		dismissedInt int
+	)
+	err := scanner.Scan(
+		&rec.SessionID,
+		&startedAtRaw,
+		&endedAtRaw,
+		&lastMatchRaw,
+		&updatedAtRaw,
+		&rec.TotalMatches,
+		&rec.TotalWins,
+		&rec.TotalLosses,
+		&rec.WinRate,
+		&rec.PlaylistsJSON,
+		&rec.MatchesJSON,
+		&localIDsRaw,
+		&dismissedInt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rec.StartedAt = decodeSessionTime(startedAtRaw)
+	if endedAtRaw.Valid && endedAtRaw.Int64 != 0 {
+		t := decodeSessionTime(endedAtRaw.Int64)
+		rec.EndedAt = &t
+	}
+	if lastMatchRaw.Valid && lastMatchRaw.Int64 != 0 {
+		t := decodeSessionTime(lastMatchRaw.Int64)
+		rec.LastMatchAt = &t
+	}
+	rec.UpdatedAt = decodeSessionTime(updatedAtRaw)
+	rec.Dismissed = dismissedInt != 0
+
+	if strings.TrimSpace(localIDsRaw) != "" {
+		_ = json.Unmarshal([]byte(localIDsRaw), &rec.LocalPlayerIDs)
+	}
+	if rec.LocalPlayerIDs == nil {
+		rec.LocalPlayerIDs = []string{}
+	}
+	return &rec, nil
+}
+
+// migrateSessionsTable ensures the sessions table has the dismissed column.
+func migrateSessionsTable(ctx context.Context, db *sql.DB) error {
+	var tableCount int
+	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sessions';").Scan(&tableCount)
+	if err != nil || tableCount == 0 {
+		return nil
+	}
+
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(sessions);")
+	if err != nil {
+		return fmt.Errorf("failed to read sessions table_info: %w", err)
+	}
+	defer rows.Close()
+
+	cols := make(map[string]bool)
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, colType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("failed to scan sessions table_info: %w", err)
+		}
+		cols[strings.ToLower(name)] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("sessions table_info iteration error: %w", err)
+	}
+
+	if !cols["dismissed"] {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0;"); err != nil {
+			return fmt.Errorf("failed to add dismissed column to sessions: %w", err)
+		}
+	}
+	return nil
 }
 
 // migrateMatchPlayers backfills match_players from existing matches with replay_stats_json on startup.

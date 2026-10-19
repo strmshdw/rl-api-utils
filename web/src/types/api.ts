@@ -119,6 +119,8 @@ export interface CurrentMatchResponse {
 export interface SessionResponse {
   session_id: string;
   started_at: string;
+  ended_at?: string;
+  last_match_at?: string;
   uptime: string;
   total_matches: number;
   total_wins: number;
@@ -128,6 +130,16 @@ export interface SessionResponse {
   matches: SessionMatchDetail[];
   active_match?: CurrentMatchResponse;
   local_player_ids?: string[];
+  continuable_session?: SessionResponse | null;
+  continue_window_seconds?: number;
+  can_continue?: boolean;
+}
+
+export interface SessionListResponse {
+  sessions: SessionResponse[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 // ============================================================================

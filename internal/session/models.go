@@ -154,17 +154,22 @@ type ActiveMatchRecord struct {
 
 // SessionResponse represents the full payload returned by GET /api/session.
 type SessionResponse struct {
-	SessionID    string                           `json:"session_id"`
-	StartedAt    time.Time                        `json:"started_at"`
-	Uptime       string                           `json:"uptime"`
-	TotalMatches int                              `json:"total_matches"`
-	TotalWins    int                              `json:"total_wins"`
-	TotalLosses  int                              `json:"total_losses"`
-	WinRate      float64                          `json:"win_rate"` // Percentage (0.0 - 100.0, rounded to 1 decimal place)
-	Playlists    map[string]*PlaylistSessionStats `json:"playlists"`
-	Matches      []*SessionMatchDetail            `json:"matches"`
-	ActiveMatch  *playertrack.CurrentMatchResponse `json:"active_match,omitempty"`
-	LocalPlayerIDs []string                         `json:"local_player_ids,omitempty"`
+	SessionID             string                           `json:"session_id"`
+	StartedAt             time.Time                        `json:"started_at"`
+	EndedAt               *time.Time                       `json:"ended_at,omitempty"`
+	LastMatchAt           *time.Time                       `json:"last_match_at,omitempty"`
+	Uptime                string                           `json:"uptime"`
+	TotalMatches          int                              `json:"total_matches"`
+	TotalWins             int                              `json:"total_wins"`
+	TotalLosses           int                              `json:"total_losses"`
+	WinRate               float64                          `json:"win_rate"` // Percentage (0.0 - 100.0, rounded to 1 decimal place)
+	Playlists             map[string]*PlaylistSessionStats `json:"playlists"`
+	Matches               []*SessionMatchDetail            `json:"matches"`
+	ActiveMatch           *playertrack.CurrentMatchResponse `json:"active_match,omitempty"`
+	LocalPlayerIDs        []string                         `json:"local_player_ids,omitempty"`
+	ContinuableSession    *SessionResponse                 `json:"continuable_session,omitempty"`
+	ContinueWindowSeconds int                              `json:"continue_window_seconds,omitempty"`
+	CanContinue           bool                             `json:"can_continue,omitempty"`
 }
 
 // DeepClone creates a fully isolated copy of SessionResponse for thread-safe concurrent reads.
@@ -173,6 +178,14 @@ func (r *SessionResponse) DeepClone() *SessionResponse {
 		return nil
 	}
 	clone := *r
+	if r.EndedAt != nil {
+		t := *r.EndedAt
+		clone.EndedAt = &t
+	}
+	if r.LastMatchAt != nil {
+		t := *r.LastMatchAt
+		clone.LastMatchAt = &t
+	}
 	if r.Playlists != nil {
 		clone.Playlists = make(map[string]*PlaylistSessionStats, len(r.Playlists))
 		for k, v := range r.Playlists {
@@ -192,5 +205,9 @@ func (r *SessionResponse) DeepClone() *SessionResponse {
 		clone.LocalPlayerIDs = make([]string, len(r.LocalPlayerIDs))
 		copy(clone.LocalPlayerIDs, r.LocalPlayerIDs)
 	}
+	if r.ContinuableSession != nil {
+		clone.ContinuableSession = r.ContinuableSession.DeepClone()
+	}
 	return &clone
 }
+

@@ -103,4 +103,88 @@ describe('SessionView', () => {
     const loading = await mount(<SessionView session={null} isLoading error={null} onResetSession={() => {}} />);
     expect(loading.container.textContent).toContain('LOADING SESSION…');
   });
+
+  it('renders the continue previous session banner and invokes continue / dismiss handlers', async () => {
+    const onContinue = vi.fn();
+    const onDismiss = vi.fn();
+    const prevSession: SessionResponse = {
+      ...SAMPLE_SESSION_RESPONSE,
+      session_id: 'prev-session-123',
+      total_matches: 3,
+      total_wins: 2,
+      total_losses: 1,
+      last_match_at: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+    };
+    const currentSession: SessionResponse = {
+      ...SAMPLE_SESSION_RESPONSE,
+      session_id: 'curr-session-456',
+      matches: [],
+      total_matches: 0,
+      total_wins: 0,
+      total_losses: 0,
+      continuable_session: prevSession,
+    };
+
+    const { container } = await renderSession(currentSession, {
+      onContinueSession: onContinue,
+      onDismissContinueSession: onDismiss,
+    });
+
+    const banner = container.querySelector('[data-testid="continue-session-banner"]')!;
+    expect(banner).not.toBeNull();
+    expect(banner.textContent).toContain('2W–1L · 3 MATCHES');
+    expect(banner.textContent).toContain('LAST PLAYED 25 MIN AGO');
+
+    await clickText(banner, 'CONTINUE SESSION');
+    expect(onContinue).toHaveBeenCalledWith('prev-session-123');
+
+    await clickText(banner, 'START NEW');
+    expect(onDismiss).toHaveBeenCalledWith('prev-session-123');
+  });
+
+  it('displays session history over time and lets the user inspect or continue past sessions', async () => {
+    const onContinue = vi.fn();
+    const pastSession: SessionResponse = {
+      ...SAMPLE_SESSION_RESPONSE,
+      session_id: 'past-session-001',
+      started_at: '2026-10-16T18:00:00Z',
+      last_match_at: '2026-10-16T19:00:00Z',
+      total_matches: 2,
+      total_wins: 2,
+      total_losses: 0,
+      can_continue: true,
+      matches: SAMPLE_SESSION_RESPONSE.matches.slice(0, 2),
+    };
+    const currentSession: SessionResponse = {
+      ...SAMPLE_SESSION_RESPONSE,
+      session_id: 'curr-session-002',
+    };
+
+    const { container } = await renderSession(currentSession, {
+      pastSessions: [currentSession, pastSession],
+      onContinueSession: onContinue,
+    });
+
+    const historySection = container.querySelector('[data-testid="session-history-section"]')!;
+    expect(historySection).not.toBeNull();
+    const histRows = historySection.querySelectorAll<HTMLElement>('[data-testid="session-history-row"]');
+    expect(histRows).toHaveLength(2);
+    expect(histRows[0].textContent).toContain('CURRENT');
+    expect(histRows[1].textContent).toContain('CONTINUABLE');
+
+    // Click the past session row to inspect its matches and KPIs
+    await act(async () => histRows[1].click());
+    expect(container.querySelector('[data-testid="historical-session-banner"]')).not.toBeNull();
+    expect(rows(container)).toHaveLength(2);
+
+    // Return to current session
+    await clickText(container, '← CURRENT SESSION');
+    expect(container.querySelector('[data-testid="historical-session-banner"]')).toBeNull();
+    expect(rows(container)).toHaveLength(5);
+
+    // Click CONTINUE directly on the history row
+    const continueBtn = histRows[1].querySelector<HTMLElement>('[data-testid="continue-history-row-btn"]')!;
+    await act(async () => continueBtn.click());
+    expect(onContinue).toHaveBeenCalledWith('past-session-001');
+  });
 });

@@ -20,12 +20,15 @@ import { formatDuration } from '../../utils/formatters';
 import { TeamBoxScore, sessionMatchRows } from '../common/BoxScore';
 import { EmptyLine, GhostButton, SectionLabel, StatusDot } from '../common/ui';
 import { PlaylistRows, SessionKpiStrip } from '../session/SessionKpis';
+import { ContinueSessionBanner } from '../session/SessionView';
 import { useMMRHistory } from '../../hooks/useMMRHistory';
 
 interface IdleStateViewProps {
   session: SessionResponse | null;
   connection: ConnectionStatus;
   onShowSession: () => void;
+  onContinueSession?: (sessionId?: string) => void;
+  onDismissContinueSession?: (sessionId?: string) => void;
 }
 
 const OUTCOME_WORD = { W: 'WIN', L: 'LOSS', D: 'DRAW' } as const;
@@ -96,7 +99,13 @@ const LastMatch: React.FC<{ match: SessionMatchDetail; onShowSession: () => void
   );
 };
 
-export const IdleStateView: React.FC<IdleStateViewProps> = ({ session, connection, onShowSession }) => {
+export const IdleStateView: React.FC<IdleStateViewProps> = ({
+  session,
+  connection,
+  onShowSession,
+  onContinueSession,
+  onDismissContinueSession,
+}) => {
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
   const summary = useMemo(() => summarizeSession(session), [session]);
   const matches = chronological(session?.matches);
@@ -125,6 +134,14 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({ session, connectio
           </span>
         </div>
       </div>
+
+      {session?.continuable_session && (
+        <ContinueSessionBanner
+          continuableSession={session.continuable_session}
+          onContinue={(id) => onContinueSession?.(id)}
+          onDismiss={(id) => onDismissContinueSession?.(id)}
+        />
+      )}
 
       {lastMatch ? <LastMatch match={lastMatch} onShowSession={onShowSession} /> : <EmptyLine>NO MATCHES THIS SESSION YET</EmptyLine>}
 
