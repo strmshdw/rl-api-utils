@@ -27,6 +27,7 @@ type jsonStatePayload struct {
 	ProcessedMatches map[string]int64                  `json:"processed_matches,omitempty"`
 	MatchPlayers     map[string][]*MatchPlayerRecord   `json:"match_players,omitempty"`
 	MMRHistory       []*MMRHistoryRecord               `json:"mmr_history,omitempty"`
+	Sessions         map[string]*SessionRecord         `json:"sessions,omitempty"`
 }
 
 // JSONStore provides an in-memory StateStore with atomic disk persistence via temporary files
@@ -41,6 +42,7 @@ type JSONStore struct {
 	processedMatches map[string]int64
 	matchPlayers     map[string][]*MatchPlayerRecord
 	mmrHistory       []*MMRHistoryRecord
+	sessions         map[string]*SessionRecord
 	closed           bool
 	maxRetries       int
 	baseBackoff      time.Duration
@@ -109,6 +111,7 @@ func NewJSONStore(filePath string) (*JSONStore, error) {
 		processedMatches: make(map[string]int64),
 		matchPlayers:     make(map[string][]*MatchPlayerRecord),
 		mmrHistory:       make([]*MMRHistoryRecord, 0),
+		sessions:         make(map[string]*SessionRecord),
 		maxRetries:       DefaultMaxRetries,
 		baseBackoff:      DefaultBaseBackoff,
 		maxBackoff:       DefaultMaxBackoff,
@@ -181,6 +184,14 @@ func NewJSONStore(filePath string) (*JSONStore, error) {
 	if payload.MMRHistory != nil {
 		store.mmrHistory = payload.MMRHistory
 	}
+	if payload.Sessions != nil {
+		store.sessions = payload.Sessions
+		for _, sess := range store.sessions {
+			if sess.LocalPlayerIDs == nil {
+				sess.LocalPlayerIDs = []string{}
+			}
+		}
+	}
 
 	// Startup backfill: populate matchPlayers from existing matches with replay_stats_json if missing
 	store.backfillMatchPlayersLocked()
@@ -209,6 +220,7 @@ func (s *JSONStore) saveLocked() error {
 		ProcessedMatches: s.processedMatches,
 		MatchPlayers:     s.matchPlayers,
 		MMRHistory:       s.mmrHistory,
+		Sessions:         s.sessions,
 	}
 
 	data, err := json.Marshal(payload)
@@ -2824,6 +2836,172 @@ func (s *JSONStore) ResetMatchRetry(ctx context.Context, matchGUID string) error
 		m.StatsSyncStatus = StatsSyncPending
 	}
 	m.UpdatedAt = now
+	return s.saveLocked()
+}
+
+func copySessionRecord(src *SessionRecord) *SessionRecord {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	if src.EndedAt != nil {
+		t := src.EndedAt.UTC()
+		cp.EndedAt = &t
+	}
+	if src.LastMatchAt != nil {
+		t := src.LastMatchAt.UTC()
+		cp.LastMatchAt = &t
+	}
+	if len(src.LocalPlayerIDs) > 0 {
+		cp.LocalPlayerIDs = make([]string, len(src.LocalPlayerIDs))
+		copy(cp.LocalPlayerIDs, src.LocalPlayerIDs)
+	} else {
+		cp.LocalPlayerIDs = []string{}
+	}
+	return &cp
+}
+
+// SaveSession inserts or updates a persistent play session record.
+func (s *JSONStore) SaveSession(ctx context.Context, session *SessionRecord) error {
+	if err := ctx.Err(); err != nil {
+		return wrapContextErr(err)
+	}
+	if session == nil || strings.TrimSpace(session.SessionID) == "" {
+		return errors.New("session ID cannot be empty")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	cp := copySessionRecord(session)
+	cp.SessionID = strings.TrimSpace(cp.SessionID)
+	now := time.Now().UTC()
+	if cp.UpdatedAt.IsZero() {
+		cp.UpdatedAt = now
+	} else {
+		cp.UpdatedAt = cp.UpdatedAt.UTC()
+	}
+	if cp.StartedAt.IsZero() {
+		cp.StartedAt = cp.UpdatedAt
+	} else {
+		cp.StartedAt = cp.StartedAt.UTC()
+	}
+	if strings.TrimSpace(cp.PlaylistsJSON) == "" {
+		cp.PlaylistsJSON = "{}"
+	}
+	if strings.TrimSpace(cp.MatchesJSON) == "" {
+		cp.MatchesJSON = "[]"
+	}
+
+	if s.sessions == nil {
+		s.sessions = make(map[string]*SessionRecord)
+	}
+	s.sessions[cp.SessionID] = cp
+	return s.saveLocked()
+}
+
+// GetSession retrieves a persistent play session by its ID.
+func (s *JSONStore) GetSession(ctx context.Context, sessionID string) (*SessionRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, wrapContextErr(err)
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, ErrSessionNotFound
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	rec, ok := s.sessions[sessionID]
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+	return copySessionRecord(rec), nil
+}
+
+// ListSessions returns a paginated list of persisted play sessions ordered most recent first.
+func (s *JSONStore) ListSessions(ctx context.Context, limit, offset int) ([]*SessionRecord, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, wrapContextErr(err)
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil, 0, ErrStoreClosed
+	}
+
+	all := make([]*SessionRecord, 0, len(s.sessions))
+	for _, rec := range s.sessions {
+		all = append(all, copySessionRecord(rec))
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		ti := all[i].StartedAt
+		if all[i].LastMatchAt != nil && !all[i].LastMatchAt.IsZero() {
+			ti = *all[i].LastMatchAt
+		}
+		tj := all[j].StartedAt
+		if all[j].LastMatchAt != nil && !all[j].LastMatchAt.IsZero() {
+			tj = *all[j].LastMatchAt
+		}
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		if !all[i].StartedAt.Equal(all[j].StartedAt) {
+			return all[i].StartedAt.After(all[j].StartedAt)
+		}
+		return all[i].SessionID < all[j].SessionID
+	})
+
+	total := len(all)
+	if offset >= total {
+		return []*SessionRecord{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
+}
+
+// DeleteSession deletes a play session record by ID.
+func (s *JSONStore) DeleteSession(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return wrapContextErr(err)
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return ErrStoreClosed
+	}
+
+	if _, ok := s.sessions[sessionID]; !ok {
+		return nil
+	}
+	delete(s.sessions, sessionID)
 	return s.saveLocked()
 }
 

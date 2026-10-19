@@ -132,6 +132,15 @@ player_tracking:
   # Automatically trigger PsyNet rank queries for players when entering a match lobby
   auto_fetch_ranks: true                   # Override with RL_SYNC_AUTO_FETCH_RANKS or RL_SYNC_PLAYER_TRACKING_AUTO_FETCH_RANKS
 
+# ==============================================================================
+# Play Session Tracking & Continuation Settings
+# ==============================================================================
+session:
+  # Maximum elapsed time since the last game played in a previous session during
+  # which that session can be continued (e.g. after restarting rl-sync or Rocket League).
+  # Set to "0s" to disable session continuation.
+  continue_window: "2h"                    # Override with RL_SYNC_SESSION_CONTINUE_WINDOW or --session-continue-window
+
 # Rocket League Local Stats API (MatchStatsExporter_TA) Settings
 # The game client can broadcast match events locally without using PsyNet auth tokens,
 # preventing duplicate login errors and party disconnects while playing in-game.

@@ -30,7 +30,15 @@ export const App: React.FC = () => {
     document.body.classList.toggle('overlay-mode', isOverlayMode);
   }, [isOverlayMode]);
 
-  const { session: liveSession, isLoading: sessionLoading, error: sessionError, resetSession } = useSession();
+  const {
+    session: liveSession,
+    pastSessions = [],
+    isLoading: sessionLoading,
+    error: sessionError,
+    resetSession,
+    continueSession,
+    dismissContinueSession,
+  } = useSession();
   const { match: liveMatch, status } = useLiveMatch();
 
   // Preview / demo mode (?preview=true, or ?preview=idle) falls back to sample data.
@@ -83,10 +91,20 @@ export const App: React.FC = () => {
             columnsOpen={columnsOpen}
             onCloseColumns={() => setColumnsOpen(false)}
             onShowSession={() => setActiveTab('session')}
+            onContinueSession={continueSession}
+            onDismissContinueSession={dismissContinueSession}
           />
         )}
         {activeTab === 'session' && (
-          <SessionView session={session} isLoading={sessionLoading} error={sessionError} onResetSession={resetSession} />
+          <SessionView
+            session={session}
+            pastSessions={pastSessions}
+            isLoading={sessionLoading}
+            error={sessionError}
+            onResetSession={resetSession}
+            onContinueSession={continueSession}
+            onDismissContinueSession={dismissContinueSession}
+          />
         )}
         {activeTab === 'history' && <HistoryView localPlayerIds={localPlayerIds} />}
         {activeTab === 'players' && <PlayersView localPlayerIds={localPlayerIds} />}

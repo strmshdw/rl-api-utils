@@ -14,10 +14,14 @@ function setHooks(match: CurrentMatchResponse | null) {
   vi.mocked(useLiveMatch).mockReturnValue({ match, status: 'connected', lastUpdated: null, error: null });
   vi.mocked(useSession).mockReturnValue({
     session: SAMPLE_SESSION_RESPONSE,
+    pastSessions: [],
     isLoading: false,
     error: null,
     refreshSession: vi.fn(),
+    refreshPastSessions: vi.fn(),
     resetSession: vi.fn(),
+    continueSession: vi.fn(),
+    dismissContinueSession: vi.fn(),
     selectedMatch: null,
     setSelectedMatch: vi.fn(),
   });

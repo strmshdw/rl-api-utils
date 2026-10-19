@@ -211,4 +211,55 @@ describe('LiveGameView — between matches', () => {
     expect(status.textContent).toContain('RANK QUERIES OFFLINE');
     expect(container.textContent).toContain('NO MATCHES THIS SESSION YET');
   });
+
+  it('renders the continue session banner on the LIVE tab even when match_ended or active_match is true', async () => {
+    let continuedId = '';
+    let dismissedId = '';
+    const sessionWithCont: SessionResponse = {
+      ...SAMPLE_SESSION_RESPONSE,
+      session_id: 'new-rotated-epoch',
+      total_matches: 0,
+      total_wins: 0,
+      total_losses: 0,
+      matches: [],
+      continuable_session: {
+        ...SAMPLE_SESSION_RESPONSE,
+        session_id: 'prev-session-id',
+        total_matches: 5,
+        total_wins: 4,
+        total_losses: 1,
+        can_continue: true,
+      },
+    };
+
+    const { container } = await mount(
+      <LiveGameView
+        match={liveMatch({ active_match: false, match_ended: true, result: 'victory' })}
+        session={sessionWithCont}
+        connection="connected"
+        columnsOpen={false}
+        onCloseColumns={noop}
+        onShowSession={noop}
+        onContinueSession={(id) => {
+          continuedId = id || '';
+        }}
+        onDismissContinueSession={(id) => {
+          dismissedId = id || '';
+        }}
+      />,
+    );
+
+    const banner = container.querySelector('[data-testid="continue-session-banner"]')!;
+    expect(banner).not.toBeNull();
+    expect(banner.textContent).toContain('4W–1L');
+
+    const continueBtn = container.querySelector<HTMLButtonElement>('[data-testid="continue-session-btn"]')!;
+    continueBtn.click();
+    expect(continuedId).toBe('prev-session-id');
+
+    const dismissBtn = container.querySelector<HTMLButtonElement>('[data-testid="dismiss-continue-btn"]')!;
+    dismissBtn.click();
+    expect(dismissedId).toBe('prev-session-id');
+  });
 });
+

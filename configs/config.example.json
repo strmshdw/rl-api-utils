@@ -29,6 +29,9 @@
     "dry_run": false,
     "once": false
   },
+  "session": {
+    "continue_window": "2h"
+  },
   "stats_api": {
     "enabled": true,
     "address": "127.0.0.1:49124",

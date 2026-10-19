@@ -165,7 +165,18 @@ func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
 
 	// Instantiate SessionTracker if not explicitly provided via WithSessionTracker
 	if d.sessionTracker == nil {
-		d.sessionTracker = session.NewSessionTracker(session.WithLogger(d.logger))
+		d.sessionTracker = session.NewSessionTracker(
+			session.WithLogger(d.logger),
+			session.WithStateStore(d.stateStore),
+			session.WithContinueWindow(d.cfg.EffectiveSessionContinueWindow()),
+		)
+	} else {
+		if d.stateStore != nil {
+			d.sessionTracker.SetStateStore(d.stateStore)
+		}
+		if !d.sessionTracker.HasExplicitContinueWindow() {
+			d.sessionTracker.SetContinueWindow(d.cfg.EffectiveSessionContinueWindow())
+		}
 	}
 
 	// Wire playerTracker -> sessionTracker observer listener
@@ -381,6 +392,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 				connected := d.statsListener.IsConnected()
 				if d.prevConnected && !connected {
 					// Game client just terminated or disconnected
+					if d.sessionTracker != nil {
+						d.sessionTracker.OnGameDisconnected()
+					}
 					if d.cfg.StatsAPI.AutoSyncOnExit && d.statsTracker != nil && d.statsTracker.PendingCount() > 0 {
 						d.logger.Info("Rocket League disconnected; auto-syncing pending replays upon game exit",
 							slog.Int("pending_matches", d.statsTracker.PendingCount()),
@@ -597,6 +611,10 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 	mux.HandleFunc("GET /api/session", d.handleGetSession)
 	mux.HandleFunc("GET /api/session/state", d.handleGetSession)
 	mux.HandleFunc("/api/session/reset", d.handleResetSession)
+	mux.HandleFunc("/api/session/continue", d.handleContinueSession)
+	mux.HandleFunc("/api/session/dismiss", d.handleDismissContinueSession)
+	mux.HandleFunc("GET /api/sessions", d.handleListSessions)
+	mux.HandleFunc("GET /api/sessions/{id...}", d.handleGetHistoricalSession)
 	mux.HandleFunc("GET /api/current-match", d.handleCurrentMatch)
 	mux.HandleFunc("GET /api/players", d.handleListPlayers)
 	mux.HandleFunc("GET /api/players/{id}/matches", d.handleGetPlayerMatches)

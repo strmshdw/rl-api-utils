@@ -73,17 +73,46 @@ func (d Duration) MarshalYAML() (interface{}, error) {
 	return time.Duration(d).String(), nil
 }
 
+// DefaultSessionContinueWindow is the default maximum elapsed time since the last
+// match of a previous session during which that session can be continued.
+const DefaultSessionContinueWindow = 2 * time.Hour
+
 // Config represents the complete daemon configuration.
 type Config struct {
 	ConfigPath     string               `yaml:"-" json:"-"`
 	Auth           AuthConfig           `yaml:"auth" json:"auth"`
 	PollingAuth    PollingAuthConfig    `yaml:"polling_auth" json:"polling_auth"`
 	PlayerTracking PlayerTrackingConfig `yaml:"player_tracking" json:"player_tracking"`
+	Session        SessionConfig        `yaml:"session" json:"session"`
 	Ballchasing    BallchasingConfig    `yaml:"ballchasing" json:"ballchasing"`
 	Sync           SyncConfig           `yaml:"sync" json:"sync"`
 	StatsAPI       StatsAPIConfig       `yaml:"stats_api" json:"stats_api"`
 	Logging        LoggingConfig        `yaml:"logging" json:"logging"`
 	Web            WebConfig            `yaml:"web" json:"web"`
+}
+
+// SessionConfig configures play session tracking, persistence, and continuation.
+type SessionConfig struct {
+	ContinueWindow Duration `yaml:"continue_window" json:"continue_window"` // default: 2h (0 disables continuation)
+}
+
+// EffectiveSessionContinueWindow returns the configured session continuation window.
+func (c *Config) EffectiveSessionContinueWindow() time.Duration {
+	if c == nil {
+		return DefaultSessionContinueWindow
+	}
+	if c.Session.ContinueWindow > 0 {
+		return c.Session.ContinueWindow.Duration()
+	}
+	if c.PlayerTracking.SessionContinueWindow > 0 {
+		return c.PlayerTracking.SessionContinueWindow.Duration()
+	}
+	// If Config was constructed as a zero literal (&config.Config{}) in tests rather than NewDefaultConfig(),
+	// fall back to DefaultSessionContinueWindow unless other top-level defaults are populated.
+	if c.Auth.Provider == "" && c.Sync.PollInterval == 0 && c.Ballchasing.BaseURL == "" {
+		return DefaultSessionContinueWindow
+	}
+	return 0
 }
 
 // WebConfig configures the embedded web dashboard and HTTP server.
@@ -151,10 +180,11 @@ func (p PollingAuthConfig) ToAuthConfig() AuthConfig {
 
 // PlayerTrackingConfig configures in-game player tracking and rank retrieval.
 type PlayerTrackingConfig struct {
-	Enabled         bool   `yaml:"enabled" json:"enabled"`                     // default: true
-	LocalPlayerID   string `yaml:"local_player_id" json:"local_player_id"`     // optional override (e.g. "Epic|<id>|0" or "Steam|<id>|0")
-	LocalPlayerName string `yaml:"local_player_name" json:"local_player_name"` // optional override for player display name
-	AutoFetchRanks  bool   `yaml:"auto_fetch_ranks" json:"auto_fetch_ranks"`   // default: true
+	Enabled               bool     `yaml:"enabled" json:"enabled"`                                                                 // default: true
+	LocalPlayerID         string   `yaml:"local_player_id" json:"local_player_id"`                                                 // optional override (e.g. "Epic|<id>|0" or "Steam|<id>|0")
+	LocalPlayerName       string   `yaml:"local_player_name" json:"local_player_name"`                                             // optional override for player display name
+	AutoFetchRanks        bool     `yaml:"auto_fetch_ranks" json:"auto_fetch_ranks"`                                               // default: true
+	SessionContinueWindow Duration `yaml:"session_continue_window,omitempty" json:"session_continue_window,omitempty"`             // optional fallback alias for session.continue_window
 }
 
 // BallchasingConfig configures replay uploads to ballchasing.com.
@@ -203,6 +233,7 @@ type CLIFlags struct {
 	LocalPlayerID         *string
 	LocalPlayerName       *string
 	AutoFetchRanks        *bool
+	SessionContinueWindow *time.Duration
 	WebEnabled            *bool
 	WebHost               *string
 	WebPort               *int
@@ -223,6 +254,9 @@ func NewDefaultConfig() *Config {
 			LocalPlayerID:   "",
 			LocalPlayerName: "",
 			AutoFetchRanks:  true,
+		},
+		Session: SessionConfig{
+			ContinueWindow: Duration(DefaultSessionContinueWindow),
 		},
 		Ballchasing: BallchasingConfig{
 			Visibility: "public",
@@ -448,6 +482,20 @@ func (c *Config) applyEnv() error {
 		}
 		c.PlayerTracking.AutoFetchRanks = b
 	}
+	if val := getEnv("RL_SYNC_SESSION_CONTINUE_WINDOW"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid RL_SYNC_SESSION_CONTINUE_WINDOW %q: %w", val, err)
+		}
+		c.Session.ContinueWindow = Duration(d)
+	}
+	if val := getEnv("RL_SYNC_CONTINUE_WINDOW"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid RL_SYNC_CONTINUE_WINDOW %q: %w", val, err)
+		}
+		c.Session.ContinueWindow = Duration(d)
+	}
 
 	if val := getEnv("RL_SYNC_BALLCHASING_API_KEY"); val != "" {
 		c.Ballchasing.APIKey = val
@@ -644,6 +692,9 @@ func (c *Config) applyCLI(cli CLIFlags) {
 	if cli.AutoFetchRanks != nil {
 		c.PlayerTracking.AutoFetchRanks = *cli.AutoFetchRanks
 	}
+	if cli.SessionContinueWindow != nil {
+		c.Session.ContinueWindow = Duration(*cli.SessionContinueWindow)
+	}
 	if cli.WebEnabled != nil {
 		c.Web.Enabled = *cli.WebEnabled
 	}
@@ -737,9 +788,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Normalize PlayerTracking
+	// Normalize PlayerTracking & Session
 	c.PlayerTracking.LocalPlayerID = strings.TrimSpace(c.PlayerTracking.LocalPlayerID)
 	c.PlayerTracking.LocalPlayerName = strings.TrimSpace(c.PlayerTracking.LocalPlayerName)
+	if c.PlayerTracking.SessionContinueWindow != 0 && c.Session.ContinueWindow == Duration(DefaultSessionContinueWindow) {
+		c.Session.ContinueWindow = c.PlayerTracking.SessionContinueWindow
+	}
+	if c.Session.ContinueWindow.Duration() < 0 {
+		errs = append(errs, errors.New("session: 'continue_window' cannot be negative"))
+	}
 
 	// Validate Ballchasing
 	if strings.TrimSpace(c.Ballchasing.APIKey) == "" {

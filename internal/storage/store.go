@@ -20,6 +20,7 @@ var (
 	ErrStoreClosed           = errors.New("state store is closed")
 	ErrPlayerNotFound        = errors.New("player not found")
 	ErrMatchAlreadyProcessed = errors.New("match outcome already processed")
+	ErrSessionNotFound       = errors.New("session not found")
 )
 
 // DownloadStatus represents the synchronization status of a replay download.
@@ -452,6 +453,29 @@ type StateStore interface {
 	MarkStatsSynced(ctx context.Context, matchGUID string) error
 	MarkStatsSyncFailed(ctx context.Context, matchGUID, errMsg string) error
 	ResetMatchRetry(ctx context.Context, matchGUID string) error
+
+	// --- Play Session Persistence ---
+	SaveSession(ctx context.Context, session *SessionRecord) error
+	GetSession(ctx context.Context, sessionID string) (*SessionRecord, error)
+	ListSessions(ctx context.Context, limit, offset int) ([]*SessionRecord, int, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+// SessionRecord represents the persistent record of a play session.
+type SessionRecord struct {
+	SessionID      string     `json:"session_id"`
+	StartedAt      time.Time  `json:"started_at"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"`
+	LastMatchAt    *time.Time `json:"last_match_at,omitempty"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	TotalMatches   int        `json:"total_matches"`
+	TotalWins      int        `json:"total_wins"`
+	TotalLosses    int        `json:"total_losses"`
+	WinRate        float64    `json:"win_rate"`
+	PlaylistsJSON  string     `json:"playlists_json,omitempty"`
+	MatchesJSON    string     `json:"matches_json,omitempty"`
+	LocalPlayerIDs []string   `json:"local_player_ids,omitempty"`
+	Dismissed      bool       `json:"dismissed,omitempty"`
 }
 
 // NewStore initializes a StateStore backend based on the database path or URI.

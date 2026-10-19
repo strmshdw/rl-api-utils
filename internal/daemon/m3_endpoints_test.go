@@ -360,4 +360,97 @@ func TestM3_Daemon_MMRHistory_And_SyncSecurity(t *testing.T) {
 			t.Fatalf("expected 200 for POST /sync with localhost origin, got %d", goodRec.Code)
 		}
 	})
+
+	t.Run("Session_Continue_Dismiss_And_History_Endpoints", func(t *testing.T) {
+		// Record a match in the current session
+		localTeam := 0
+		winnerTeam := 0
+		h.sess.ConcludeMatch(&playertrack.CurrentMatchResponse{
+			MatchGUID:    "ep-session-m1",
+			PlaylistID:   11,
+			PlaylistName: "Ranked Doubles 2v2",
+			LocalTeam:    &localTeam,
+			WinnerTeam:   &winnerTeam,
+			Result:       "victory",
+			LocalPlayer: &playertrack.LobbyPlayer{
+				PlayerID: "Steam|local|0",
+				Name:     "LocalHero",
+				TeamNum:  0,
+				IsLocal:  true,
+				Stats:    playertrack.PlayerStatsSummary{Goals: 3, Score: 450},
+			},
+		})
+
+		firstSessionID := h.sess.GetSessionSummary().SessionID
+
+		// Reset session (simulating restart or game exit) -> archives firstSessionID
+		resetReq := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
+		resetRec := httptest.NewRecorder()
+		h.handler.ServeHTTP(resetRec, resetReq)
+		if resetRec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for POST /api/session/reset, got %d", resetRec.Code)
+		}
+
+		// GET /api/session should now include continuable_session
+		getReq := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+		getRec := httptest.NewRecorder()
+		h.handler.ServeHTTP(getRec, getReq)
+		var curSess session.SessionResponse
+		if err := json.Unmarshal(getRec.Body.Bytes(), &curSess); err != nil {
+			t.Fatalf("decode /api/session: %v", err)
+		}
+		if curSess.ContinuableSession == nil || curSess.ContinuableSession.SessionID != firstSessionID {
+			t.Fatalf("expected continuable_session=%s, got %+v", firstSessionID, curSess.ContinuableSession)
+		}
+
+		// GET /api/sessions should list the archived session
+		listReq := httptest.NewRequest(http.MethodGet, "/api/sessions?limit=10&offset=0", nil)
+		listRec := httptest.NewRecorder()
+		h.handler.ServeHTTP(listRec, listReq)
+		if listRec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for GET /api/sessions, got %d", listRec.Code)
+		}
+		var listResp daemon.SessionListResponse
+		if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+			t.Fatalf("decode /api/sessions: %v", err)
+		}
+		if listResp.Total < 1 || len(listResp.Sessions) < 1 || listResp.Sessions[0].SessionID != firstSessionID {
+			t.Fatalf("expected firstSessionID in /api/sessions, got %+v", listResp)
+		}
+
+		// GET /api/sessions/{id} should return the archived session details
+		detailReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+firstSessionID, nil)
+		detailRec := httptest.NewRecorder()
+		h.handler.ServeHTTP(detailRec, detailReq)
+		if detailRec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for GET /api/sessions/{id}, got %d", detailRec.Code)
+		}
+
+		// POST /api/session/dismiss should hide continuable_session from GET /api/session
+		dismissReq := httptest.NewRequest(http.MethodPost, "/api/session/dismiss", nil)
+		dismissRec := httptest.NewRecorder()
+		h.handler.ServeHTTP(dismissRec, dismissReq)
+		if dismissRec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for POST /api/session/dismiss, got %d", dismissRec.Code)
+		}
+		var afterDismiss session.SessionResponse
+		_ = json.Unmarshal(dismissRec.Body.Bytes(), &afterDismiss)
+		if afterDismiss.ContinuableSession != nil {
+			t.Fatalf("expected nil continuable_session after dismiss")
+		}
+
+		// POST /api/session/continue should still resume the session when invoked
+		contReq := httptest.NewRequest(http.MethodPost, "/api/session/continue", bytes.NewBufferString(`{"session_id":"`+firstSessionID+`"}`))
+		contRec := httptest.NewRecorder()
+		h.handler.ServeHTTP(contRec, contReq)
+		if contRec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for POST /api/session/continue, got %d: %s", contRec.Code, contRec.Body.String())
+		}
+		var continued session.SessionResponse
+		_ = json.Unmarshal(contRec.Body.Bytes(), &continued)
+		if continued.SessionID != firstSessionID || continued.TotalMatches != 1 {
+			t.Fatalf("expected continued session %s with 1 match, got %+v", firstSessionID, continued)
+		}
+	})
 }
+

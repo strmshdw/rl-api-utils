@@ -146,6 +146,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		localPlayerID          string
 		localPlayerName        string
 		autoFetchRanks         bool
+		sessionContinueWindow  time.Duration
 		pollingAuthEnabled     bool
 		pollingAuthProvider    string
 		webHost                string
@@ -175,6 +176,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	fs.StringVar(&localPlayerID, "local-player-id", "", "Override local player ID (e.g. 'Epic|<id>|0' or 'Steam|<id>|0')")
 	fs.StringVar(&localPlayerName, "local-player-name", "", "Override local player display name")
 	fs.BoolVar(&autoFetchRanks, "auto-fetch-ranks", true, "Automatically fetch competitive ranks via secondary account")
+	fs.DurationVar(&sessionContinueWindow, "session-continue-window", 0, "Maximum time since last match to allow continuing a previous play session (default 2h, 0s to disable)")
 	fs.BoolVar(&pollingAuthEnabled, "polling-auth", false, "Enable secondary account authentication for rank retrieval")
 	fs.StringVar(&pollingAuthProvider, "polling-provider", "", "Authentication provider for secondary account ('epic' or 'steam')")
 	fs.StringVar(&webHost, "web-host", "", "HTTP host binding for web dashboard (default '127.0.0.1')")
@@ -251,6 +253,8 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 			cli.LocalPlayerName = &localPlayerName
 		case "auto-fetch-ranks":
 			cli.AutoFetchRanks = &autoFetchRanks
+		case "session-continue-window":
+			cli.SessionContinueWindow = &sessionContinueWindow
 		case "polling-auth":
 			cli.PollingAuthEnabled = &pollingAuthEnabled
 		case "polling-provider":
@@ -280,6 +284,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		slog.String("db_path", cfg.Sync.DBPath),
 		slog.String("replay_dir", cfg.Sync.ReplayDir),
 		slog.Duration("poll_interval", cfg.Sync.PollInterval.Duration()),
+		slog.Duration("session_continue_window", cfg.EffectiveSessionContinueWindow()),
 		slog.Bool("dry_run", cfg.Sync.DryRun),
 		slog.Bool("once", cfg.Sync.Once),
 		slog.String("log_level", cfg.Logging.Level),
