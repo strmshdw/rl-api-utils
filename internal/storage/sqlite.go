@@ -205,7 +205,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	// Apply critical PRAGMA configurations
@@ -2003,6 +2003,46 @@ func (s *SQLiteStore) GetPlayerMatchup(ctx context.Context, playerID string, pla
 		&lastPlayed,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
+		// Fallback to computing matchup directly from match_players + matches if not in player_matchups
+		const fallbackQuery = `
+		SELECT
+			COALESCE(SUM(CASE WHEN mp.team_num = lp.team_num AND lp.team_num = m.winner_team THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mp.team_num = lp.team_num AND lp.team_num != m.winner_team THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mp.team_num != lp.team_num AND lp.team_num = m.winner_team THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mp.team_num != lp.team_num AND lp.team_num != m.winner_team THEN 1 ELSE 0 END), 0),
+			COUNT(*),
+			COALESCE(MAX(m.record_start_timestamp), 0)
+		FROM match_players mp
+		JOIN matches m ON mp.match_guid = m.match_guid
+		JOIN (
+			SELECT match_guid, MIN(team_num) AS team_num
+			FROM match_players
+			WHERE is_local = 1
+			GROUP BY match_guid
+		) lp ON lp.match_guid = m.match_guid
+		WHERE mp.player_id = ?
+		  AND m.playlist = ?
+		  AND m.winner_team >= 0
+		  AND mp.is_local = 0;
+		`
+		var fb PlayerMatchup
+		var fbLast int64
+		if fbErr := s.db.QueryRowContext(ctx, fallbackQuery, resolvedID, playlistID).Scan(
+			&fb.WinsAsTeammate,
+			&fb.LossesAsTeammate,
+			&fb.WinsAsOpponent,
+			&fb.LossesAsOpponent,
+			&fb.TotalMatches,
+			&fbLast,
+		); fbErr == nil && fb.TotalMatches > 0 {
+			fb.PlayerID = resolvedID
+			fb.PlaylistID = playlistID
+			if fbLast > 0 {
+				fb.LastPlayedAt = time.Unix(fbLast, 0).UTC()
+			}
+			return &fb, nil
+		}
+
 		// When no matchup record exists, return zeroed record with TotalMatches=0 and nil error
 		return &PlayerMatchup{
 			PlayerID:   playerID,
@@ -2067,6 +2107,58 @@ func (s *SQLiteStore) GetPlayerMatchups(ctx context.Context, playerID string) ([
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows iteration error in get player matchups: %w", err)
+	}
+
+	if len(matchups) == 0 {
+		const fallbackQuery = `
+		SELECT
+			mp.player_id,
+			m.playlist,
+			COALESCE(SUM(CASE WHEN mp.team_num = lp.team_num AND lp.team_num = m.winner_team THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mp.team_num = lp.team_num AND lp.team_num != m.winner_team THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mp.team_num != lp.team_num AND lp.team_num = m.winner_team THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mp.team_num != lp.team_num AND lp.team_num != m.winner_team THEN 1 ELSE 0 END), 0),
+			COUNT(*),
+			COALESCE(MAX(m.record_start_timestamp), 0)
+		FROM match_players mp
+		JOIN matches m ON mp.match_guid = m.match_guid
+		JOIN (
+			SELECT match_guid, MIN(team_num) AS team_num
+			FROM match_players
+			WHERE is_local = 1
+			GROUP BY match_guid
+		) lp ON lp.match_guid = m.match_guid
+		WHERE mp.player_id = ?
+		  AND m.winner_team >= 0
+		  AND mp.is_local = 0
+		GROUP BY mp.player_id, m.playlist
+		ORDER BY m.playlist ASC;
+		`
+		fbRows, fbErr := s.db.QueryContext(ctx, fallbackQuery, playerID)
+		if fbErr == nil {
+			defer fbRows.Close()
+			for fbRows.Next() {
+				var (
+					m          PlayerMatchup
+					lastPlayed int64
+				)
+				if err := fbRows.Scan(
+					&m.PlayerID,
+					&m.PlaylistID,
+					&m.WinsAsTeammate,
+					&m.LossesAsTeammate,
+					&m.WinsAsOpponent,
+					&m.LossesAsOpponent,
+					&m.TotalMatches,
+					&lastPlayed,
+				); err == nil {
+					if lastPlayed > 0 {
+						m.LastPlayedAt = time.Unix(lastPlayed, 0).UTC()
+					}
+					matchups = append(matchups, &m)
+				}
+			}
+		}
 	}
 
 	return matchups, nil
@@ -3979,30 +4071,37 @@ func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) er
 		_, _ = s.db.ExecContext(ctx, "DELETE FROM players WHERE LOWER(player_id) = ?;", accLower)
 	}
 
-	// 4. One-time migration (PRAGMA user_version < 3) to deduplicate console aliases,
+	// 4. One-time migration (PRAGMA user_version < 4) to deduplicate console aliases,
 	// ensure all replay_stats_json players exist in players/match_players,
-	// rebuild inverted opponent matchups, and mark matches lacking full boost telemetry as PENDING.
+	// rebuild head-to-head player_matchups atomically, and mark matches lacking full boost telemetry as PENDING.
 	var userVersion int
 	_ = s.db.QueryRowContext(ctx, "PRAGMA user_version;").Scan(&userVersion)
-	if userVersion < 3 {
+	if userVersion < 4 {
 		// 4.0 Ensure all non-local players in matches.replay_stats_json are present in players and match_players,
 		// and repair matches.record_start_timestamp if it was set to wall-clock sync time instead of st.Date.
 		type mJsonRow struct {
-			guid       string
-			startTS    int64
-			winnerTeam int
-			statsJSON  string
+			guid                  string
+			startTS               int64
+			winnerTeam            int
+			statsJSON             string
+			mpCount               int
+			nonLocalInPlayersCnt  int
 		}
 		var mJsonRows []mJsonRow
 		mjRows, err := s.db.QueryContext(ctx, `
-			SELECT match_guid, record_start_timestamp, COALESCE(winner_team, -1), replay_stats_json
-			FROM matches
-			WHERE replay_stats_json != '';
+			SELECT m.match_guid,
+			       m.record_start_timestamp,
+			       COALESCE(m.winner_team, -1),
+			       m.replay_stats_json,
+			       (SELECT COUNT(*) FROM match_players mp WHERE mp.match_guid = m.match_guid),
+			       (SELECT COUNT(*) FROM match_players mp JOIN players p ON mp.player_id = p.player_id WHERE mp.match_guid = m.match_guid AND mp.is_local = 0)
+			FROM matches m
+			WHERE m.replay_stats_json != '';
 		`)
 		if err == nil {
 			for mjRows.Next() {
 				var r mJsonRow
-				if err := mjRows.Scan(&r.guid, &r.startTS, &r.winnerTeam, &r.statsJSON); err == nil {
+				if err := mjRows.Scan(&r.guid, &r.startTS, &r.winnerTeam, &r.statsJSON, &r.mpCount, &r.nonLocalInPlayersCnt); err == nil {
 					mJsonRows = append(mJsonRows, r)
 				}
 			}
@@ -4022,6 +4121,10 @@ func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) er
 						_, _ = s.db.ExecContext(ctx, "UPDATE matches SET record_start_timestamp = ? WHERE match_guid = ?;", matchTS, r.guid)
 					}
 				}
+			}
+			// Fast-path skip if match_players and players are already populated for this match
+			if r.mpCount >= len(st.Players) && r.nonLocalInPlayersCnt >= len(st.Players)-1 && len(st.Players) > 0 {
+				continue
 			}
 			for _, p := range st.Players {
 				pid := strings.TrimSpace(p.OnlineID)
@@ -4156,116 +4259,95 @@ func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) er
 			}
 		}
 
-		// 4c. If Ballchasing matches were previously processed into processed_match_outcomes,
-		// rebuild player_matchups from matches + match_players so opponent wins/losses reflect local perspective.
-		var bcProcessedCount int
+		// 4c. Rebuild player_matchups and processed_match_outcomes atomically from matches + match_players
+		// so all head-to-head records across all playlists are complete and accurate from the local perspective.
+		var hasMatchPlayersWithWinner int
 		_ = s.db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM matches m
-			JOIN processed_match_outcomes pmo ON m.match_guid = pmo.match_guid
-			WHERE m.ballchasing_id != '';
-		`).Scan(&bcProcessedCount)
+			WHERE m.winner_team >= 0
+			  AND EXISTS (SELECT 1 FROM match_players lp WHERE lp.match_guid = m.match_guid AND lp.is_local = 1);
+		`).Scan(&hasMatchPlayersWithWinner)
 
-		if bcProcessedCount > 0 {
-			_, _ = s.db.ExecContext(ctx, "DELETE FROM player_matchups;")
-			_, _ = s.db.ExecContext(ctx, "DELETE FROM processed_match_outcomes;")
-
-			type matchRow struct {
-				guid       string
-				startTS    int64
-				playlist   int
-				winnerTeam int
-			}
-			var allMatches []matchRow
-			mRows, err := s.db.QueryContext(ctx, `
-				SELECT match_guid, record_start_timestamp, playlist, winner_team
-				FROM matches
-				WHERE winner_team >= 0
-				ORDER BY record_start_timestamp ASC, match_guid ASC;
-			`)
-			if err == nil {
-				for mRows.Next() {
-					var mr matchRow
-					if err := mRows.Scan(&mr.guid, &mr.startTS, &mr.playlist, &mr.winnerTeam); err == nil {
-						allMatches = append(allMatches, mr)
-					}
-				}
-				mRows.Close()
-			}
-
-			for _, mr := range allMatches {
-				mpRows, err := s.db.QueryContext(ctx, `
-					SELECT mp.player_id, mp.team_num, mp.is_local, COALESCE(p.platform, ''), COALESCE(p.player_name, '')
+		if hasMatchPlayersWithWinner > 0 {
+			if tx, err := s.db.BeginTx(ctx, nil); err == nil {
+				// Ensure every non-local participant in match_players exists in players to satisfy foreign key constraints
+				_, _ = tx.ExecContext(ctx, `
+					INSERT INTO players (player_id, platform, player_name, player_name_lower, ranks_json, first_seen_at, last_seen_at)
+					SELECT
+						mp.player_id,
+						CASE WHEN INSTR(mp.player_id, '|') > 1 THEN SUBSTR(mp.player_id, 1, INSTR(mp.player_id, '|') - 1) ELSE 'Unknown' END,
+						CASE WHEN INSTR(mp.player_id, '|') > 1 THEN SUBSTR(mp.player_id, INSTR(mp.player_id, '|') + 1, LENGTH(mp.player_id) - INSTR(mp.player_id, '|') - 2) ELSE mp.player_id END,
+						LOWER(CASE WHEN INSTR(mp.player_id, '|') > 1 THEN SUBSTR(mp.player_id, INSTR(mp.player_id, '|') + 1, LENGTH(mp.player_id) - INSTR(mp.player_id, '|') - 2) ELSE mp.player_id END),
+						'{}',
+						COALESCE(MIN(m.record_start_timestamp), 0),
+						COALESCE(MAX(m.record_start_timestamp), 0)
 					FROM match_players mp
-					LEFT JOIN players p ON mp.player_id = p.player_id
-					WHERE mp.match_guid = ?;
-				`, mr.guid)
-				if err != nil {
-					continue
-				}
-				type mpInfo struct {
-					playerID string
-					teamNum  int
-					isLocal  bool
-					platform string
-					name     string
-				}
-				var participants []mpInfo
-				localTeam := -1
-				for mpRows.Next() {
-					var info mpInfo
-					var isLoc int
-					if err := mpRows.Scan(&info.playerID, &info.teamNum, &isLoc, &info.platform, &info.name); err == nil {
-						info.isLocal = (isLoc == 1)
-						if info.isLocal && localTeam == -1 {
-							localTeam = info.teamNum
-						}
-						participants = append(participants, info)
-					}
-				}
-				mpRows.Close()
+					JOIN matches m ON mp.match_guid = m.match_guid
+					WHERE mp.is_local = 0
+					  AND mp.player_id != ''
+					  AND mp.player_id != '0'
+					  AND mp.player_id NOT LIKE '%|0|0'
+					  AND NOT EXISTS (SELECT 1 FROM players p WHERE p.player_id = mp.player_id)
+					GROUP BY mp.player_id;
+				`)
 
-				if localTeam < 0 {
-					continue
-				}
+				_, _ = tx.ExecContext(ctx, "DELETE FROM player_matchups;")
+				_, _ = tx.ExecContext(ctx, "DELETE FROM processed_match_outcomes;")
 
-				var outcomes []PlayerOutcome
-				for _, p := range participants {
-					if p.isLocal || strings.HasSuffix(p.playerID, "|0|0") {
-						continue
-					}
-					plat := p.platform
-					if plat == "" && strings.Contains(p.playerID, "|") {
-						plat = strings.Split(p.playerID, "|")[0]
-					}
-					name := p.name
-					if name == "" && strings.Contains(p.playerID, "|") {
-						parts := strings.Split(p.playerID, "|")
-						if len(parts) >= 2 {
-							name = parts[1]
-						}
-					}
-					outcomes = append(outcomes, PlayerOutcome{
-						PlayerID:   p.playerID,
-						Platform:   plat,
-						PlayerName: name,
-						IsTeammate: p.teamNum == localTeam,
-						Won:        localTeam == mr.winnerTeam,
-					})
-				}
+				_, _ = tx.ExecContext(ctx, `
+					INSERT INTO player_matchups (
+						player_id, playlist_id,
+						wins_as_teammate, losses_as_teammate,
+						wins_as_opponent, losses_as_opponent,
+						total_matches, last_played_at
+					)
+					SELECT
+						mp.player_id,
+						m.playlist,
+						COALESCE(SUM(CASE WHEN mp.team_num = lp.team_num AND lp.team_num = m.winner_team THEN 1 ELSE 0 END), 0),
+						COALESCE(SUM(CASE WHEN mp.team_num = lp.team_num AND lp.team_num != m.winner_team THEN 1 ELSE 0 END), 0),
+						COALESCE(SUM(CASE WHEN mp.team_num != lp.team_num AND lp.team_num = m.winner_team THEN 1 ELSE 0 END), 0),
+						COALESCE(SUM(CASE WHEN mp.team_num != lp.team_num AND lp.team_num != m.winner_team THEN 1 ELSE 0 END), 0),
+						COUNT(*),
+						COALESCE(MAX(m.record_start_timestamp), 0)
+					FROM match_players mp
+					JOIN matches m ON mp.match_guid = m.match_guid
+					JOIN (
+						SELECT match_guid, MIN(team_num) AS team_num
+						FROM match_players
+						WHERE is_local = 1
+						GROUP BY match_guid
+					) lp ON lp.match_guid = m.match_guid
+					JOIN players p ON p.player_id = mp.player_id
+					WHERE m.winner_team >= 0
+					  AND mp.is_local = 0
+					  AND mp.player_id NOT LIKE '%|0|0'
+					GROUP BY mp.player_id, m.playlist;
+				`)
 
-				if len(outcomes) > 0 {
-					matchTime := time.Unix(mr.startTS, 0).UTC()
-					_ = s.RecordMatchResults(ctx, mr.guid, mr.playlist, outcomes, matchTime)
-				}
+				_, _ = tx.ExecContext(ctx, `
+					INSERT INTO processed_match_outcomes (match_guid, playlist_id, processed_at)
+					SELECT
+						m.match_guid,
+						m.playlist,
+						m.record_start_timestamp
+					FROM matches m
+					WHERE m.winner_team >= 0
+					  AND EXISTS (SELECT 1 FROM match_players lp WHERE lp.match_guid = m.match_guid AND lp.is_local = 1)
+					  AND EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_guid = m.match_guid AND mp.is_local = 0 AND mp.player_id NOT LIKE '%|0|0')
+					ON CONFLICT(match_guid) DO NOTHING;
+				`)
+
+				// Remove orphan player records absent from both player_matchups and match_players
+				_, _ = tx.ExecContext(ctx, `
+					DELETE FROM players
+					WHERE NOT EXISTS (SELECT 1 FROM player_matchups pm WHERE pm.player_id = players.player_id)
+					  AND NOT EXISTS (SELECT 1 FROM match_players mp WHERE mp.player_id = players.player_id);
+				`)
+
+				_ = tx.Commit()
 			}
-
-			// Remove orphan player records absent from both player_matchups and match_players
-			_, _ = s.db.ExecContext(ctx, `
-				DELETE FROM players
-				WHERE NOT EXISTS (SELECT 1 FROM player_matchups pm WHERE pm.player_id = players.player_id)
-				  AND NOT EXISTS (SELECT 1 FROM match_players mp WHERE mp.player_id = players.player_id);
-			`)
 		}
 
 		// 4d. Mark Ballchasing matches whose replay_stats_json lacks full boost telemetry as PENDING
@@ -4277,7 +4359,7 @@ func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) er
 			  AND replay_stats_json NOT LIKE '%"boost":%';
 		`)
 
-		_, _ = s.db.ExecContext(ctx, "PRAGMA user_version = 3;")
+		_, _ = s.db.ExecContext(ctx, "PRAGMA user_version = 4;")
 	}
 
 	// 5. Repair player first_seen_at and last_seen_at timestamps that were set to wall-clock sync time

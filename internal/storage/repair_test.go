@@ -329,6 +329,20 @@ func TestSQLiteStore_MigrationDeduplicatesConsoleAliasesAndFixesInvertedMatchups
 	if err != nil || total != 1 || len(summaries) != 1 {
 		t.Fatalf("FilterPlayerSummaries(playstation): total=%d len=%d err=%v", total, len(summaries), err)
 	}
+
+	// 6. Even if player_matchups row is missing, GetPlayerMatchups and GetPlayerMatchup fall back to match_players + matches
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM player_matchups WHERE player_id = 'PS4|7370223800633025836|0';")
+	fbMatchups, err := store.GetPlayerMatchups(ctx, "hungry-panda88")
+	if err != nil || len(fbMatchups) != 1 {
+		t.Fatalf("GetPlayerMatchups fallback: len=%d err=%v", len(fbMatchups), err)
+	}
+	if fbMatchups[0].WinsAsOpponent != 1 || fbMatchups[0].TotalMatches != 1 {
+		t.Errorf("GetPlayerMatchups fallback = %+v; want WinsAsOpponent=1, TotalMatches=1", fbMatchups[0])
+	}
+	fbSingle, err := store.GetPlayerMatchup(ctx, "hungry-panda88", 11)
+	if err != nil || fbSingle.WinsAsOpponent != 1 || fbSingle.TotalMatches != 1 {
+		t.Errorf("GetPlayerMatchup fallback = %+v err=%v; want WinsAsOpponent=1, TotalMatches=1", fbSingle, err)
+	}
 }
 
 

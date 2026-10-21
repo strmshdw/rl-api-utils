@@ -180,11 +180,11 @@ func (p PollingAuthConfig) ToAuthConfig() AuthConfig {
 
 // PlayerTrackingConfig configures in-game player tracking and rank retrieval.
 type PlayerTrackingConfig struct {
-	Enabled               bool     `yaml:"enabled" json:"enabled"`                                                                 // default: true
-	LocalPlayerID         string   `yaml:"local_player_id" json:"local_player_id"`                                                 // optional override (e.g. "Epic|<id>|0" or "Steam|<id>|0")
-	LocalPlayerName       string   `yaml:"local_player_name" json:"local_player_name"`                                             // optional override for player display name
-	AutoFetchRanks        bool     `yaml:"auto_fetch_ranks" json:"auto_fetch_ranks"`                                               // default: true
-	SessionContinueWindow Duration `yaml:"session_continue_window,omitempty" json:"session_continue_window,omitempty"`             // optional fallback alias for session.continue_window
+	Enabled               bool     `yaml:"enabled" json:"enabled"`                                                     // default: true
+	LocalPlayerID         string   `yaml:"local_player_id" json:"local_player_id"`                                     // optional override (e.g. "Epic|<id>|0" or "Steam|<id>|0")
+	LocalPlayerName       string   `yaml:"local_player_name" json:"local_player_name"`                                 // optional override for player display name
+	AutoFetchRanks        bool     `yaml:"auto_fetch_ranks" json:"auto_fetch_ranks"`                                   // default: true
+	SessionContinueWindow Duration `yaml:"session_continue_window,omitempty" json:"session_continue_window,omitempty"` // optional fallback alias for session.continue_window
 }
 
 // BallchasingConfig configures replay uploads to ballchasing.com.
@@ -289,7 +289,7 @@ func NewDefaultConfig() *Config {
 		},
 		Web: WebConfig{
 			Enabled: true,
-			Host:    "127.0.0.1",
+			Host:    "0.0.0.0",
 			Port:    49125,
 		},
 	}
@@ -935,4 +935,3 @@ func (c *Config) SaveConfig(filePath string) error {
 	}
 	return AtomicWriteFile(filePath, data, 0600)
 }
-
