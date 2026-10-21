@@ -10,7 +10,7 @@
   <circle cx="50" cy="49.3" r="16"
           fill="none" stroke-width="2.2"
           stroke-linecap="round"
-          stroke-dasharray="21.1 4.03"
-          stroke-dashoffset="23.115"
+          stroke-dasharray="20.19 4.94"
+          stroke-dashoffset="22.66"
           transform="rotate(45 50 49.3)"/>
 </svg>
