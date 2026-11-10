@@ -416,8 +416,9 @@ func migrateMatchesTable(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// GetMatch retrieves a single match record by GUID.
+// GetMatch retrieves a single match record by GUID (falling back to case/hyphen-insensitive GUID or ballchasing_id).
 func (s *SQLiteStore) GetMatch(ctx context.Context, matchGUID string) (*MatchRecord, error) {
+	matchGUID = strings.TrimSpace(matchGUID)
 	if matchGUID == "" {
 		return nil, ErrInvalidGUID
 	}
@@ -435,12 +436,85 @@ func (s *SQLiteStore) GetMatch(ctx context.Context, matchGUID string) (*MatchRec
 	row := s.db.QueryRowContext(ctx, query, matchGUID)
 	rec, err := scanMatchRecord(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrMatchNotFound
+		const fallbackQuery = `
+		SELECT match_guid, record_start_timestamp, map_name, playlist, replay_url,
+		       download_status, local_file_path, downloaded_at, upload_status,
+		       ballchasing_id, ballchasing_url, uploaded_at, retry_count,
+		       last_error, blue_score, orange_score, winner_team, replay_stats_json,
+		       synced_at, stats_sync_status, stats_retry_count, created_at, updated_at
+		FROM matches
+		WHERE LOWER(REPLACE(match_guid, '-', '')) = LOWER(REPLACE(?, '-', ''))
+		   OR ballchasing_id = ?
+		ORDER BY record_start_timestamp DESC
+		LIMIT 1;
+		`
+		fbRow := s.db.QueryRowContext(ctx, fallbackQuery, matchGUID, matchGUID)
+		fbRec, fbErr := scanMatchRecord(fbRow)
+		if errors.Is(fbErr, sql.ErrNoRows) {
+			return nil, ErrMatchNotFound
+		}
+		if fbErr != nil {
+			return nil, fmt.Errorf("failed to get match %s: %w", matchGUID, fbErr)
+		}
+		return fbRec, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get match %s: %w", matchGUID, err)
 	}
 	return rec, nil
+}
+
+// GetMatchByBallchasingID retrieves a match record by its Ballchasing replay ID.
+func (s *SQLiteStore) GetMatchByBallchasingID(ctx context.Context, ballchasingID string) (*MatchRecord, error) {
+	ballchasingID = strings.TrimSpace(ballchasingID)
+	if ballchasingID == "" {
+		return nil, ErrMatchNotFound
+	}
+
+	const query = `
+	SELECT match_guid, record_start_timestamp, map_name, playlist, replay_url,
+	       download_status, local_file_path, downloaded_at, upload_status,
+	       ballchasing_id, ballchasing_url, uploaded_at, retry_count,
+	       last_error, blue_score, orange_score, winner_team, replay_stats_json,
+	       synced_at, stats_sync_status, stats_retry_count, created_at, updated_at
+	FROM matches
+	WHERE ballchasing_id = ?
+	ORDER BY record_start_timestamp DESC
+	LIMIT 1;
+	`
+	row := s.db.QueryRowContext(ctx, query, ballchasingID)
+	rec, err := scanMatchRecord(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrMatchNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get match by ballchasing_id %s: %w", ballchasingID, err)
+	}
+	return rec, nil
+}
+
+func (s *SQLiteStore) resolveExistingMatchGUID(ctx context.Context, guid, ballchasingID string) string {
+	guid = strings.TrimSpace(guid)
+	ballchasingID = strings.TrimSpace(ballchasingID)
+	if guid != "" {
+		var exact string
+		if err := s.db.QueryRowContext(ctx, "SELECT match_guid FROM matches WHERE match_guid = ? LIMIT 1;", guid).Scan(&exact); err == nil && exact != "" {
+			return exact
+		}
+	}
+	if ballchasingID != "" {
+		var byBC string
+		if err := s.db.QueryRowContext(ctx, "SELECT match_guid FROM matches WHERE ballchasing_id = ? ORDER BY record_start_timestamp DESC LIMIT 1;", ballchasingID).Scan(&byBC); err == nil && byBC != "" {
+			return byBC
+		}
+	}
+	if guid != "" {
+		var byNorm string
+		if err := s.db.QueryRowContext(ctx, "SELECT match_guid FROM matches WHERE LOWER(REPLACE(match_guid, '-', '')) = LOWER(REPLACE(?, '-', '')) ORDER BY record_start_timestamp DESC LIMIT 1;", guid).Scan(&byNorm); err == nil && byNorm != "" {
+			return byNorm
+		}
+	}
+	return guid
 }
 
 // ListPendingDownloads returns all matches ready for download (PENDING, or FAILED with retry_count < maxRetries and backoff elapsed).
@@ -2267,7 +2341,14 @@ func (s *SQLiteStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchSta
 	}
 
 	st := *stats
-	guid := strings.TrimSpace(st.MatchGUID)
+	guid := s.resolveExistingMatchGUID(ctx, st.MatchGUID, st.BallchasingID)
+	st.MatchGUID = guid
+	stats.MatchGUID = guid
+	if len(stats.Players) > 0 {
+		playersCopy := make([]ReplayPlayerStats, len(stats.Players))
+		copy(playersCopy, stats.Players)
+		st.Players = playersCopy
+	}
 
 	// Fallback score calculation from player goals if top-level team scores are 0-0
 	if st.BlueScore == 0 && st.OrangeScore == 0 && len(st.Players) > 0 {
@@ -2295,11 +2376,6 @@ func (s *SQLiteStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchSta
 	}
 	st.BallchasingURL = NormalizeBallchasingURL(st.BallchasingID, st.BallchasingURL)
 
-	statsJSON, err := json.Marshal(&st)
-	if err != nil {
-		return fmt.Errorf("failed to marshal replay stats: %w", err)
-	}
-
 	now := time.Now().UTC()
 	nowUnix := now.Unix()
 
@@ -2319,6 +2395,101 @@ func (s *SQLiteStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchSta
 		if err := s.db.QueryRowContext(ctx, "SELECT record_start_timestamp FROM matches WHERE match_guid = ?;", guid).Scan(&existingTS); err == nil && existingTS > 0 {
 			startTS = existingTS
 		}
+	}
+
+	// Resolve all players and local status before marshaling replay_stats_json
+	localAccounts := s.getLocalAccountIDs(ctx)
+	matchPlayers := make([]*MatchPlayerRecord, 0, len(st.Players))
+	matchTime := time.Unix(startTS, 0).UTC()
+
+	for i := range st.Players {
+		p := &st.Players[i]
+		pid := strings.TrimSpace(p.OnlineID)
+		if (pid == "" || pid == "0") && strings.TrimSpace(p.Name) != "" {
+			pid = strings.TrimSpace(p.Name)
+		}
+		if pid == "" {
+			continue
+		}
+		plat := strings.TrimSpace(p.Platform)
+		if plat == "" {
+			plat = "Unknown"
+		}
+		canonicalID := s.resolvePlayerIDForMatch(ctx, guid, pid, plat, p.Name, p.Team, true)
+
+		isLocal := p.IsLocal || localAccounts[strings.ToLower(pid)] || localAccounts[strings.ToLower(canonicalID)]
+		if isLocal {
+			var existingLocalID string
+			if err := s.db.QueryRowContext(ctx, "SELECT player_id FROM match_players WHERE match_guid = ? AND team_num = ? AND is_local = 1 LIMIT 1;", guid, p.Team).Scan(&existingLocalID); err == nil && existingLocalID != "" {
+				canonicalID = existingLocalID
+			}
+		}
+		p.IsLocal = isLocal
+
+		var won *bool
+		if st.WinnerTeam != nil && *st.WinnerTeam >= 0 {
+			w := (*st.WinnerTeam == p.Team)
+			won = &w
+		}
+
+		var statsJSONStr string
+		if p.Core != nil || p.Boost != nil || p.Movement != nil || p.Positioning != nil || p.Demo != nil || p.Ball != nil || p.Camera != nil || p.Rank != nil {
+			if b, mErr := json.Marshal(p); mErr == nil {
+				statsJSONStr = string(b)
+			}
+		}
+
+		mp := &MatchPlayerRecord{
+			MatchGUID:  guid,
+			PlayerID:   canonicalID,
+			Platform:   plat,
+			PlayerName: strings.TrimSpace(p.Name),
+			TeamNum:    p.Team,
+			IsLocal:    isLocal,
+			Won:        won,
+			Score:      p.Score,
+			Goals:      p.Goals,
+			Assists:    p.Assists,
+			Saves:      p.Saves,
+			Shots:      p.Shots,
+			Demos:      p.Demos,
+			CarName:    strings.TrimSpace(p.CarName),
+			StatsJSON:  statsJSONStr,
+		}
+		matchPlayers = append(matchPlayers, mp)
+
+		if !isLocal {
+			pRec, err := s.GetPlayer(ctx, canonicalID)
+			if err != nil {
+				pRec = &PlayerRecord{
+					PlayerID:    canonicalID,
+					Platform:    plat,
+					PlayerName:  strings.TrimSpace(p.Name),
+					FirstSeenAt: matchTime,
+					LastSeenAt:  matchTime,
+				}
+				_ = s.UpsertPlayer(ctx, pRec)
+			} else {
+				if pRec.Platform == "" || pRec.Platform == "Unknown" {
+					pRec.Platform = plat
+				}
+				if strings.TrimSpace(p.Name) != "" {
+					pRec.PlayerName = strings.TrimSpace(p.Name)
+				}
+				if matchTime.Before(pRec.FirstSeenAt) {
+					pRec.FirstSeenAt = matchTime
+				}
+				if matchTime.After(pRec.LastSeenAt) {
+					pRec.LastSeenAt = matchTime
+				}
+				_ = s.UpsertPlayer(ctx, pRec)
+			}
+		}
+	}
+
+	statsJSON, err := json.Marshal(&st)
+	if err != nil {
+		return fmt.Errorf("failed to marshal replay stats: %w", err)
 	}
 
 	dlStatus := DownloadDownloaded
@@ -2353,6 +2524,7 @@ func (s *SQLiteStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchSta
 		replay_stats_json = excluded.replay_stats_json,
 		synced_at = excluded.synced_at,
 		download_status = CASE WHEN matches.download_status = 'PENDING' THEN 'DOWNLOADED' ELSE matches.download_status END,
+		upload_status = CASE WHEN excluded.ballchasing_id != '' AND (matches.upload_status = '' OR matches.upload_status = 'PENDING' OR matches.upload_status = 'FAILED') THEN 'UPLOADED' ELSE matches.upload_status END,
 		stats_sync_status = CASE WHEN excluded.ballchasing_id != '' THEN 'SYNCED' ELSE matches.stats_sync_status END,
 		updated_at = excluded.updated_at;
 	`
@@ -2365,86 +2537,6 @@ func (s *SQLiteStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchSta
 	)
 	if err != nil {
 		return fmt.Errorf("failed to sync replay stats for %s: %w", guid, err)
-	}
-
-	// Upsert all players in this replay into players table and match_players
-	localAccounts := s.getLocalAccountIDs(ctx)
-	matchPlayers := make([]*MatchPlayerRecord, 0, len(st.Players))
-	matchTime := time.Unix(startTS, 0).UTC()
-
-	for _, p := range st.Players {
-		pid := strings.TrimSpace(p.OnlineID)
-		if (pid == "" || pid == "0") && strings.TrimSpace(p.Name) != "" {
-			pid = strings.TrimSpace(p.Name)
-		}
-		if pid == "" {
-			continue
-		}
-		plat := strings.TrimSpace(p.Platform)
-		if plat == "" {
-			plat = "Unknown"
-		}
-		canonicalID := s.resolvePlayerIDForMatch(ctx, guid, pid, plat, p.Name, p.Team, true)
-
-		isLocal := localAccounts[strings.ToLower(pid)] || localAccounts[strings.ToLower(canonicalID)]
-
-		var won *bool
-		if st.WinnerTeam != nil && *st.WinnerTeam >= 0 {
-			w := (*st.WinnerTeam == p.Team)
-			won = &w
-		}
-
-		var statsJSONStr string
-		if p.Core != nil || p.Boost != nil || p.Movement != nil || p.Positioning != nil || p.Demo != nil || p.Ball != nil || p.Camera != nil || p.Rank != nil {
-			if b, mErr := json.Marshal(p); mErr == nil {
-				statsJSONStr = string(b)
-			}
-		}
-
-		mp := &MatchPlayerRecord{
-			MatchGUID: guid,
-			PlayerID:  canonicalID,
-			TeamNum:   p.Team,
-			IsLocal:   isLocal,
-			Won:       won,
-			Score:     p.Score,
-			Goals:     p.Goals,
-			Assists:   p.Assists,
-			Saves:     p.Saves,
-			Shots:     p.Shots,
-			Demos:     p.Demos,
-			CarName:   strings.TrimSpace(p.CarName),
-			StatsJSON: statsJSONStr,
-		}
-		matchPlayers = append(matchPlayers, mp)
-
-		if !isLocal {
-			pRec, err := s.GetPlayer(ctx, canonicalID)
-			if err != nil {
-				pRec = &PlayerRecord{
-					PlayerID:    canonicalID,
-					Platform:    plat,
-					PlayerName:  strings.TrimSpace(p.Name),
-					FirstSeenAt: matchTime,
-					LastSeenAt:  matchTime,
-				}
-				_ = s.UpsertPlayer(ctx, pRec)
-			} else {
-				if pRec.Platform == "" || pRec.Platform == "Unknown" {
-					pRec.Platform = plat
-				}
-				if strings.TrimSpace(p.Name) != "" {
-					pRec.PlayerName = strings.TrimSpace(p.Name)
-				}
-				if matchTime.Before(pRec.FirstSeenAt) {
-					pRec.FirstSeenAt = matchTime
-				}
-				if matchTime.After(pRec.LastSeenAt) {
-					pRec.LastSeenAt = matchTime
-				}
-				_ = s.UpsertPlayer(ctx, pRec)
-			}
-		}
 	}
 
 	if len(matchPlayers) > 0 {
@@ -2579,9 +2671,14 @@ func (s *SQLiteStore) EnrichMatchStatsWithPlayers(ctx context.Context, matchGUID
 				continue
 			}
 			mpIDLower := strings.ToLower(strings.TrimSpace(mps[j].playerID))
-			if (spOnlineLower != "" && spOnlineLower != "0" && (mpIDLower == spOnlineLower || strings.Contains(mpIDLower, "|"+spOnlineLower+"|"))) ||
-				(spNameLower != "" && strings.EqualFold(mps[j].playerName, spNameLower) && mps[j].teamNum == sp.Team) ||
-				(mps[j].teamNum == sp.Team && mps[j].score == sp.Score && mps[j].goals == sp.Goals && len(mps) <= 2) {
+			mpIDToken := ""
+			if parts := strings.Split(mpIDLower, "|"); len(parts) >= 2 {
+				mpIDToken = strings.TrimSpace(parts[1])
+			}
+			if (spOnlineLower != "" && spOnlineLower != "0" && (mpIDLower == spOnlineLower || mpIDToken == spOnlineLower || strings.Contains(mpIDLower, "|"+spOnlineLower+"|") || strings.Contains(spOnlineLower, "|"+mpIDToken+"|"))) ||
+				(sp.IsLocal && mps[j].isLocal && mps[j].teamNum == sp.Team) ||
+				(spNameLower != "" && (strings.EqualFold(mps[j].playerName, spNameLower) || mpIDToken == spNameLower) && mps[j].teamNum == sp.Team) ||
+				(mps[j].teamNum == sp.Team && mps[j].score == sp.Score && mps[j].goals == sp.Goals) {
 				matched = &mps[j]
 				matchedMP[j] = true
 				break
@@ -2589,6 +2686,9 @@ func (s *SQLiteStore) EnrichMatchStatsWithPlayers(ctx context.Context, matchGUID
 		}
 
 		if matched != nil {
+			if matched.isLocal {
+				sp.IsLocal = true
+			}
 			if strings.TrimSpace(matched.statsJSON) != "" && matched.statsJSON != "{}" {
 				var parsedRPS ReplayPlayerStats
 				if err := json.Unmarshal([]byte(matched.statsJSON), &parsedRPS); err == nil {
@@ -2680,6 +2780,7 @@ func (s *SQLiteStore) EnrichMatchStatsWithPlayers(ctx context.Context, matchGUID
 				sp.OnlineID = mp.playerID
 			}
 			sp.Team = mp.teamNum
+			sp.IsLocal = mp.isLocal
 			sp.Score = mp.score
 			sp.Goals = mp.goals
 			sp.Assists = mp.assists
@@ -3327,13 +3428,40 @@ func (s *SQLiteStore) SaveMatchPlayers(ctx context.Context, matchGUID string, pl
 		return nil
 	}
 
+	matchGUID = s.resolveExistingMatchGUID(ctx, matchGUID, "")
 	resolvedPlayers := make([]*MatchPlayerRecord, 0, len(players))
 	for _, p := range players {
 		if p == nil || strings.TrimSpace(p.PlayerID) == "" {
 			continue
 		}
 		cp := *p
-		cp.PlayerID = s.resolvePlayerIDForMatch(ctx, matchGUID, p.PlayerID, "", "", p.TeamNum, false)
+		cp.MatchGUID = matchGUID
+		plat := strings.TrimSpace(p.Platform)
+		pName := strings.TrimSpace(p.PlayerName)
+		if plat == "" {
+			if parts := strings.SplitN(p.PlayerID, "|", 3); len(parts) == 3 {
+				plat = strings.TrimSpace(parts[0])
+			}
+		}
+		if pName == "" && strings.TrimSpace(p.StatsJSON) != "" {
+			var rps ReplayPlayerStats
+			if err := json.Unmarshal([]byte(p.StatsJSON), &rps); err == nil {
+				if strings.TrimSpace(rps.Name) != "" {
+					pName = strings.TrimSpace(rps.Name)
+				}
+				if plat == "" && strings.TrimSpace(rps.Platform) != "" {
+					plat = strings.TrimSpace(rps.Platform)
+				}
+			}
+		}
+		resolvedID := s.resolvePlayerIDForMatch(ctx, matchGUID, p.PlayerID, plat, pName, p.TeamNum, false)
+		if p.IsLocal {
+			var existingLocalID string
+			if err := s.db.QueryRowContext(ctx, "SELECT player_id FROM match_players WHERE match_guid = ? AND team_num = ? AND is_local = 1 LIMIT 1;", matchGUID, p.TeamNum).Scan(&existingLocalID); err == nil && existingLocalID != "" {
+				resolvedID = existingLocalID
+			}
+		}
+		cp.PlayerID = resolvedID
 		resolvedPlayers = append(resolvedPlayers, &cp)
 	}
 
@@ -3901,8 +4029,7 @@ func (s *SQLiteStore) ListPendingStatsSync(ctx context.Context, maxRetries int) 
 	       last_error, blue_score, orange_score, winner_team, replay_stats_json,
 	       synced_at, stats_sync_status, stats_retry_count, created_at, updated_at
 	FROM matches
-	WHERE (upload_status = 'UPLOADED' OR upload_status = 'DUPLICATE')
-	  AND ballchasing_id != ''
+	WHERE ballchasing_id != ''
 	  AND (
 	    stats_sync_status = 'PENDING'
 	    OR (
@@ -4455,11 +4582,23 @@ func (s *SQLiteStore) mergeDuplicatePlayerIDs(ctx context.Context, dupID, canonI
 // normalizes API links in ballchasing_url, deduplicates player aliases, repairs timestamps,
 // and rebuilds head-to-head player_matchups with local-perspective win/loss outcomes.
 func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) error {
-	// 1. Normalize any API links in ballchasing_url to web links
+	// 1. Normalize any API links in ballchasing_url to web links and repair upload_status / stats_sync_status
 	_, _ = s.db.ExecContext(ctx, `
 		UPDATE matches
 		SET ballchasing_url = 'https://ballchasing.com/replay/' || ballchasing_id
 		WHERE ballchasing_id != '' AND (ballchasing_url LIKE '%/api/replays/%' OR ballchasing_url = '');
+	`)
+	_, _ = s.db.ExecContext(ctx, `
+		UPDATE matches
+		SET upload_status = 'UPLOADED'
+		WHERE ballchasing_id != '' AND (upload_status = '' OR upload_status = 'PENDING' OR upload_status = 'FAILED');
+	`)
+	_, _ = s.db.ExecContext(ctx, `
+		UPDATE matches
+		SET stats_sync_status = 'PENDING', stats_retry_count = 0
+		WHERE ballchasing_id != ''
+		  AND stats_sync_status = 'SYNCED'
+		  AND replay_stats_json NOT LIKE '%"boost":%';
 	`)
 
 	// 2. Find matches with 0-0 scores and non-empty replay_stats_json
@@ -4978,6 +5117,36 @@ func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) er
 
 	// 6. Repair any corrupted rank_name values in players.ranks_json caused by the legacy 19-tier rank table
 	s.repairCorruptedRanksJSON(ctx, false)
+
+	// 7. Backfill match_players.stats_json from matches.replay_stats_json for any rows missing per-player telemetry
+	if mpMissingRows, err := s.db.QueryContext(ctx, `
+		SELECT mp.match_guid, mp.player_id, mp.team_num, COALESCE(p.player_name, ''), m.replay_stats_json
+		FROM match_players mp
+		JOIN matches m ON mp.match_guid = m.match_guid
+		LEFT JOIN players p ON mp.player_id = p.player_id
+		WHERE (mp.stats_json = '' OR mp.stats_json = '{}')
+		  AND m.replay_stats_json LIKE '%"boost":%';
+	`); err == nil {
+		type mpBackfill struct {
+			guid      string
+			playerID  string
+			statsJSON string
+		}
+		var backfills []mpBackfill
+		for mpMissingRows.Next() {
+			var guid, pid, pName, replayJSON string
+			var teamNum int
+			if err := mpMissingRows.Scan(&guid, &pid, &teamNum, &pName, &replayJSON); err == nil {
+				if extracted := ExtractPlayerStatsJSONFromReplay("", replayJSON, pid, pName, teamNum); extracted != "" {
+					backfills = append(backfills, mpBackfill{guid: guid, playerID: pid, statsJSON: extracted})
+				}
+			}
+		}
+		mpMissingRows.Close()
+		for _, bf := range backfills {
+			_, _ = s.db.ExecContext(ctx, `UPDATE match_players SET stats_json = ? WHERE match_guid = ? AND player_id = ?;`, bf.statsJSON, bf.guid, bf.playerID)
+		}
+	}
 
 	return nil
 }

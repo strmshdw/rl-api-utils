@@ -178,19 +178,28 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 				continue
 			}
 
+			var existingMatch *storage.MatchRecord
 			if candidateGUID := strings.TrimSpace(listItem.MatchGUID); candidateGUID != "" {
-				if existing, err := b.store.GetMatch(ctx, candidateGUID); err == nil && existing != nil &&
-					existing.BallchasingID != "" &&
-					(existing.BlueScore > 0 || existing.OrangeScore > 0) &&
-					strings.Contains(existing.ReplayStatsJSON, `"boost":`) {
-					syncedMatches++
-					b.mu.Lock()
-					b.progress.TotalReplays = totalReplays
-					b.progress.SyncedMatches = syncedMatches
-					b.progress.SyncedPlayers = syncedPlayers
-					b.mu.Unlock()
-					continue
+				if ex, err := b.store.GetMatch(ctx, candidateGUID); err == nil && ex != nil {
+					existingMatch = ex
 				}
+			}
+			if existingMatch == nil {
+				if ex, err := b.store.GetMatch(ctx, replayID); err == nil && ex != nil && ex.BallchasingID == replayID {
+					existingMatch = ex
+				}
+			}
+			if existingMatch != nil &&
+				existingMatch.BallchasingID != "" &&
+				(existingMatch.BlueScore > 0 || existingMatch.OrangeScore > 0) &&
+				strings.Contains(existingMatch.ReplayStatsJSON, `"boost":`) {
+				syncedMatches++
+				b.mu.Lock()
+				b.progress.TotalReplays = totalReplays
+				b.progress.SyncedMatches = syncedMatches
+				b.progress.SyncedPlayers = syncedPlayers
+				b.mu.Unlock()
+				continue
 			}
 
 			// Strictly respect rate limits before each individual replay query
@@ -218,7 +227,13 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 				detail = &listItem
 			}
 
-			guid := strings.TrimSpace(detail.MatchGUID)
+			guid := ""
+			if existingMatch != nil && strings.TrimSpace(existingMatch.MatchGUID) != "" {
+				guid = strings.TrimSpace(existingMatch.MatchGUID)
+			}
+			if guid == "" {
+				guid = strings.TrimSpace(detail.MatchGUID)
+			}
 			if guid == "" {
 				guid = strings.TrimSpace(listItem.MatchGUID)
 			}
@@ -329,6 +344,7 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 				}
 
 				isLocal := (found && i == localIdx) || (localTeam != nil && c.Team == *localTeam && localPName != "" && strings.EqualFold(c.Name, localPName))
+				playerStats[i].IsLocal = isLocal
 
 				var won *bool
 				if winnerTeam != nil {
@@ -342,19 +358,21 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 				}
 
 				matchPlayers = append(matchPlayers, &storage.MatchPlayerRecord{
-					MatchGUID: guid,
-					PlayerID:  playerID,
-					TeamNum:   c.Team,
-					IsLocal:   isLocal,
-					Won:       won,
-					Score:     entry.p.Score,
-					Goals:     entry.p.Goals,
-					Assists:   entry.p.Assists,
-					Saves:     entry.p.Saves,
-					Shots:     entry.p.Shots,
-					Demos:     playerStats[i].Demos,
-					CarName:   entry.p.CarName,
-					StatsJSON: pStatsJSON,
+					MatchGUID:  guid,
+					PlayerID:   playerID,
+					Platform:   c.Platform,
+					PlayerName: c.Name,
+					TeamNum:    c.Team,
+					IsLocal:    isLocal,
+					Won:        won,
+					Score:      entry.p.Score,
+					Goals:      entry.p.Goals,
+					Assists:    entry.p.Assists,
+					Saves:      entry.p.Saves,
+					Shots:      entry.p.Shots,
+					Demos:      playerStats[i].Demos,
+					CarName:    entry.p.CarName,
+					StatsJSON:  pStatsJSON,
 				})
 			}
 
@@ -422,6 +440,12 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 					slog.Any("error", err),
 				)
 				continue
+			}
+			if st.MatchGUID != "" && st.MatchGUID != guid {
+				guid = st.MatchGUID
+				for _, mp := range matchPlayers {
+					mp.MatchGUID = guid
+				}
 			}
 
 			if len(matchPlayers) > 0 {

@@ -94,19 +94,21 @@ type MatchRecord struct {
 
 // MatchPlayerRecord represents an individual player's participation, box score, and telemetry in a match.
 type MatchPlayerRecord struct {
-	MatchGUID string `json:"match_guid"`
-	PlayerID  string `json:"player_id"`
-	TeamNum   int    `json:"team_num"` // 0 = Blue, 1 = Orange
-	IsLocal   bool   `json:"is_local"`
-	Won       *bool  `json:"won,omitempty"` // nil = unknown/draw, true = win, false = loss
-	Score     int    `json:"score"`
-	Goals     int    `json:"goals"`
-	Assists   int    `json:"assists"`
-	Saves     int    `json:"saves"`
-	Shots     int    `json:"shots"`
-	Demos     int    `json:"demos"`
-	CarName   string `json:"car_name"`
-	StatsJSON string `json:"stats_json,omitempty"`
+	MatchGUID  string `json:"match_guid"`
+	PlayerID   string `json:"player_id"`
+	Platform   string `json:"platform,omitempty"`
+	PlayerName string `json:"player_name,omitempty"`
+	TeamNum    int    `json:"team_num"` // 0 = Blue, 1 = Orange
+	IsLocal    bool   `json:"is_local"`
+	Won        *bool  `json:"won,omitempty"` // nil = unknown/draw, true = win, false = loss
+	Score      int    `json:"score"`
+	Goals      int    `json:"goals"`
+	Assists    int    `json:"assists"`
+	Saves      int    `json:"saves"`
+	Shots      int    `json:"shots"`
+	Demos      int    `json:"demos"`
+	CarName    string `json:"car_name"`
+	StatsJSON  string `json:"stats_json,omitempty"`
 }
 
 // MMRHistoryRecord represents a point-in-time competitive MMR snapshot.
@@ -205,6 +207,7 @@ type ReplayPlayerStats struct {
 	Shots               int                           `json:"shots"`
 	Demos               int                           `json:"demos,omitempty"`
 	IsBot               bool                          `json:"is_bot"`
+	IsLocal             bool                          `json:"is_local,omitempty"`
 	CarID               int                           `json:"car_id,omitempty"`
 	CarName             string                        `json:"car_name,omitempty"`
 	MVP                 bool                          `json:"mvp,omitempty"`
@@ -1029,11 +1032,33 @@ func ExtractPlayerStatsJSONFromReplay(mpStatsJSON, replayStatsJSON, playerID, pl
 		if err := json.Unmarshal([]byte(s), &st); err == nil {
 			lowerID := strings.ToLower(strings.TrimSpace(playerID))
 			lowerName := strings.ToLower(strings.TrimSpace(playerName))
+			idToken := ""
+			if parts := strings.Split(lowerID, "|"); len(parts) >= 2 {
+				idToken = strings.TrimSpace(parts[1])
+			}
 			for _, p := range st.Players {
 				pID := strings.ToLower(strings.TrimSpace(p.OnlineID))
-				if (pID != "" && pID != "0" && (pID == lowerID || strings.Contains(lowerID, "|"+pID+"|"))) ||
-					(lowerName != "" && strings.EqualFold(strings.TrimSpace(p.Name), lowerName) && (teamNum < 0 || p.Team == teamNum)) {
+				pName := strings.ToLower(strings.TrimSpace(p.Name))
+				if (pID != "" && pID != "0" && (pID == lowerID || pID == idToken || strings.Contains(lowerID, "|"+pID+"|") || strings.Contains(pID, "|"+idToken+"|"))) ||
+					(lowerName != "" && pName == lowerName && (teamNum < 0 || p.Team == teamNum)) ||
+					(idToken != "" && pName == idToken && (teamNum < 0 || p.Team == teamNum)) {
 					if b, err := json.Marshal(p); err == nil {
+						return string(b)
+					}
+				}
+			}
+			// Fallback: if teamNum is specified and there is only 1 player on that team (e.g. 1v1), return that player.
+			if teamNum >= 0 {
+				var teamCandidate *ReplayPlayerStats
+				teamCount := 0
+				for i := range st.Players {
+					if st.Players[i].Team == teamNum {
+						teamCandidate = &st.Players[i]
+						teamCount++
+					}
+				}
+				if teamCount == 1 && teamCandidate != nil {
+					if b, err := json.Marshal(teamCandidate); err == nil {
 						return string(b)
 					}
 				}
