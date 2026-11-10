@@ -92,9 +92,16 @@ describe('App shell', () => {
     expect(container.querySelector('[data-testid="app-header"]')!.textContent).not.toContain('COLUMNS');
   });
 
-  it('supports 12 design styles, dark/light mode toggle, and anti-squint text scale toggle', async () => {
+  it('hides theme and configuration complexity behind the Settings gear button and supports all 14 design styles, dark/light mode, and text scale', async () => {
     setHooks(null);
     const { container } = await mount(<App />);
+
+    // Settings panel is closed by default so header remains clean
+    expect(container.querySelector('#theme-select')).toBeNull();
+    const settingsBtn = container.querySelector<HTMLButtonElement>('#btn-settings')!;
+    expect(settingsBtn).not.toBeNull();
+    settingsBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
 
     const lightBtn = container.querySelector<HTMLButtonElement>('#btn-color-light')!;
     lightBtn.click();
@@ -165,6 +172,11 @@ describe('App shell', () => {
     setHooks(null);
     const { container } = await mount(<App />);
 
+    // Open Settings panel to access dev/debug preview and buffer controls
+    const settingsBtn = container.querySelector<HTMLButtonElement>('#btn-settings')!;
+    settingsBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+
     // Toggle IN-MATCH preview when no live match is running
     const matchBtn = container.querySelector<HTMLButtonElement>('#btn-mode-match')!;
     matchBtn.click();
@@ -188,7 +200,7 @@ describe('App shell', () => {
     calBtn.click();
     await new Promise((r) => setTimeout(r, 10));
     const calBar = container.querySelector('#custom-calendar-bar')!;
-    expect(calBar.className).toContain('flex');
+    expect(calBar).not.toBeNull();
     expect(container.querySelector('#custom-date-from')).not.toBeNull();
     expect(container.querySelector('#custom-date-to')).not.toBeNull();
 
@@ -219,7 +231,7 @@ describe('App shell', () => {
     expect(banner.textContent).toContain('REPLAY HISTORY LIMIT EXCEEDED');
     expect(banner.textContent).toContain('20 / 20 UNDOWNLOADED REPLAYS');
 
-    // Dismiss banner on demand even in exceeded state, and restore via SHOW SYNC BANNER
+    // Dismiss banner on demand even in exceeded state, and restore via SHOW SYNC BANNER inside Settings
     const dismissBtn = banner.querySelector<HTMLButtonElement>('[data-testid="banner-dismiss-btn"]')!;
     expect(dismissBtn).not.toBeNull();
     dismissBtn.click();

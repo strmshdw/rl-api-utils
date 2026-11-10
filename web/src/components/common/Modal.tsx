@@ -117,6 +117,7 @@ export const Modal: React.FC<ModalProps> = ({
     <dialog
       ref={dialogRef}
       aria-labelledby={titleId}
+      {...({ closedby: 'any' } as React.DialogHTMLAttributes<HTMLDialogElement>)}
       className="broadcast-dialog broadcast-modal font-display text-ink"
     >
       <div
