@@ -1091,6 +1091,20 @@ func (s *JSONStore) resolveCanonicalPlayerIDLocked(playerID string) string {
 			return bestID
 		}
 	}
+	if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
+		for _, mps := range s.matchPlayers {
+			for _, mp := range mps {
+				if mp != nil && mp.IsLocal && mp.PlayerID != "" && mp.PlayerID != "0" {
+					return mp.PlayerID
+				}
+			}
+		}
+		for _, a := range s.auth {
+			if a.AccountID != "" {
+				return a.AccountID
+			}
+		}
+	}
 	for _, mps := range s.matchPlayers {
 		for _, mp := range mps {
 			if mp == nil {
@@ -1103,6 +1117,175 @@ func (s *JSONStore) resolveCanonicalPlayerIDLocked(playerID string) string {
 		}
 	}
 	return playerID
+}
+
+func (s *JSONStore) isLocalPlayerIDLocked(playerID string) bool {
+	trimmed := strings.TrimSpace(playerID)
+	if trimmed == "" {
+		return false
+	}
+	if strings.EqualFold(trimmed, "me") || strings.EqualFold(trimmed, "you") {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	for _, a := range s.auth {
+		if a.AccountID != "" && strings.EqualFold(a.AccountID, trimmed) {
+			return true
+		}
+	}
+	for _, mps := range s.matchPlayers {
+		for _, mp := range mps {
+			if mp != nil && mp.IsLocal && strings.ToLower(mp.PlayerID) == lower {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// GetLocalPlayerProfile synthesizes a PlayerRecord and per-playlist PlayerMatchup slice for the local player in JSONStore.
+func (s *JSONStore) GetLocalPlayerProfile(ctx context.Context, playerID string) (*PlayerRecord, []*PlayerMatchup, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, nil, ErrStoreClosed
+	}
+
+	trimmed := strings.TrimSpace(playerID)
+	if trimmed == "" {
+		return nil, nil, ErrPlayerNotFound
+	}
+	resolvedID := s.resolveCanonicalPlayerIDLocked(trimmed)
+	if !s.isLocalPlayerIDLocked(trimmed) && !s.isLocalPlayerIDLocked(resolvedID) {
+		return nil, nil, ErrPlayerNotFound
+	}
+
+	canonicalID := resolvedID
+	if strings.EqualFold(canonicalID, "me") || strings.EqualFold(canonicalID, "you") || canonicalID == "" {
+		return nil, nil, ErrPlayerNotFound
+	}
+
+	platform := "Unknown"
+	if strings.Contains(canonicalID, "|") {
+		parts := strings.Split(canonicalID, "|")
+		if strings.TrimSpace(parts[0]) != "" {
+			platform = strings.TrimSpace(parts[0])
+		}
+	}
+	displayName := "You"
+	for _, a := range s.auth {
+		if strings.TrimSpace(a.DisplayName) != "" {
+			displayName = strings.TrimSpace(a.DisplayName)
+			break
+		}
+	}
+
+	var firstSeen, lastSeen time.Time
+	type plAgg struct {
+		wins       int
+		losses     int
+		total      int
+		lastPlayed int64
+	}
+	byPlaylist := make(map[int]*plAgg)
+
+	for guid, mps := range s.matchPlayers {
+		m := s.matches[guid]
+		if m == nil {
+			continue
+		}
+		for _, mp := range mps {
+			if mp == nil || (!mp.IsLocal && !strings.EqualFold(mp.PlayerID, canonicalID)) {
+				continue
+			}
+			ts := time.Unix(m.RecordStartTimestamp, 0).UTC()
+			if m.RecordStartTimestamp > 0 {
+				if firstSeen.IsZero() || ts.Before(firstSeen) {
+					firstSeen = ts
+				}
+				if lastSeen.IsZero() || ts.After(lastSeen) {
+					lastSeen = ts
+				}
+			}
+			if m.Playlist > 0 {
+				agg, ok := byPlaylist[m.Playlist]
+				if !ok {
+					agg = &plAgg{}
+					byPlaylist[m.Playlist] = agg
+				}
+				if m.RecordStartTimestamp > agg.lastPlayed {
+					agg.lastPlayed = m.RecordStartTimestamp
+				}
+				var won, lost bool
+				if mp.Won != nil {
+					if *mp.Won {
+						won = true
+					} else {
+						lost = true
+					}
+				} else if m.WinnerTeam != nil && *m.WinnerTeam >= 0 {
+					if *m.WinnerTeam == mp.TeamNum {
+						won = true
+					} else {
+						lost = true
+					}
+				}
+				if won {
+					agg.wins++
+					agg.total++
+				} else if lost {
+					agg.losses++
+					agg.total++
+				}
+			}
+		}
+	}
+	now := time.Now().UTC()
+	if firstSeen.IsZero() {
+		firstSeen = now
+	}
+	if lastSeen.IsZero() {
+		lastSeen = now
+	}
+
+	matchups := make([]*PlayerMatchup, 0, len(byPlaylist))
+	for pid, agg := range byPlaylist {
+		if agg.total <= 0 {
+			continue
+		}
+		lp := lastSeen
+		if agg.lastPlayed > 0 {
+			lp = time.Unix(agg.lastPlayed, 0).UTC()
+		}
+		matchups = append(matchups, &PlayerMatchup{
+			PlayerID:         canonicalID,
+			PlaylistID:       pid,
+			WinsAsTeammate:   agg.wins,
+			LossesAsTeammate: agg.losses,
+			TotalMatches:     agg.total,
+			LastPlayedAt:     lp,
+		})
+	}
+	sort.Slice(matchups, func(i, j int) bool {
+		if matchups[i].TotalMatches != matchups[j].TotalMatches {
+			return matchups[i].TotalMatches > matchups[j].TotalMatches
+		}
+		return matchups[i].PlaylistID < matchups[j].PlaylistID
+	})
+
+	rec := &PlayerRecord{
+		PlayerID:    canonicalID,
+		Platform:    platform,
+		PlayerName:  displayName,
+		RanksJSON:   "{}",
+		Tags:        []string{},
+		FirstSeenAt: firstSeen,
+		LastSeenAt:  lastSeen,
+	}
+	return rec, matchups, nil
 }
 
 // GetPlayer retrieves a single player profile by PlayerID. Returns ErrPlayerNotFound if missing.
@@ -1313,6 +1496,7 @@ func (s *JSONStore) computePlayerSplitStatsLocked(
 			continue
 		}
 
+		isLocalTarget := s.isLocalPlayerIDLocked(resolvedID)
 		var targetMP *MatchPlayerRecord
 		localTeam := -1
 		for _, mp := range mPlayers {
@@ -1322,12 +1506,15 @@ func (s *JSONStore) computePlayerSplitStatsLocked(
 			if mp.IsLocal {
 				localTeam = mp.TeamNum
 			}
-			if mp.PlayerID == resolvedID {
+			if mp.PlayerID == resolvedID || (isLocalTarget && mp.IsLocal) {
 				targetMP = mp
 			}
 		}
-		if targetMP == nil || targetMP.IsLocal {
+		if targetMP == nil {
 			continue
+		}
+		if targetMP.IsLocal && localTeam < 0 {
+			localTeam = targetMP.TeamNum
 		}
 
 		if localTeam < 0 {
@@ -1391,6 +1578,9 @@ func (s *JSONStore) FilterPlayerSummaries(ctx context.Context, filter PlayerDire
 
 	matching := make([]*PlayerSummary, 0)
 	for _, p := range s.players {
+		if s.isLocalPlayerIDLocked(p.PlayerID) {
+			continue
+		}
 		if hasPlatform && !MatchesPlatformFilter(p.Platform, cleanPlatform) {
 			continue
 		}
@@ -2627,13 +2817,14 @@ func (s *JSONStore) ListPlayerMatches(ctx context.Context, playerID string, filt
 			continue
 		}
 
+		isLocalTarget := s.isLocalPlayerIDLocked(resolvedID)
 		var targetMP *MatchPlayerRecord
 		localTeam := -1
 		for _, mp := range mPlayers {
 			if mp.IsLocal {
 				localTeam = mp.TeamNum
 			}
-			if mp.PlayerID == resolvedID {
+			if mp.PlayerID == resolvedID || (isLocalTarget && mp.IsLocal) {
 				targetMP = mp
 			}
 		}

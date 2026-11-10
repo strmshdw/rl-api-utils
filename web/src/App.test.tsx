@@ -244,5 +244,58 @@ describe('App shell', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(container.querySelector('#replay-limit-banner')).not.toBeNull();
   });
+
+  it('pushes browser history states on tab/player navigation, restores state on popstate, and supports viewing own profile', async () => {
+    setHooks(null);
+    const { container } = await mount(<App />);
+
+    expect(window.location.pathname).toBe('/');
+    expect(nav(container).querySelector('[aria-current="page"]')?.textContent).toBe('LIVE');
+
+    // Switch to SESSION tab -> pushes /session
+    await clickText(nav(container), 'SESSION');
+    expect(window.location.pathname).toBe('/session');
+    expect(document.title).toContain('Session | RL/SYNC');
+
+    // Switch to PLAYERS tab -> pushes /players
+    await clickText(nav(container), 'PLAYERS');
+    expect(window.location.pathname).toBe('/players');
+    expect(container.querySelector('[data-testid="players-view"]')).not.toBeNull();
+
+    // Click VIEW MY PROFILE -> pushes /players/<local-id> and renders PlayerProfilePage
+    const ownProfileBtn = container.querySelector<HTMLButtonElement>('[data-testid="view-own-profile-btn"]')!;
+    expect(ownProfileBtn).not.toBeNull();
+    ownProfileBtn.click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(window.location.pathname).toContain('/players/');
+    expect(container.querySelector('[data-testid="player-profile-page"]')).not.toBeNull();
+
+    // Simulate browser Back via popstate to /players
+    const playersNavState = {
+      rlsyncNav: true,
+      depth: 2,
+      tab: 'players' as const,
+      player: null,
+      modalPlayer: null,
+    };
+    window.history.replaceState(playersNavState, '', '/players');
+    window.dispatchEvent(new PopStateEvent('popstate', { state: playersNavState }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(container.querySelector('[data-testid="player-profile-page"]')).toBeNull();
+    expect(container.querySelector('[data-testid="players-view"]')).not.toBeNull();
+
+    // Simulate browser Back via popstate to /session
+    const sessionNavState = {
+      rlsyncNav: true,
+      depth: 1,
+      tab: 'session' as const,
+      player: null,
+      modalPlayer: null,
+    };
+    window.history.replaceState(sessionNavState, '', '/session');
+    window.dispatchEvent(new PopStateEvent('popstate', { state: sessionNavState }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(container.querySelector('[data-testid="session-view"]')).not.toBeNull();
+  });
 });
 

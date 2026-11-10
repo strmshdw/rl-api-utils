@@ -443,6 +443,9 @@ export function computeDynamicRelationshipTag(
 
   if (typeof overrideLabel === 'string' && overrideLabel) {
     const up = overrideLabel.toUpperCase();
+    if (up === 'YOU') {
+      return make('YOU', 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
+    }
     if (up.includes('PRIME') || up.includes('SYNERGY')) {
       return make(up, 't-text-win text-win t-border-win', 'border-win');
     }

@@ -1519,6 +1519,35 @@ func TestDaemon_HTTP_Phase2_PlayersMatchesSessionAndPrune(t *testing.T) {
 		t.Fatalf("expected 1 defeat match (guid-2v2-loss-2) from local perspective, got %+v", oppMatchesResp.Matches)
 	}
 
+	// 3b. Verify GET /api/players/{localID} and GET /api/players/me return HTTP 200 for the local player's own profile
+	for _, selfEndpoint := range []string{"/api/players/Epic%7Cmy_epic_acc_001%7C0", "/api/players/me"} {
+		recSelf := executeTestRequest(d, http.MethodGet, selfEndpoint, nil)
+		if recSelf.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d: %s", selfEndpoint, recSelf.Code, recSelf.Body.String())
+		}
+		var selfDetail daemon.PlayerDetailResponse
+		if err := json.Unmarshal(recSelf.Body.Bytes(), &selfDetail); err != nil {
+			t.Fatalf("unmarshal %s failed: %v", selfEndpoint, err)
+		}
+		if selfDetail.RelationshipTag != "YOU" {
+			t.Errorf("%s RelationshipTag = %q; want YOU", selfEndpoint, selfDetail.RelationshipTag)
+		}
+		if selfDetail.WithYouStats == nil || selfDetail.WithYouStats.Games != 2 || selfDetail.WithYouStats.Wins != 1 || selfDetail.WithYouStats.Losses != 1 {
+			t.Errorf("%s WithYouStats = %+v; want Games=2 Wins=1 Losses=1", selfEndpoint, selfDetail.WithYouStats)
+		}
+	}
+	recSelfMatches := executeTestRequest(d, http.MethodGet, "/api/players/me/matches", nil)
+	if recSelfMatches.Code != http.StatusOK {
+		t.Fatalf("GET /api/players/me/matches returned %d: %s", recSelfMatches.Code, recSelfMatches.Body.String())
+	}
+	var selfMatchesResp daemon.PlayerMatchesResponse
+	if err := json.Unmarshal(recSelfMatches.Body.Bytes(), &selfMatchesResp); err != nil {
+		t.Fatalf("unmarshal /api/players/me/matches failed: %v", err)
+	}
+	if len(selfMatchesResp.Matches) != 2 {
+		t.Errorf("expected 2 matches for local player, got %d", len(selfMatchesResp.Matches))
+	}
+
 	// 4. Verify GET /api/matches/{guid} returns enriched player rank & Ballchasing telemetry
 	recMatchDetail := executeTestRequest(d, http.MethodGet, "/api/matches/guid-2v2-win-1", nil)
 	if recMatchDetail.Code != http.StatusOK {

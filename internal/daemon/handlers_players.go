@@ -256,22 +256,64 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	player, err := d.stateStore.GetPlayer(r.Context(), playerID)
+	var (
+		player        *storage.PlayerRecord
+		localMatchups []*storage.PlayerMatchup
+		isLocalPlayer bool
+	)
+	player, err = d.stateStore.GetPlayer(r.Context(), playerID)
 	if err != nil {
 		if errors.Is(err, storage.ErrPlayerNotFound) {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
+			if sqlStore, ok := d.stateStore.(*storage.SQLiteStore); ok {
+				if lp, lMatchups, lErr := sqlStore.GetLocalPlayerProfile(r.Context(), playerID); lErr == nil && lp != nil {
+					player = lp
+					localMatchups = lMatchups
+					playerID = lp.PlayerID
+					isLocalPlayer = true
+				}
+			} else if jsonStore, ok := d.stateStore.(*storage.JSONStore); ok {
+				if lp, lMatchups, lErr := jsonStore.GetLocalPlayerProfile(r.Context(), playerID); lErr == nil && lp != nil {
+					player = lp
+					localMatchups = lMatchups
+					playerID = lp.PlayerID
+					isLocalPlayer = true
+				}
+			}
+			if player == nil {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
+				return
+			}
+		} else {
+			d.logger.Error("failed to query player", slog.String("player_id", playerID), slog.Any("error", err))
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query player"})
 			return
 		}
-		d.logger.Error("failed to query player", slog.String("player_id", playerID), slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query player"})
-		return
 	}
 	if player == nil {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
 		return
+	}
+	if !isLocalPlayer {
+		if localIDs, lErr := d.stateStore.GetLocalPlayerIDs(r.Context()); lErr == nil {
+			for _, lid := range localIDs {
+				if strings.EqualFold(lid, player.PlayerID) || strings.EqualFold(lid, playerID) {
+					isLocalPlayer = true
+					if sqlStore, ok := d.stateStore.(*storage.SQLiteStore); ok {
+						if _, lMatchups, mErr := sqlStore.GetLocalPlayerProfile(r.Context(), player.PlayerID); mErr == nil {
+							localMatchups = lMatchups
+						}
+					} else if jsonStore, ok := d.stateStore.(*storage.JSONStore); ok {
+						if _, lMatchups, mErr := jsonStore.GetLocalPlayerProfile(r.Context(), player.PlayerID); mErr == nil {
+							localMatchups = lMatchups
+						}
+					}
+					break
+				}
+			}
+		}
 	}
 
 	q := r.URL.Query()
@@ -281,13 +323,18 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 	hasDateFilter := fromUnix > 0 || toUnix > 0
 	hasPlaylistFilter := playlist != "" && strings.ToLower(playlist) != "all"
 
-	matchups, err := d.stateStore.GetPlayerMatchups(r.Context(), playerID)
-	if err != nil {
-		d.logger.Warn("failed to query player matchups; using empty slice",
-			slog.String("player_id", playerID),
-			slog.Any("error", err),
-		)
-		matchups = make([]*storage.PlayerMatchup, 0)
+	var matchups []*storage.PlayerMatchup
+	if isLocalPlayer {
+		matchups = localMatchups
+	} else {
+		matchups, err = d.stateStore.GetPlayerMatchups(r.Context(), playerID)
+		if err != nil {
+			d.logger.Warn("failed to query player matchups; using empty slice",
+				slog.String("player_id", playerID),
+				slog.Any("error", err),
+			)
+			matchups = make([]*storage.PlayerMatchup, 0)
+		}
 	}
 	if matchups == nil {
 		matchups = make([]*storage.PlayerMatchup, 0)
@@ -367,6 +414,11 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 
 	playerCopy := *player
 
+	relTag := storage.ComputeRelationshipTag(tmWins, tmLosses, oppWins, oppLosses)
+	if isLocalPlayer {
+		relTag = "YOU"
+	}
+
 	resp := PlayerDetailResponse{
 		PlayerRecord:    &playerCopy,
 		EncountersCount: encountersCount,
@@ -374,7 +426,7 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		TeammateLosses:  tmLosses,
 		OpponentWins:    oppWins,
 		OpponentLosses:  oppLosses,
-		RelationshipTag: storage.ComputeRelationshipTag(tmWins, tmLosses, oppWins, oppLosses),
+		RelationshipTag: relTag,
 		WithYouStats:    withYouStats,
 		AgainstYouStats: againstYouStats,
 		Matchups:        filteredMatchups,
