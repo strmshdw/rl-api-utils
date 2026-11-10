@@ -345,5 +345,181 @@ func TestSQLiteStore_MigrationDeduplicatesConsoleAliasesAndFixesInvertedMatchups
 	}
 }
 
+func TestCanonical23TierRankFormatting(t *testing.T) {
+	expectedBase := map[int]string{
+		0:  "Unranked",
+		1:  "Bronze I",
+		2:  "Bronze II",
+		3:  "Bronze III",
+		4:  "Silver I",
+		5:  "Silver II",
+		6:  "Silver III",
+		7:  "Gold I",
+		8:  "Gold II",
+		9:  "Gold III",
+		10: "Platinum I",
+		11: "Platinum II",
+		12: "Platinum III",
+		13: "Diamond I",
+		14: "Diamond II",
+		15: "Diamond III",
+		16: "Champion I",
+		17: "Champion II",
+		18: "Champion III",
+		19: "Grand Champion I",
+		20: "Grand Champion II",
+		21: "Grand Champion III",
+		22: "Supersonic Legend",
+	}
+
+	expectedShortBase := map[int]string{
+		0:  "UNRANKED",
+		1:  "BRZ I",
+		2:  "BRZ II",
+		3:  "BRZ III",
+		4:  "SLV I",
+		5:  "SLV II",
+		6:  "SLV III",
+		7:  "GOLD I",
+		8:  "GOLD II",
+		9:  "GOLD III",
+		10: "PLAT I",
+		11: "PLAT II",
+		12: "PLAT III",
+		13: "DIA I",
+		14: "DIA II",
+		15: "DIA III",
+		16: "CHAMP I",
+		17: "CHAMP II",
+		18: "CHAMP III",
+		19: "GC I",
+		20: "GC II",
+		21: "GC III",
+		22: "SSL",
+	}
+
+	divSuffix := map[int]string{
+		1: "Div I",
+		2: "Div II",
+		3: "Div III",
+		4: "Div IV",
+	}
+	shortDivSuffix := map[int]string{
+		1: "DIV I",
+		2: "DIV II",
+		3: "DIV III",
+		4: "DIV IV",
+	}
+
+	for tier := 0; tier <= 22; tier++ {
+		base := expectedBase[tier]
+		shortBase := expectedShortBase[tier]
+
+		// Division 0 (omitted)
+		if got := FormatRankName(tier, 0); got != base {
+			t.Errorf("FormatRankName(%d, 0) = %q; want %q", tier, got, base)
+		}
+		if gotShort := FormatShortRankName(tier, 0); gotShort != shortBase {
+			t.Errorf("FormatShortRankName(%d, 0) = %q; want %q", tier, gotShort, shortBase)
+		}
+
+		// Divisions 1..4
+		for div := 1; div <= 4; div++ {
+			wantFull := base
+			wantShort := shortBase
+			if tier > 0 && tier < 22 {
+				wantFull = base + " " + divSuffix[div]
+				wantShort = shortBase + " · " + shortDivSuffix[div]
+			}
+			if got := FormatRankName(tier, div); got != wantFull {
+				t.Errorf("FormatRankName(%d, %d) = %q; want %q", tier, div, got, wantFull)
+			}
+			if gotShort := FormatShortRankName(tier, div); gotShort != wantShort {
+				t.Errorf("FormatShortRankName(%d, %d) = %q; want %q", tier, div, gotShort, wantShort)
+			}
+		}
+	}
+
+	// Spot-check examples from specification
+	if got := FormatShortRankName(19, 2); got != "GC I · DIV II" {
+		t.Errorf("FormatShortRankName(19, 2) = %q; want 'GC I · DIV II'", got)
+	}
+	if got := FormatShortRankName(22, 1); got != "SSL" {
+		t.Errorf("FormatShortRankName(22, 1) = %q; want 'SSL'", got)
+	}
+	if got := FormatShortRankName(18, 4); got != "CHAMP III · DIV IV" {
+		t.Errorf("FormatShortRankName(18, 4) = %q; want 'CHAMP III · DIV IV'", got)
+	}
+	if got := FormatShortRankName(15, 4); got != "DIA III · DIV IV" {
+		t.Errorf("FormatShortRankName(15, 4) = %q; want 'DIA III · DIV IV'", got)
+	}
+	if got := FormatShortRankName(11, 1); got != "PLAT II · DIV I" {
+		t.Errorf("FormatShortRankName(11, 1) = %q; want 'PLAT II · DIV I'", got)
+	}
+}
+
+func TestRepairHistoricalData_RepairsCorruptedRanksJSON(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "ranks_repair.db")
+
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+	defer store.Close()
+
+	// Insert a player with corrupted legacy 19-tier rank names (e.g. tier 13 labeled "Champion I Div II", tier 20 labeled "Tier 20",
+	// tier 13 Roman-numeral prefix collision labeled "Diamond II Div I", and tier 19 0-based PsyNet division 0 "Grand Champion I Division I")
+	corruptedRanks := `{"10":{"playlist_id":10,"playlist_name":"Ranked Duel 1v1","tier":13,"division":1,"rank_name":"Diamond II Div I","mmr":910},"11":{"playlist_id":11,"playlist_name":"Ranked Doubles 2v2","tier":13,"division":2,"rank_name":"Champion I Div II","mmr":980},"13":{"playlist_id":13,"playlist_name":"Ranked Standard 3v3","tier":20,"division":3,"rank_name":"Tier 20","mmr":1580},"27":{"playlist_id":27,"playlist_name":"Ranked Hoops","tier":19,"division":0,"rank_name":"Grand Champion I Division I","mmr":1435}}`
+	err = store.UpsertPlayer(ctx, &PlayerRecord{
+		PlayerID:   "Steam|76561198000012345|0",
+		Platform:   "Steam",
+		PlayerName: "DiamondAndGCPlayer",
+		RanksJSON:  corruptedRanks,
+	})
+	if err != nil {
+		t.Fatalf("UpsertPlayer failed: %v", err)
+	}
+
+	if err := store.RepairHistoricalData(ctx); err != nil {
+		t.Fatalf("RepairHistoricalData failed: %v", err)
+	}
+
+	p, err := store.GetPlayer(ctx, "Steam|76561198000012345|0")
+	if err != nil {
+		t.Fatalf("GetPlayer failed: %v", err)
+	}
+
+	// Verify tier 13 (playlist 10, previously "Diamond II Div I") is repaired to "Diamond I Div I" ("DIA I · DIV I")
+	if !containsSubstr(p.RanksJSON, `"Diamond I Div I"`) || !containsSubstr(p.RanksJSON, `"DIA I · DIV I"`) {
+		t.Errorf("expected repaired Diamond I Div I in RanksJSON, got %s", p.RanksJSON)
+	}
+	// Verify tier 13 (playlist 11) is now "Diamond I Div II" ("DIA I · DIV II") and tier 20 is "Grand Champion II Div III" ("GC II · DIV III")
+	if !containsSubstr(p.RanksJSON, `"Diamond I Div II"`) || !containsSubstr(p.RanksJSON, `"DIA I · DIV II"`) {
+		t.Errorf("expected repaired Diamond I Div II in RanksJSON, got %s", p.RanksJSON)
+	}
+	if !containsSubstr(p.RanksJSON, `"Grand Champion II Div III"`) || !containsSubstr(p.RanksJSON, `"GC II · DIV III"`) {
+		t.Errorf("expected repaired Grand Champion II Div III in RanksJSON, got %s", p.RanksJSON)
+	}
+	// Verify tier 19 (playlist 27, division 0 "Division I") has short_rank "GC I · DIV I"
+	if !containsSubstr(p.RanksJSON, `"GC I · DIV I"`) {
+		t.Errorf("expected short_rank GC I · DIV I for 0-based PsyNet division 0, got %s", p.RanksJSON)
+	}
+}
+
+func containsSubstr(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || (len(s) > 0 && indexSubstr(s, sub) >= 0))
+}
+
+func indexSubstr(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+
 
 

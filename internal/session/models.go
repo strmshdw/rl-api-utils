@@ -22,7 +22,28 @@ const (
 	EventClockUpdated EventType = "clock_updated"
 	// EventSessionUpdate is emitted when session-level statistics or history update.
 	EventSessionUpdate EventType = "session_update"
+	// EventSyncProgress is emitted when background replay/Ballchasing sync starts, progresses, or completes.
+	EventSyncProgress EventType = "sync_progress"
 )
+
+// MostPlayedPlaylistSummary summarizes the most-played playlist in a session.
+type MostPlayedPlaylistSummary struct {
+	ID           int     `json:"id"`
+	Name         string  `json:"name"`
+	NetMMR       float64 `json:"net_mmr"`
+	Wins         int     `json:"wins"`
+	Losses       int     `json:"losses"`
+	MatchesCount int     `json:"matches_count"`
+}
+
+// DeepClone returns an isolated copy of MostPlayedPlaylistSummary.
+func (m *MostPlayedPlaylistSummary) DeepClone() *MostPlayedPlaylistSummary {
+	if m == nil {
+		return nil
+	}
+	clone := *m
+	return &clone
+}
 
 // SessionEvent represents an event envelope passed through internal broadcaster channels and SSE.
 type SessionEvent struct {
@@ -82,6 +103,7 @@ type SessionMatchPlayer struct {
 	Won            *bool                          `json:"won,omitempty"`
 	Stats          playertrack.PlayerStatsSummary `json:"stats"`
 	RankName       string                         `json:"rank_name"`
+	ShortRank      string                         `json:"short_rank,omitempty"`
 	Tier           int                            `json:"tier"`
 	Division       int                            `json:"division"`
 	MMR            float64                        `json:"mmr"`
@@ -154,22 +176,39 @@ type ActiveMatchRecord struct {
 
 // SessionResponse represents the full payload returned by GET /api/session.
 type SessionResponse struct {
-	SessionID             string                           `json:"session_id"`
-	StartedAt             time.Time                        `json:"started_at"`
-	EndedAt               *time.Time                       `json:"ended_at,omitempty"`
-	LastMatchAt           *time.Time                       `json:"last_match_at,omitempty"`
-	Uptime                string                           `json:"uptime"`
-	TotalMatches          int                              `json:"total_matches"`
-	TotalWins             int                              `json:"total_wins"`
-	TotalLosses           int                              `json:"total_losses"`
-	WinRate               float64                          `json:"win_rate"` // Percentage (0.0 - 100.0, rounded to 1 decimal place)
-	Playlists             map[string]*PlaylistSessionStats `json:"playlists"`
-	Matches               []*SessionMatchDetail            `json:"matches"`
+	SessionID             string                            `json:"session_id"`
+	StartedAt             time.Time                         `json:"started_at"`
+	EndedAt               *time.Time                        `json:"ended_at,omitempty"`
+	LastMatchAt           *time.Time                        `json:"last_match_at,omitempty"`
+	Uptime                string                            `json:"uptime"`
+	TotalMatches          int                               `json:"total_matches"`
+	TotalWins             int                               `json:"total_wins"`
+	TotalLosses           int                               `json:"total_losses"`
+	WinRate               float64                           `json:"win_rate"` // Percentage (0.0 - 100.0, rounded to 1 decimal place)
+	Playlists             map[string]*PlaylistSessionStats  `json:"playlists"`
+	MostPlayedPlaylist    *MostPlayedPlaylistSummary        `json:"most_played_playlist,omitempty"`
+	ForStats              *storage.PlayerRoleStatsSummary   `json:"for_stats,omitempty"`
+	AgainstStats          *storage.PlayerRoleStatsSummary   `json:"against_stats,omitempty"`
+	Matches               []*SessionMatchDetail             `json:"matches"`
 	ActiveMatch           *playertrack.CurrentMatchResponse `json:"active_match,omitempty"`
-	LocalPlayerIDs        []string                         `json:"local_player_ids,omitempty"`
-	ContinuableSession    *SessionResponse                 `json:"continuable_session,omitempty"`
-	ContinueWindowSeconds int                              `json:"continue_window_seconds,omitempty"`
-	CanContinue           bool                             `json:"can_continue,omitempty"`
+	LocalPlayerIDs        []string                          `json:"local_player_ids,omitempty"`
+	ContinuableSession    *SessionResponse                  `json:"continuable_session,omitempty"`
+	ContinueWindowSeconds int                               `json:"continue_window_seconds,omitempty"`
+	CanContinue           bool                              `json:"can_continue,omitempty"`
+	StatsAPIReady         bool                              `json:"stats_api_ready"`
+	RankAPIReady          bool                              `json:"rank_api_ready"`
+	MMRPollerState        string                            `json:"mmr_poller_state,omitempty"`
+	GameConnected         bool                              `json:"game_connected"`
+	PendingCount          int                               `json:"pending_count"`
+	TriggerThreshold      int                               `json:"trigger_threshold"`
+	ForceSyncOnTrigger    bool                              `json:"force_sync_on_trigger"`
+	EnableToast           bool                              `json:"enable_toast"`
+	AutoSyncOnExit        bool                              `json:"auto_sync_on_exit"`
+	MaxHostedReplays      int                               `json:"max_hosted_replays"`
+	ReplayCount           int                               `json:"replay_count"`
+	ReplayLimit           int                               `json:"replay_limit"`
+	ReplayUsagePct        float64                           `json:"replay_usage_pct"`
+	ReplayLimitStatus     string                            `json:"replay_limit_status,omitempty"`
 }
 
 // DeepClone creates a fully isolated copy of SessionResponse for thread-safe concurrent reads.
@@ -191,6 +230,17 @@ func (r *SessionResponse) DeepClone() *SessionResponse {
 		for k, v := range r.Playlists {
 			clone.Playlists[k] = v.DeepClone()
 		}
+	}
+	if r.MostPlayedPlaylist != nil {
+		clone.MostPlayedPlaylist = r.MostPlayedPlaylist.DeepClone()
+	}
+	if r.ForStats != nil {
+		fs := *r.ForStats
+		clone.ForStats = &fs
+	}
+	if r.AgainstStats != nil {
+		as := *r.AgainstStats
+		clone.AgainstStats = &as
 	}
 	if r.Matches != nil {
 		clone.Matches = make([]*SessionMatchDetail, len(r.Matches))

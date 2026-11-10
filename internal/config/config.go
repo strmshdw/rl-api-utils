@@ -203,6 +203,7 @@ type SyncConfig struct {
 	DBPath          string   `yaml:"db_path" json:"db_path"`                   // default: "./rl-sync.db"
 	KeepLocalFiles  bool     `yaml:"keep_local_files" json:"keep_local_files"` // default: true
 	DownloadTimeout Duration `yaml:"download_timeout" json:"download_timeout"` // default: 30s
+	ReplayLimit     int      `yaml:"replay_limit,omitempty" json:"replay_limit,omitempty"` // default: 200 if 0
 	DryRun          bool     `yaml:"dry_run" json:"dry_run"`                   // default: false
 	Once            bool     `yaml:"once" json:"once"`                         // default: false
 }
@@ -289,7 +290,7 @@ func NewDefaultConfig() *Config {
 		},
 		Web: WebConfig{
 			Enabled: true,
-			Host:    "0.0.0.0",
+			Host:    "127.0.0.1",
 			Port:    49125,
 		},
 	}

@@ -561,6 +561,55 @@ func FormatRank(tier, division int) string {
 	return baseName
 }
 
+var shortTierNames = [23]string{
+	"UNRANKED", // 0
+	"BRZ I",    // 1
+	"BRZ II",   // 2
+	"BRZ III",  // 3
+	"SLV I",    // 4
+	"SLV II",   // 5
+	"SLV III",  // 6
+	"GLD I",    // 7
+	"GLD II",   // 8
+	"GLD III",  // 9
+	"PLAT I",   // 10
+	"PLAT II",  // 11
+	"PLAT III", // 12
+	"DIA I",    // 13
+	"DIA II",   // 14
+	"DIA III",  // 15
+	"CHAMP I",  // 16
+	"CHAMP II", // 17
+	"CHAMP III",// 18
+	"GC I",     // 19
+	"GC II",    // 20
+	"GC III",   // 21
+	"SSL",      // 22
+}
+
+var shortDivisionNames = [4]string{
+	"DIV I",
+	"DIV II",
+	"DIV III",
+	"DIV IV",
+}
+
+// FormatShortRank formats a tier (0..22) and 0-based division (0..3) into an abbreviated tactical rank string
+// (e.g. "GC I · DIV II", "SSL", "DIA III · DIV IV").
+func FormatShortRank(tier, division int) string {
+	if tier < 0 || tier >= len(shortTierNames) {
+		return "UNRANKED"
+	}
+	base := shortTierNames[tier]
+	if tier == 0 || tier == 22 {
+		return base
+	}
+	if division >= 0 && division < len(shortDivisionNames) {
+		return base + " · " + shortDivisionNames[division]
+	}
+	return base
+}
+
 // ============================================================================
 // Canonical Playlist Mapping
 // ============================================================================
@@ -621,6 +670,7 @@ type PlayerPlaylistRank struct {
 	Tier          int     `json:"tier"`
 	Division      int     `json:"division"`
 	RankName      string  `json:"rank_name"`
+	ShortRank     string  `json:"short_rank,omitempty"`
 	MMR           float64 `json:"mmr"`
 	MatchesPlayed int     `json:"matches_played"`
 }
@@ -629,7 +679,7 @@ type PlayerPlaylistRank struct {
 type PlayerRanksSnapshot map[string]PlayerPlaylistRank
 
 // GetRank returns the PlayerPlaylistRank for a specific playlist ID, or false if not present.
-func (s PlayerRanksSnapshot) GetRank(playlistID int) (PlayerPlaylistRank, bool) {
+func (s PlayerRanksSnapshot) GetRank(playlistID int) (PlayerRanksSnapshotRank PlayerPlaylistRank, ok bool) {
 	if s == nil {
 		return PlayerPlaylistRank{}, false
 	}
@@ -661,6 +711,7 @@ func FromSkill(s rlapi.Skill) PlayerPlaylistRank {
 		Tier:          s.Tier,
 		Division:      s.Division,
 		RankName:      FormatRank(s.Tier, s.Division),
+		ShortRank:     FormatShortRank(s.Tier, s.Division),
 		MMR:           ConvertSkillRatingToMMR(s.MMR),
 		MatchesPlayed: s.MatchesPlayed,
 	}
@@ -719,6 +770,10 @@ func ParseRanksJSON(raw string) (PlayerRanksSnapshot, error) {
 		}
 		if rank.RankName == "" {
 			rank.RankName = FormatRank(rank.Tier, rank.Division)
+			changed = true
+		}
+		if rank.ShortRank == "" && rank.Tier >= 0 && rank.Tier < len(shortTierNames) {
+			rank.ShortRank = FormatShortRank(rank.Tier, rank.Division)
 			changed = true
 		}
 		if rank.MMR > 0.0 && rank.MMR <= 150.0 {

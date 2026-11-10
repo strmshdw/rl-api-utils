@@ -125,23 +125,62 @@ func (d *Daemon) handleListPlayers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	q := r.URL.Query()
+	query := strings.TrimSpace(q.Get("query"))
 	if query == "" {
-		query = strings.TrimSpace(r.URL.Query().Get("q"))
+		query = strings.TrimSpace(q.Get("q"))
 	}
-	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
-	role := strings.TrimSpace(r.URL.Query().Get("role"))
-	sort := strings.TrimSpace(r.URL.Query().Get("sort"))
-	order := strings.TrimSpace(r.URL.Query().Get("order"))
+	if query == "" {
+		query = strings.TrimSpace(q.Get("search"))
+	}
+	platform := strings.TrimSpace(q.Get("platform"))
+	role := strings.TrimSpace(q.Get("role"))
+	playlist := strings.TrimSpace(q.Get("playlist"))
+	sortBy := strings.TrimSpace(q.Get("sort_by"))
+	if sortBy == "" {
+		sortBy = strings.TrimSpace(q.Get("sort"))
+	}
+	sortDir := strings.TrimSpace(q.Get("sort_dir"))
+	if sortDir == "" {
+		sortDir = strings.TrimSpace(q.Get("order"))
+	}
+
+	fromUnix := storage.ParseDateFilter(q.Get("from"), false)
+	toUnix := storage.ParseDateFilter(q.Get("to"), true)
+
+	minMatches := 2
+	if rawMinMatches := strings.TrimSpace(q.Get("min_matches")); rawMinMatches != "" {
+		if parsed, err := strconv.Atoi(rawMinMatches); err == nil && parsed > 0 {
+			minMatches = parsed
+		}
+	}
+	minSynergyGames := 1
+	if rawMinSynGames := strings.TrimSpace(q.Get("min_synergy_games")); rawMinSynGames != "" {
+		if parsed, err := strconv.Atoi(rawMinSynGames); err == nil && parsed > 0 {
+			minSynergyGames = parsed
+		}
+	}
+	minSynergyWR := 50.0
+	if rawMinSynWR := strings.TrimSpace(q.Get("min_synergy_wr")); rawMinSynWR != "" {
+		if parsed, err := strconv.ParseFloat(rawMinSynWR, 64); err == nil && parsed > 0 {
+			minSynergyWR = parsed
+		}
+	}
 
 	filter := storage.PlayerDirectoryFilter{
-		Query:    query,
-		Platform: platform,
-		Role:     role,
-		Sort:     sort,
-		Order:    order,
-		Limit:    limit,
-		Offset:   offset,
+		Query:           query,
+		Platform:        platform,
+		Role:            role,
+		Playlist:        playlist,
+		FromUnix:        fromUnix,
+		ToUnix:          toUnix,
+		MinMatches:      minMatches,
+		MinSynergyGames: minSynergyGames,
+		MinSynergyWR:    minSynergyWR,
+		Sort:            sortBy,
+		Order:           sortDir,
+		Limit:           limit,
+		Offset:          offset,
 	}
 
 	summaries, total, err := d.stateStore.FilterPlayerSummaries(r.Context(), filter)
@@ -235,6 +274,13 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	q := r.URL.Query()
+	playlist := strings.TrimSpace(q.Get("playlist"))
+	fromUnix := storage.ParseDateFilter(q.Get("from"), false)
+	toUnix := storage.ParseDateFilter(q.Get("to"), true)
+	hasDateFilter := fromUnix > 0 || toUnix > 0
+	hasPlaylistFilter := playlist != "" && strings.ToLower(playlist) != "all"
+
 	matchups, err := d.stateStore.GetPlayerMatchups(r.Context(), playerID)
 	if err != nil {
 		d.logger.Warn("failed to query player matchups; using empty slice",
@@ -247,8 +293,66 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		matchups = make([]*storage.PlayerMatchup, 0)
 	}
 
+	pids := storage.ParsePlaylistFilter(playlist)
+	filteredMatchups := matchups
+	if hasPlaylistFilter && len(pids) > 0 {
+		pidSet := make(map[int]bool, len(pids))
+		for _, id := range pids {
+			pidSet[id] = true
+		}
+		filteredMatchups = make([]*storage.PlayerMatchup, 0, len(matchups))
+		for _, mu := range matchups {
+			if pidSet[mu.PlaylistID] {
+				filteredMatchups = append(filteredMatchups, mu)
+			}
+		}
+	}
+
+	var fbTmWins, fbTmLosses, fbOppWins, fbOppLosses, encountersCount int
+	if !hasDateFilter {
+		for _, mu := range filteredMatchups {
+			fbTmWins += mu.WinsAsTeammate
+			fbTmLosses += mu.LossesAsTeammate
+			fbOppWins += mu.WinsAsOpponent
+			fbOppLosses += mu.LossesAsOpponent
+			encountersCount += mu.TotalMatches
+		}
+	}
+
+	var withYouStats, againstYouStats *storage.PlayerRoleStatsSummary
+	if sqlStore, ok := d.stateStore.(*storage.SQLiteStore); ok {
+		withYouStats, againstYouStats = sqlStore.ComputePlayerSplitStats(
+			r.Context(), playerID, player.PlayerName, pids, fromUnix, toUnix,
+			fbTmWins, fbTmLosses, fbOppWins, fbOppLosses,
+		)
+	} else if jsonStore, ok := d.stateStore.(*storage.JSONStore); ok {
+		withYouStats, againstYouStats = jsonStore.ComputePlayerSplitStats(
+			r.Context(), playerID, player.PlayerName, pids, fromUnix, toUnix,
+			fbTmWins, fbTmLosses, fbOppWins, fbOppLosses,
+		)
+	}
+	if withYouStats == nil {
+		withYouStats = &storage.PlayerRoleStatsSummary{}
+	}
+	if againstYouStats == nil {
+		againstYouStats = &storage.PlayerRoleStatsSummary{}
+	}
+
+	tmWins := withYouStats.Wins
+	tmLosses := withYouStats.Losses
+	oppWins := againstYouStats.Wins
+	oppLosses := againstYouStats.Losses
+	totalFromSplit := withYouStats.Games + againstYouStats.Games
+	if hasDateFilter || totalFromSplit > encountersCount {
+		encountersCount = totalFromSplit
+	}
+
 	recentMatches, _, err := d.stateStore.ListPlayerMatches(r.Context(), playerID, storage.PlayerMatchFilter{
-		Limit: 5,
+		PlaylistFilter:   playlist,
+		FromUnix:         fromUnix,
+		ToUnix:           toUnix,
+		LocalPerspective: true,
+		Limit:            5,
 	})
 	if err != nil {
 		d.logger.Warn("failed to query player recent matches; using empty slice",
@@ -261,10 +365,20 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		recentMatches = make([]*storage.PlayerMatchDetail, 0)
 	}
 
+	playerCopy := *player
+
 	resp := PlayerDetailResponse{
-		PlayerRecord:  player,
-		Matchups:      matchups,
-		RecentMatches: recentMatches,
+		PlayerRecord:    &playerCopy,
+		EncountersCount: encountersCount,
+		TeammateWins:    tmWins,
+		TeammateLosses:  tmLosses,
+		OpponentWins:    oppWins,
+		OpponentLosses:  oppLosses,
+		RelationshipTag: storage.ComputeRelationshipTag(tmWins, tmLosses, oppWins, oppLosses),
+		WithYouStats:    withYouStats,
+		AgainstYouStats: againstYouStats,
+		Matchups:        filteredMatchups,
+		RecentMatches:   recentMatches,
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -302,8 +416,9 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	q := r.URL.Query()
 	limit := 50
-	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+	if rawLimit := q.Get("limit"); rawLimit != "" {
 		if parsed, err := strconv.Atoi(rawLimit); err == nil {
 			if parsed < 1 {
 				limit = 1
@@ -316,7 +431,7 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 	}
 
 	offset := 0
-	if rawOffset := r.URL.Query().Get("offset"); rawOffset != "" {
+	if rawOffset := q.Get("offset"); rawOffset != "" {
 		if parsed, err := strconv.Atoi(rawOffset); err == nil {
 			if parsed < 0 {
 				offset = 0
@@ -327,14 +442,33 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var playlist int
-	if rawPlaylist := r.URL.Query().Get("playlist"); rawPlaylist != "" {
+	rawPlaylist := strings.TrimSpace(q.Get("playlist"))
+	if rawPlaylist != "" {
 		if parsed, err := strconv.Atoi(rawPlaylist); err == nil {
 			playlist = parsed
 		}
 	}
 
-	role := strings.TrimSpace(r.URL.Query().Get("role"))
-	result := strings.TrimSpace(r.URL.Query().Get("result"))
+	role := strings.TrimSpace(q.Get("role"))
+	result := strings.TrimSpace(q.Get("result"))
+	status := strings.TrimSpace(q.Get("status"))
+	search := strings.TrimSpace(q.Get("search"))
+	if search == "" {
+		search = strings.TrimSpace(q.Get("query"))
+	}
+	if search == "" {
+		search = strings.TrimSpace(q.Get("q"))
+	}
+	sortBy := strings.TrimSpace(q.Get("sort_by"))
+	if sortBy == "" {
+		sortBy = strings.TrimSpace(q.Get("sort"))
+	}
+	sortDir := strings.TrimSpace(q.Get("sort_dir"))
+	if sortDir == "" {
+		sortDir = strings.TrimSpace(q.Get("order"))
+	}
+	fromUnix := storage.ParseDateFilter(q.Get("from"), false)
+	toUnix := storage.ParseDateFilter(q.Get("to"), true)
 
 	if d.stateStore == nil {
 		w.WriteHeader(http.StatusOK)
@@ -348,11 +482,19 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 	}
 
 	filter := storage.PlayerMatchFilter{
-		Role:     role,
-		Playlist: playlist,
-		Result:   result,
-		Limit:    limit,
-		Offset:   offset,
+		Role:             role,
+		Playlist:         playlist,
+		PlaylistFilter:   rawPlaylist,
+		FromUnix:         fromUnix,
+		ToUnix:           toUnix,
+		Status:           status,
+		Result:           result,
+		Search:           search,
+		SortBy:           sortBy,
+		SortDir:          sortDir,
+		LocalPerspective: true,
+		Limit:            limit,
+		Offset:           offset,
 	}
 
 	matches, total, err := d.stateStore.ListPlayerMatches(r.Context(), playerID, filter)

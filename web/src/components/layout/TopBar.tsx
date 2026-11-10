@@ -2,6 +2,14 @@ import React from 'react';
 import { SessionResponse } from '../../types/api';
 import { deltaInk, formatMmr, formatRecord, formatSigned, playlistLabels } from '../../utils/broadcast';
 import { StatusDot } from '../common/ui';
+import {
+  DateRangePreset,
+  ReplayLimitPreviewState,
+  THEME_STYLES,
+  ThemeStyleKey,
+  useDashboard,
+} from '../../context/DashboardContext';
+import { ReplayLimitBanner } from './ReplayLimitBanner';
 
 export type DashboardTab = 'live' | 'session' | 'history' | 'players';
 
@@ -14,6 +22,7 @@ interface TopBarProps {
   playlistId?: number;
   /** Shown while a live match is on screen; opens the column customiser. */
   onOpenColumns?: () => void;
+  onRefreshSession?: () => Promise<void> | void;
 }
 
 const TABS: ReadonlyArray<{ id: DashboardTab; label: string }> = [
@@ -23,66 +32,410 @@ const TABS: ReadonlyArray<{ id: DashboardTab; label: string }> = [
   { id: 'players', label: 'PLAYERS' },
 ];
 
-const GHOST_LINK =
-  'border border-outline px-2.5 py-1 text-muted hover:text-ink hover:border-ink transition-colors duration-120 whitespace-nowrap';
+const THEME_OPTIONS: ReadonlyArray<{ id: ThemeStyleKey; label: string }> = [
+  { id: 'broadcast', label: '01 · 版画 Ginza Deco: Sumi Woodblock (D2-K3 Default)' },
+  { id: 'tactical', label: '02 · 漆 Ginza Deco: Urushi & Brass (D2-K2)' },
+  { id: 'swiss', label: '03 · 硯 Ginza Deco: Suzuri Inkstone (D2-K1)' },
+  { id: 'arashi', label: '04 · 嵐 Ginza Deco: Arashi Washi & Sumi (D2 Light)' },
+  { id: 'arena', label: '05 · Glassmorphic Arena (Frosted HUD)' },
+  { id: 'carbon', label: '06 · Carbon Paddock (Motorsport Gold)' },
+  { id: 'synthwave', label: '07 · Mannfield Night (Neon Violet)' },
+  { id: 'editorial', label: '08 · Editorial Gazette (Fraunces Serif)' },
+  { id: 'nordic', label: '09 · Nordic Frost (Arctic Slate & Ice)' },
+  { id: 'terminal', label: '10 · Retro CRT Phosphor (Monospace)' },
+  { id: 'solar', label: '11 · Utopia Daylight (Warm Sand & Teal)' },
+  { id: 'industrial', label: '12 · Cobalt Blueprint (CAD Grid)' },
+  { id: 'oled', label: '13 · Pure OLED Pitch (True Zero Black)' },
+];
 
-export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange, inMatch, session, playlistId, onOpenColumns }) => {
+const GHOST_LINK =
+  'border border-outline px-2.5 py-1 text-sm font-bold text-muted hover:text-ink hover:border-ink transition-colors duration-120 whitespace-nowrap t-radius';
+
+export const TopBar: React.FC<TopBarProps> = ({
+  activeTab,
+  onTabChange,
+  inMatch,
+  session,
+  playlistId,
+  onOpenColumns,
+  onRefreshSession,
+}) => {
+  const {
+    themeStyle,
+    colorMode,
+    setTheme,
+    fontScale,
+    setFontScale,
+    statMode,
+    setStatMode,
+    dateRange,
+    setDateRange,
+    customFrom,
+    setCustomFrom,
+    customTo,
+    setCustomTo,
+    showCustomCalendar,
+    setShowCustomCalendar,
+    replayLimitPreview,
+    setReplayLimitPreview,
+    liveModeOverride,
+    setLiveModeOverride,
+  } = useDashboard();
+
   const matchCount = session?.matches?.length ?? 0;
   const playlist = playlistId != null ? session?.playlists?.[String(playlistId)] : undefined;
 
   return (
-    <header
-      data-testid="app-header"
-      className="sticky top-0 z-10 h-14 bg-page border-b border-line px-8 flex items-center justify-between gap-6 font-display"
-    >
-      <div className="flex items-center gap-10 h-full min-w-0">
-        <div className="italic font-extrabold text-[22px] tracking-t4 whitespace-nowrap select-none">
-          RL<span className="text-blue-ink">/</span>SYNC
-        </div>
-        <nav aria-label="Dashboard" className="flex gap-7 h-full font-bold text-[15px] tracking-t8">
-          {TABS.map((tab) => {
-            const active = tab.id === activeTab;
-            return (
+    <>
+      {/* REPLAY HISTORY LIMIT WARNING / ERROR BANNER */}
+      <ReplayLimitBanner session={session} onRefreshSession={onRefreshSession} />
+
+      {/* STICKY ARCHITECTURAL MASTHEAD (Quiet Chrome on --t-page) */}
+      <header
+        data-testid="app-header"
+        className="sticky top-0 z-30 t-bg-page bg-page border-b t-border border-line font-display"
+      >
+        {/* Row 1: Primary Brand, Navigation Tabs & Studio Theme Controls on a Single Balanced Row */}
+        <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-1.5 flex flex-wrap xl:flex-nowrap items-center justify-between gap-2">
+          {/* Left: Arashikage Crest + Brand + Primary Navigation */}
+          <div className="flex items-center gap-3.5 min-w-0 shrink-0">
+            <div className="flex items-center gap-2 select-none">
+              <div className="p-1 surface-plaque border border-line flex items-center justify-center">
+                <div className="arashikage-hex" aria-hidden="true">
+                  <div className="hex-solid" />
+                  <div className="hex-broken"><span /><span /></div>
+                  <div className="hex-solid" />
+                  <div className="hex-broken"><span /><span /></div>
+                  <div className="hex-solid" />
+                  <div className="hex-broken"><span /><span /></div>
+                </div>
+              </div>
+              <span className="hanko-square-stamp" aria-hidden="true">印</span>
+              <span className="t-font-display font-bold text-xl tracking-widest t-text-strong whitespace-nowrap">
+                RL<span className="t-text-orange text-orange-ink">◆</span>SYNC
+              </span>
+              <span className="text-[11px] t-font-mono cartouche-mono px-1.5 py-0.5 hidden sm:inline whitespace-nowrap">
+                嵐影 · v2.6
+              </span>
+            </div>
+
+            <nav aria-label="Dashboard" className="flex items-center gap-0.5 font-bold text-sm tracking-wider">
+              {TABS.map((tab) => {
+                const active = tab.id === activeTab;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    id={`nav-${tab.id}`}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => onTabChange(tab.id)}
+                    className={`px-2.5 py-1 t-font-display font-bold text-sm uppercase tracking-widest flex items-center gap-1.5 border-b-2 transition-colors whitespace-nowrap ${
+                      active
+                        ? 't-border-blue border-blue-ink t-text-strong text-ink-strong'
+                        : 'border-transparent t-text-muted text-muted hover:text-ink'
+                    }`}
+                  >
+                    {tab.id === 'live' && (
+                      <StatusDot className={inMatch ? 'bg-loss animate-pulse' : 'bg-faint'} />
+                    )}
+                    {tab.label}
+                    {tab.id === 'session' && matchCount > 0 && (
+                      <span className="text-xs t-font-mono px-1.5 py-0.5 surface-plaque t-border t-text-ink2 text-count">
+                        {matchCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Right: Theme Expression Selector, Dark/Light Polarity, Scale, Replay Buffer & Overlay */}
+          <div className="flex flex-wrap xl:flex-nowrap items-center gap-1.5 text-xs shrink-0">
+            {/* Design Style Switcher */}
+            <div className="flex items-center gap-1">
+              <label
+                htmlFor="theme-select"
+                className="t-text-muted t-font-display font-bold uppercase tracking-wider text-xs hidden 2xl:inline"
+              >
+                STYLE:
+              </label>
+              <select
+                id="theme-select"
+                value={themeStyle}
+                onChange={(e) => {
+                  const next = e.target.value as ThemeStyleKey;
+                  if (!THEME_STYLES[next]) return;
+                  if (next === 'arashi') {
+                    setTheme(next, 'light');
+                  } else if (next === 'broadcast' || next === 'tactical' || next === 'swiss') {
+                    setTheme(next, 'dark');
+                  } else {
+                    setTheme(next, colorMode);
+                  }
+                }}
+                className="surface-plaque t-text-strong t-border px-2 py-1 text-xs font-semibold t-radius focus:outline-none cursor-pointer max-w-[240px]"
+              >
+                {THEME_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Dark / Light Mode Toggle */}
+            <div className="flex t-border t-radius overflow-hidden">
               <button
-                key={tab.id}
                 type="button"
-                aria-current={active ? 'page' : undefined}
-                onClick={() => onTabChange(tab.id)}
-                className={`flex items-center gap-2 h-full whitespace-nowrap transition-colors duration-120 ${
-                  active ? 'text-ink-strong shadow-[inset_0_-3px_0_#fff]' : 'text-muted hover:text-ink'
+                id="btn-color-dark"
+                onClick={() => setTheme(themeStyle === 'arashi' ? 'broadcast' : themeStyle, 'dark')}
+                className={`px-2.5 py-1 t-font-display font-bold text-xs uppercase tracking-wider ${
+                  colorMode === 'dark'
+                    ? 't-bg-blue-ink t-text-on-accent'
+                    : 'surface-plaque t-text-muted hover:opacity-80'
                 }`}
               >
-                {tab.id === 'live' && <StatusDot className={inMatch ? 'bg-loss' : 'bg-faint'} />}
-                {tab.label}
-                {tab.id === 'session' && matchCount > 0 && <span className="text-count">{matchCount}</span>}
+                影 DARK
               </button>
-            );
-          })}
-        </nav>
-      </div>
+              <button
+                type="button"
+                id="btn-color-light"
+                onClick={() => setTheme(themeStyle, 'light')}
+                className={`px-2.5 py-1 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border ${
+                  colorMode === 'light'
+                    ? 't-bg-blue-ink t-text-on-accent'
+                    : 'surface-plaque t-text-muted hover:opacity-80'
+                }`}
+              >
+                嵐 LIGHT
+              </button>
+            </div>
 
-      <div className="flex items-center gap-6 font-semibold text-[15px] tracking-t6 text-muted whitespace-nowrap">
-        {session && (
-          <span className="hidden lg:inline">
-            SESSION <span className="text-ink-strong">{formatRecord(session.total_wins, session.total_losses)}</span>
-          </span>
-        )}
-        {playlist && (
-          <span className="hidden md:inline">
-            {playlistLabels(playlist.playlist_id, playlist.playlist_name).short}{' '}
-            <span className="text-ink-strong">{formatMmr(playlist.current_mmr)}</span>{' '}
-            <span className={deltaInk(playlist.mmr_delta)}>{formatSigned(playlist.mmr_delta)}</span>
-          </span>
-        )}
-        {onOpenColumns && (
-          <button type="button" onClick={onOpenColumns} className={GHOST_LINK}>
-            COLUMNS
-          </button>
-        )}
-        <a href="/?mode=overlay" target="_blank" rel="noopener noreferrer" className={GHOST_LINK}>
-          OVERLAY ↗
-        </a>
-      </div>
-    </header>
+            {/* Font Scale Switcher */}
+            <div className="flex t-border t-radius overflow-hidden">
+              <button
+                type="button"
+                id="btn-scale-normal"
+                onClick={() => setFontScale('normal')}
+                className={`px-2 py-1 t-font-display font-bold text-xs uppercase tracking-wider ${
+                  fontScale === 'normal'
+                    ? 't-bg-panel-hover t-text-strong border-b-2 t-border-blue'
+                    : 'surface-plaque t-text-muted hover:opacity-80'
+                }`}
+                title="Default Large Readable Scale (16px base)"
+              >
+                TEXT: LARGE (DEFAULT)
+              </button>
+              <button
+                type="button"
+                id="btn-scale-xl"
+                onClick={() => setFontScale('xl')}
+                className={`px-2 py-1 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border ${
+                  fontScale === 'xl'
+                    ? 't-bg-panel-hover t-text-strong border-b-2 t-border-blue'
+                    : 'surface-plaque t-text-muted hover:opacity-80'
+                }`}
+                title="Extra-Large Scale (+15% for 1440p/4K monitors)"
+              >
+                TEXT: XL (+15%)
+              </button>
+            </div>
+
+            {/* Replay Limit State Preview Selector */}
+            <div className="flex items-center gap-1">
+              <label
+                htmlFor="limit-state-select"
+                className="t-text-muted t-font-display font-bold uppercase tracking-wider text-xs hidden 2xl:inline"
+              >
+                BUFFER:
+              </label>
+              <select
+                id="limit-state-select"
+                value={replayLimitPreview}
+                onChange={(e) => setReplayLimitPreview(e.target.value as ReplayLimitPreviewState)}
+                className="surface-plaque t-text-strong t-border px-2 py-1 text-xs font-semibold t-radius focus:outline-none cursor-pointer"
+              >
+                <option value="auto">BUFFER: AUTO (5/20)</option>
+                <option value="warn">BUFFER: WARN (16/20)</option>
+                <option value="error">BUFFER: FULL (20/20)</option>
+                <option value="ok">BUFFER: OK (HIDDEN)</option>
+              </select>
+            </div>
+
+            <a href="/?mode=overlay" target="_blank" rel="noopener noreferrer" className={GHOST_LINK}>
+              OVERLAY ↗
+            </a>
+          </div>
+        </div>
+
+        {/* Row 2: Compact Ledger Control Strip */}
+        <div className="border-t border-line surface-plaque">
+          <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-1 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Live / Idle View Switch */}
+              <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Live or Idle view mode">
+                <button
+                  type="button"
+                  id="btn-mode-match"
+                  onClick={() => {
+                    setLiveModeOverride('match');
+                    if (activeTab !== 'live') onTabChange('live');
+                  }}
+                  className={`px-2.5 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider ${
+                    inMatch
+                      ? 't-bg-blue-ink t-text-on-accent'
+                      : 't-bg-page t-text-muted hover:opacity-80'
+                  }`}
+                >
+                  IN-MATCH
+                </button>
+                <button
+                  type="button"
+                  id="btn-mode-idle"
+                  onClick={() => {
+                    setLiveModeOverride(liveModeOverride === 'idle' ? 'auto' : 'idle');
+                    if (activeTab !== 'live') onTabChange('live');
+                  }}
+                  className={`px-2.5 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border ${
+                    !inMatch
+                      ? 't-bg-blue-ink t-text-on-accent'
+                      : 't-bg-page t-text-muted hover:opacity-80'
+                  }`}
+                >
+                  IDLE VIEW
+                </button>
+              </div>
+
+              {/* Global AVG / G vs TOTALS Toggle */}
+              <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Stat aggregation mode">
+                <button
+                  type="button"
+                  id="btn-stat-avg"
+                  onClick={() => setStatMode('avg')}
+                  className={`px-2.5 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider ${
+                    statMode === 'avg'
+                      ? 't-bg-blue-ink t-text-on-accent'
+                      : 't-bg-page t-text-muted hover:opacity-80'
+                  }`}
+                >
+                  AVG / G
+                </button>
+                <button
+                  type="button"
+                  id="btn-stat-total"
+                  onClick={() => setStatMode('total')}
+                  className={`px-2.5 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border ${
+                    statMode === 'total'
+                      ? 't-bg-blue-ink t-text-on-accent'
+                      : 't-bg-page t-text-muted hover:opacity-80'
+                  }`}
+                >
+                  TOTALS
+                </button>
+              </div>
+
+              {/* Global Timeframe Selector + Custom Calendar Picker */}
+              <div className="flex flex-wrap items-center gap-1.5 t-bg-page t-border px-2 py-0.5 t-radius">
+                <span className="t-font-display font-bold text-xs uppercase tracking-wider t-text-muted">
+                  TIMEFRAME:
+                </span>
+                <select
+                  id="global-date-range"
+                  aria-label="Timeframe"
+                  value={dateRange}
+                  onChange={(e) => setDateRange(e.target.value as DateRangePreset)}
+                  className="surface-plaque t-text-strong text-xs t-font-display font-bold uppercase tracking-wider px-1.5 py-0.5 t-border focus:outline-none cursor-pointer"
+                >
+                  <option value="all">ALL TIME</option>
+                  <option value="today">TODAY / SESSION</option>
+                  <option value="7d">LAST 7 DAYS</option>
+                  <option value="30d">LAST 30 DAYS</option>
+                  <option value="custom">CUSTOM CALENDAR RANGE...</option>
+                </select>
+
+                {(showCustomCalendar || dateRange === 'custom') && (
+                  <div
+                    id="custom-calendar-bar"
+                    data-testid="custom-calendar-bar"
+                    className="flex items-center gap-1.5 pl-1.5 border-l t-border"
+                  >
+                    <label
+                      htmlFor="custom-date-from"
+                      className="text-xs t-font-display font-bold t-text-muted uppercase"
+                    >
+                      FROM
+                    </label>
+                    <input
+                      id="custom-date-from"
+                      type="date"
+                      value={customFrom}
+                      onChange={(e) => setCustomFrom(e.target.value)}
+                      className="surface-plaque t-text-strong t-border px-1.5 py-0.5 text-xs t-font-mono t-radius focus:outline-none cursor-pointer"
+                    />
+                    <span className="t-text-muted font-bold">→</span>
+                    <label
+                      htmlFor="custom-date-to"
+                      className="text-xs t-font-display font-bold t-text-muted uppercase"
+                    >
+                      TO
+                    </label>
+                    <input
+                      id="custom-date-to"
+                      type="date"
+                      value={customTo}
+                      onChange={(e) => setCustomTo(e.target.value)}
+                      className="surface-plaque t-text-strong t-border px-1.5 py-0.5 text-xs t-font-mono t-radius focus:outline-none cursor-pointer"
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  id="btn-cal-toggle"
+                  onClick={() => {
+                    if (!showCustomCalendar && dateRange !== 'custom') {
+                      setDateRange('custom');
+                    } else {
+                      setShowCustomCalendar((prev) => !prev);
+                    }
+                  }}
+                  className="px-2 py-0.5 surface-plaque t-border t-font-display font-bold text-xs uppercase tracking-wider t-text-strong hover:opacity-80"
+                  title="Pick custom start & end dates"
+                >
+                  ◆ DATES
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 font-semibold text-xs tracking-wider text-muted">
+              {session && (
+                <span>
+                  SESSION{' '}
+                  <span className="text-ink-strong t-font-mono">
+                    {formatRecord(session.total_wins, session.total_losses)}
+                  </span>
+                </span>
+              )}
+              {playlist && (
+                <span>
+                  {playlistLabels(playlist.playlist_id, playlist.playlist_name).short}{' '}
+                  <span className="text-ink-strong t-font-mono">{formatMmr(playlist.current_mmr)}</span>{' '}
+                  <span className={`${deltaInk(playlist.mmr_delta)} t-font-mono`}>
+                    {formatSigned(playlist.mmr_delta)}
+                  </span>
+                </span>
+              )}
+              {onOpenColumns && (
+                <button type="button" onClick={onOpenColumns} className={GHOST_LINK}>
+                  COLUMNS
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </header>
+    </>
   );
 };
+

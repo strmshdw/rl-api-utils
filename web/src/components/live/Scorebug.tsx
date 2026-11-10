@@ -24,10 +24,12 @@ export function parityLabel(blueAvg: number | null, orangeAvg: number | null): s
   return diff > 0 ? `+${Math.round(diff)} BLUE` : `+${Math.round(-diff)} ORANGE`;
 }
 
-const ScoreTile: React.FC<{ value: number; testId: string }> = ({ value, testId }) => (
+const ScoreTile: React.FC<{ value: number; testId: string; isRival?: boolean }> = ({ value, testId, isRival }) => (
   <div
     data-testid={testId}
-    className="w-[110px] shrink-0 bg-ink text-page flex items-center justify-center font-extrabold text-[76px] leading-none"
+    className={`w-[108px] shrink-0 surface-plaque border-x border-line flex items-center justify-center font-extrabold text-[68px] leading-none t-font-mono ${
+      isRival ? 'text-orange-ink' : 't-text-strong text-ink-strong'
+    }`}
   >
     {value}
   </div>
@@ -52,36 +54,57 @@ export const Scorebug: React.FC<ScorebugProps> = ({ match, bluePlayers, orangePl
         <span className="text-loss text-[11px] leading-none">● LIVE</span>
         <span
           data-testid="scorebug-clock"
-          className={`font-mono font-extrabold text-[16px] tracking-tight leading-none ${match.is_overtime ? 'text-loss' : 'text-ink'}`}
+          className={`font-mono font-extrabold text-[17px] tracking-tight leading-none ${match.is_overtime ? 'text-loss' : 'text-ink-strong'}`}
         >
           {formatMatchClock(match.time_remaining, match.is_overtime)}
         </span>
         {match.is_overtime && (
-          <span className="text-[10px] font-sans font-bold text-loss px-1 bg-loss/15 rounded">OT</span>
+          <span className="text-[10px] font-sans font-bold text-loss px-1 bg-loss/15">OT</span>
         )}
       </div>
     );
   }
 
   return (
-    <div data-testid="scorebug" className="flex justify-center pt-9 pb-7 font-display">
-      <div className="flex items-stretch h-[92px] w-full justify-center">
-        <div className="slab-left flex-[1_1_300px] max-w-[300px] min-w-0 bg-blue-slab text-ink flex flex-col justify-center items-end pr-6 pl-8 overflow-hidden">
-          <div className="font-extrabold text-[30px] tracking-t6 leading-none">BLUE</div>
-          <div className="font-semibold text-[14px] tracking-t8 opacity-[.85] max-w-full truncate">{sub(blueAvg, 0)}</div>
-        </div>
-        <ScoreTile value={goals(bluePlayers)} testId="score-blue" />
-        <div className="w-[150px] shrink-0 bg-tile flex flex-col items-center justify-center gap-1 px-2 text-center">
-          <div className="font-bold text-[13px] tracking-t14">{status}</div>
-          <div className="font-semibold text-[15px] tracking-t6 text-ink-2 max-w-full truncate">
-            {playlistLabels(match.playlist_id, match.playlist_name).mode}
+    <div data-testid="scorebug" className="w-full font-display">
+      <div className="w-full surface-plaque border border-outline overflow-hidden">
+        <div className="team-split-rule" />
+        <div className="flex items-stretch h-[82px] w-full justify-between">
+          <div className="slab-left relative flex-1 min-w-0 t-bg-blue-slab bg-blue-slab t-on-slab flex flex-col justify-center items-end pr-6 pl-8 overflow-hidden">
+            <span aria-hidden="true" className="f-serif-jp font-black text-[64px] leading-none opacity-10 absolute left-4 select-none pointer-events-none">
+              嵐
+            </span>
+            <div className="font-bold text-[26px] tracking-widest leading-none z-10 uppercase">
+              <span className="sr-only">BLUE </span>嵐 STORM
+            </div>
+            <div className="font-mono font-bold text-[12px] tracking-wider opacity-85 max-w-full truncate z-10 mt-1">
+              {sub(blueAvg, 0)}
+            </div>
           </div>
-          {parity && <div className="font-medium text-[12px] tracking-t8 text-muted-2">{parity}</div>}
-        </div>
-        <ScoreTile value={goals(orangePlayers)} testId="score-orange" />
-        <div className="slab-right flex-[1_1_300px] max-w-[300px] min-w-0 bg-orange-slab text-page flex flex-col justify-center items-start pl-6 pr-8 overflow-hidden">
-          <div className="font-extrabold text-[30px] tracking-t6 leading-none">ORANGE</div>
-          <div className="font-semibold text-[14px] tracking-t8 opacity-80 max-w-full truncate">{sub(orangeAvg, 1)}</div>
+          <ScoreTile value={goals(bluePlayers)} testId="score-blue" />
+          <div className="w-[186px] shrink-0 surface-plaque flex flex-col items-center justify-center gap-1 px-3 text-center">
+            <div className="font-bold text-[12px] tracking-t14">{status}</div>
+            <div className="font-bold text-[14px] tracking-wider text-ink-strong max-w-full truncate">
+              {playlistLabels(match.playlist_id, match.playlist_name).mode}
+            </div>
+            {parity && (
+              <div className="font-mono font-bold text-[11px] tracking-wider px-2 py-0.5 cartouche-mono">
+                {parity}
+              </div>
+            )}
+          </div>
+          <ScoreTile value={goals(orangePlayers)} testId="score-orange" isRival />
+          <div className="slab-right relative flex-1 min-w-0 t-bg-orange-slab bg-orange-slab text-white flex flex-col justify-center items-start pl-6 pr-8 overflow-hidden">
+            <span aria-hidden="true" className="f-serif-jp font-black text-[64px] leading-none opacity-15 absolute right-4 select-none pointer-events-none">
+              影
+            </span>
+            <div className="font-bold text-[26px] tracking-widest leading-none z-10 uppercase">
+              <span className="sr-only">ORANGE </span>影 RIVAL
+            </div>
+            <div className="font-mono font-bold text-[12px] tracking-wider opacity-90 max-w-full truncate z-10 mt-1">
+              {sub(orangeAvg, 1)}
+            </div>
+          </div>
         </div>
       </div>
     </div>

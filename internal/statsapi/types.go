@@ -167,6 +167,10 @@ func (ed *EventData) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MaxHostedReplays is Rocket League's server-side rolling FIFO cap of 20 online match replays.
+// Any un-downloaded replays beyond 20 games are permanently overwritten on PsyNet.
+const MaxHostedReplays = 20
+
 // PendingMatch tracks an online match detected via Stats API that has not yet been downloaded/persisted.
 type PendingMatch struct {
 	MatchGUID  string    `json:"match_guid"`
@@ -180,5 +184,7 @@ type Status struct {
 	PendingCount       int            `json:"pending_count"`
 	TriggerThreshold   int            `json:"trigger_threshold"`
 	ForceSyncOnTrigger bool           `json:"force_sync_on_trigger"`
+	EnableToast        bool           `json:"enable_toast"`
+	MaxHostedReplays   int            `json:"max_hosted_replays"`
 	PendingMatches     []PendingMatch `json:"pending_matches"`
 }
