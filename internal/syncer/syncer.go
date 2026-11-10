@@ -689,6 +689,7 @@ func (s *Syncer) syncBallchasingReplayDetail(ctx context.Context, matchGUID stri
 		}
 
 		isLocal := (found && i == localIdx) || (localTeam != nil && c.Team == *localTeam && strings.EqualFold(c.Name, identity.ConfigLocalPlayerName))
+		playerStats[i].IsLocal = isLocal
 
 		var won *bool
 		if winnerTeam != nil {
@@ -702,19 +703,21 @@ func (s *Syncer) syncBallchasingReplayDetail(ctx context.Context, matchGUID stri
 		}
 
 		matchPlayers = append(matchPlayers, &storage.MatchPlayerRecord{
-			MatchGUID: matchGUID,
-			PlayerID:  playerID,
-			TeamNum:   c.Team,
-			IsLocal:   isLocal,
-			Won:       won,
-			Score:     entry.p.Score,
-			Goals:     entry.p.Goals,
-			Assists:   entry.p.Assists,
-			Saves:     entry.p.Saves,
-			Shots:     entry.p.Shots,
-			Demos:     playerStats[i].Demos,
-			CarName:   entry.p.CarName,
-			StatsJSON: pStatsJSON,
+			MatchGUID:  matchGUID,
+			PlayerID:   playerID,
+			Platform:   c.Platform,
+			PlayerName: c.Name,
+			TeamNum:    c.Team,
+			IsLocal:    isLocal,
+			Won:        won,
+			Score:      entry.p.Score,
+			Goals:      entry.p.Goals,
+			Assists:    entry.p.Assists,
+			Saves:      entry.p.Saves,
+			Shots:      entry.p.Shots,
+			Demos:      playerStats[i].Demos,
+			CarName:    entry.p.CarName,
+			StatsJSON:  pStatsJSON,
 		})
 	}
 
@@ -859,6 +862,7 @@ func (s *Syncer) SyncDownloadedReplayStats(ctx context.Context, matchGUID, local
 		}
 
 		isLocal := (found && i == localIdx) || (localTeam != nil && p.Team == *localTeam && strings.EqualFold(p.Name, meta.PlayerName))
+		replayStats[i].IsLocal = isLocal
 
 		var won *bool
 		if meta.WinnerTeam != nil {
@@ -867,17 +871,19 @@ func (s *Syncer) SyncDownloadedReplayStats(ctx context.Context, matchGUID, local
 		}
 
 		matchPlayers = append(matchPlayers, &storage.MatchPlayerRecord{
-			MatchGUID: matchGUID,
-			PlayerID:  canonicalID,
-			TeamNum:   p.Team,
-			IsLocal:   isLocal,
-			Won:       won,
-			Score:     p.Score,
-			Goals:     p.Goals,
-			Assists:   p.Assists,
-			Saves:     p.Saves,
-			Shots:     p.Shots,
-			Demos:     p.Demos,
+			MatchGUID:  matchGUID,
+			PlayerID:   canonicalID,
+			Platform:   plat,
+			PlayerName: p.Name,
+			TeamNum:    p.Team,
+			IsLocal:    isLocal,
+			Won:        won,
+			Score:      p.Score,
+			Goals:      p.Goals,
+			Assists:    p.Assists,
+			Saves:      p.Saves,
+			Shots:      p.Shots,
+			Demos:      p.Demos,
 		})
 	}
 

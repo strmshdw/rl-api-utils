@@ -319,12 +319,13 @@ func cloneMatchRecord(src *MatchRecord) *MatchRecord {
 	return &dst
 }
 
-// GetMatch retrieves a single match record by its GUID.
+// GetMatch retrieves a single match record by its GUID (falling back to case/hyphen-insensitive GUID or BallchasingID).
 // Returns ErrMatchNotFound if the record does not exist.
 func (s *JSONStore) GetMatch(ctx context.Context, matchGUID string) (*MatchRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	matchGUID = strings.TrimSpace(matchGUID)
 	if matchGUID == "" {
 		return nil, ErrInvalidGUID
 	}
@@ -338,10 +339,49 @@ func (s *JSONStore) GetMatch(ctx context.Context, matchGUID string) (*MatchRecor
 
 	rec, ok := s.matches[matchGUID]
 	if !ok {
-		return nil, ErrMatchNotFound
+		normTarget := strings.ToLower(strings.ReplaceAll(matchGUID, "-", ""))
+		for k, m := range s.matches {
+			if m == nil {
+				continue
+			}
+			if m.BallchasingID == matchGUID || strings.ToLower(strings.ReplaceAll(k, "-", "")) == normTarget {
+				rec = m
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return nil, ErrMatchNotFound
+		}
 	}
 
 	return cloneMatchRecord(rec), nil
+}
+
+func (s *JSONStore) resolveExistingMatchGUIDLocked(guid, ballchasingID string) string {
+	guid = strings.TrimSpace(guid)
+	ballchasingID = strings.TrimSpace(ballchasingID)
+	if guid != "" {
+		if _, ok := s.matches[guid]; ok {
+			return guid
+		}
+	}
+	if ballchasingID != "" {
+		for k, m := range s.matches {
+			if m != nil && m.BallchasingID == ballchasingID {
+				return k
+			}
+		}
+	}
+	if guid != "" {
+		normTarget := strings.ToLower(strings.ReplaceAll(guid, "-", ""))
+		for k := range s.matches {
+			if strings.ToLower(strings.ReplaceAll(k, "-", "")) == normTarget {
+				return k
+			}
+		}
+	}
+	return guid
 }
 
 
@@ -1795,16 +1835,41 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 		stats.BallchasingURL = "https://ballchasing.com/replay/" + stats.BallchasingID
 	}
 
-	statsJSON, err := json.Marshal(stats)
-	if err != nil {
-		return fmt.Errorf("failed to marshal replay stats: %w", err)
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.closed {
 		return ErrStoreClosed
+	}
+
+	guid = s.resolveExistingMatchGUIDLocked(guid, stats.BallchasingID)
+	stats.MatchGUID = guid
+
+	// Upsert players and match_players
+	localAccounts := make(map[string]bool)
+	for _, a := range s.auth {
+		if a.AccountID != "" {
+			localAccounts[strings.ToLower(a.AccountID)] = true
+		}
+	}
+	for i := range stats.Players {
+		pid := strings.TrimSpace(stats.Players[i].OnlineID)
+		plat := strings.TrimSpace(stats.Players[i].Platform)
+		if plat == "" {
+			plat = "Unknown"
+		}
+		canonicalID := pid
+		if canonicalID != "" && !strings.Contains(canonicalID, "|") {
+			canonicalID = fmt.Sprintf("%s|%s|0", plat, pid)
+		}
+		if stats.Players[i].IsLocal || localAccounts[strings.ToLower(pid)] || localAccounts[strings.ToLower(canonicalID)] {
+			stats.Players[i].IsLocal = true
+		}
+	}
+
+	statsJSON, err := json.Marshal(stats)
+	if err != nil {
+		return fmt.Errorf("failed to marshal replay stats: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -1873,13 +1938,6 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 	}
 
 	// Upsert players and match_players
-	localAccounts := make(map[string]bool)
-	for _, a := range s.auth {
-		if a.AccountID != "" {
-			localAccounts[strings.ToLower(a.AccountID)] = true
-		}
-	}
-
 	matchPlayers := make([]*MatchPlayerRecord, 0, len(stats.Players))
 	matchTime := time.Unix(startTS, 0).UTC()
 
@@ -1897,7 +1955,7 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 			canonicalID = fmt.Sprintf("%s|%s|0", plat, pid)
 		}
 
-		isLocal := localAccounts[strings.ToLower(pid)] || localAccounts[strings.ToLower(canonicalID)]
+		isLocal := p.IsLocal || localAccounts[strings.ToLower(pid)] || localAccounts[strings.ToLower(canonicalID)]
 
 		var won *bool
 		if stats.WinnerTeam != nil && *stats.WinnerTeam >= 0 {

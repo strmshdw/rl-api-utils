@@ -520,6 +520,177 @@ func indexSubstr(s, sub string) int {
 	return -1
 }
 
+func TestSQLiteStore_SyncReplayStats_ResolvesExistingMatchAndCanonicalPlayers(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "syncreplays.db")
+
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+	defer store.Close()
+
+	// 1. Seed a match discovered via PsyNet with upload_status = 'PENDING' and a PS4 opponent
+	err = store.UpsertDiscoveredMatches(ctx, []*MatchRecord{
+		{
+			MatchGUID:            "PSYNET-GUID-100",
+			RecordStartTimestamp: 1773528433,
+			MapName:              "DFH Stadium",
+			Playlist:             10,
+			DownloadStatus:       DownloadDownloaded,
+			UploadStatus:         UploadPending,
+			BallchasingID:        "bc-sync-100",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertDiscoveredMatches: %v", err)
+	}
+
+	err = store.UpsertPlayer(ctx, &PlayerRecord{
+		PlayerID:   "PS4|7370223800633025836|0",
+		Platform:   "PS4",
+		PlayerName: "ConsoleHero",
+	})
+	if err != nil {
+		t.Fatalf("UpsertPlayer: %v", err)
+	}
+
+	err = store.SaveMatchPlayers(ctx, "PSYNET-GUID-100", []*MatchPlayerRecord{
+		{
+			MatchGUID:  "PSYNET-GUID-100",
+			PlayerID:   "Steam|76561198816594023|0",
+			Platform:   "Steam",
+			PlayerName: "LocalPilot",
+			TeamNum:    0,
+			IsLocal:    true,
+			Score:      500,
+			Goals:      3,
+		},
+		{
+			MatchGUID:  "PSYNET-GUID-100",
+			PlayerID:   "PS4|7370223800633025836|0",
+			Platform:   "PS4",
+			PlayerName: "ConsoleHero",
+			TeamNum:    1,
+			IsLocal:    false,
+			Score:      320,
+			Goals:      1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveMatchPlayers initial: %v", err)
+	}
+
+	// 2. Sync replay stats from Ballchasing where MatchGUID in replay is the ballchasing ID or lowercase GUID,
+	// and opponent is reported as PlayStation|ConsoleHero|0
+	st := &ReplayMatchStats{
+		MatchGUID:      "bc-sync-100",
+		MapName:        "DFH Stadium",
+		Playlist:       10,
+		BlueScore:      3,
+		OrangeScore:    1,
+		Duration:       300,
+		Date:           "2026-03-14T22:47:13Z",
+		BallchasingID:  "bc-sync-100",
+		BallchasingURL: "https://ballchasing.com/replay/bc-sync-100",
+		Players: []ReplayPlayerStats{
+			{
+				Name:     "LocalPilot",
+				Platform: "Steam",
+				OnlineID: "76561198816594023",
+				Team:     0,
+				IsLocal:  true,
+				Score:    500,
+				Goals:    3,
+				Saves:    2,
+				Shots:    5,
+				Boost:    &ballchasing.BoostStats{BPM: 425, AvgAmount: 48},
+			},
+			{
+				Name:     "ConsoleHero",
+				Platform: "PlayStation",
+				OnlineID: "ConsoleHero",
+				Team:     1,
+				IsLocal:  false,
+				Score:    320,
+				Goals:    1,
+				Saves:    1,
+				Shots:    3,
+				Boost:    &ballchasing.BoostStats{BPM: 360, AvgAmount: 41},
+			},
+		},
+	}
+
+	if err := store.SyncReplayStats(ctx, st); err != nil {
+		t.Fatalf("SyncReplayStats: %v", err)
+	}
+	if st.MatchGUID != "PSYNET-GUID-100" {
+		t.Errorf("resolved st.MatchGUID = %q; want PSYNET-GUID-100", st.MatchGUID)
+	}
+
+	// Follow up with SaveMatchPlayers (as syncer does) with PlayStation|ConsoleHero|0
+	err = store.SaveMatchPlayers(ctx, st.MatchGUID, []*MatchPlayerRecord{
+		{
+			MatchGUID:  st.MatchGUID,
+			PlayerID:   "Steam|76561198816594023|0",
+			Platform:   "Steam",
+			PlayerName: "LocalPilot",
+			TeamNum:    0,
+			IsLocal:    true,
+			Score:      500,
+			Goals:      3,
+		},
+		{
+			MatchGUID:  st.MatchGUID,
+			PlayerID:   "PlayStation|ConsoleHero|0",
+			Platform:   "PlayStation",
+			PlayerName: "ConsoleHero",
+			TeamNum:    1,
+			IsLocal:    false,
+			Score:      320,
+			Goals:      1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveMatchPlayers follow-up: %v", err)
+	}
+
+	// Verify only 1 match exists and its upload_status is UPLOADED and stats_sync_status is SYNCED
+	matches, total, err := store.ListHistoricalMatches(ctx, MatchFilter{Limit: 10})
+	if err != nil || total != 1 {
+		t.Fatalf("ListHistoricalMatches: total=%d err=%v", total, err)
+	}
+	if matches[0].UploadStatus != UploadUploaded || matches[0].StatsSyncStatus != StatsSyncSynced {
+		t.Errorf("match status = upload:%s stats:%s; want UPLOADED / SYNCED", matches[0].UploadStatus, matches[0].StatsSyncStatus)
+	}
+
+	// Verify match_players has exactly 2 rows (no duplicate PlayStation|ConsoleHero|0 row) and both have Boost telemetry
+	mps, err := store.GetMatchPlayers(ctx, "PSYNET-GUID-100")
+	if err != nil {
+		t.Fatalf("GetMatchPlayers: %v", err)
+	}
+	if len(mps) != 2 {
+		t.Fatalf("len(mps) = %d; want 2 (%+v)", len(mps), mps)
+	}
+	for _, mp := range mps {
+		if !containsSubstr(mp.StatsJSON, `"bpm":`) {
+			t.Errorf("expected stats_json with bpm for player %s, got %q", mp.PlayerID, mp.StatsJSON)
+		}
+	}
+
+	// Verify LocalPilot was NOT inserted into players table
+	if _, err := store.GetPlayer(ctx, "Steam|76561198816594023|0"); err == nil {
+		t.Errorf("expected local player not to be inserted into players directory")
+	}
+
+	// Verify ExtractPlayerStatsJSONFromReplay resolves ConsoleHero from replay_stats_json even if mpStatsJSON is empty
+	extracted := ExtractPlayerStatsJSONFromReplay("", matches[0].ReplayStatsJSON, "PS4|7370223800633025836|0", "", 1)
+	if !containsSubstr(extracted, `"bpm":360`) {
+		t.Errorf("expected ExtractPlayerStatsJSONFromReplay to extract ConsoleHero bpm:360, got %q", extracted)
+	}
+}
+
+
 
 
 

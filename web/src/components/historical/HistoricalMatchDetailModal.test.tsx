@@ -197,4 +197,44 @@ describe('HistoricalMatchDetailModal', () => {
 
     expect(onPlayerClick).toHaveBeenCalledWith('epic_p2', 'PlayerTwo');
   });
+
+  it('fetches full Ballchasing telemetry from /api/matches/{guid} when opened with basic scoreboard stats', async () => {
+    const basicMatch: HistoricalMatchRecord = {
+      ...SAMPLE_HISTORICAL_MATCH,
+      stats: {
+        ...SAMPLE_HISTORICAL_MATCH.stats!,
+        players: SAMPLE_HISTORICAL_MATCH.stats!.players.map((p) => ({
+          ...p,
+          boost: undefined,
+          movement: undefined,
+          positioning: undefined,
+        })),
+      },
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: async () => SAMPLE_HISTORICAL_MATCH,
+    } as Response);
+
+    const { container } = await mount(
+      <HistoricalMatchDetailModal
+        match={basicMatch}
+        onClose={vi.fn()}
+        localPlayerIds={new Set(['steam_p1'])}
+      />
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith('/api/matches/test-guid-1234');
+
+    await clickText(container, '2. BOOST ECONOMY & PADS');
+    expect(container.textContent).not.toContain('TELEMETRY PENDING');
+    expect(container.textContent).toContain('550');
+
+    fetchSpy.mockRestore();
+  });
 });

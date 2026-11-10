@@ -626,6 +626,7 @@ export interface ReplayPlayerStats {
   shots: number;
   demos: number;
   is_bot?: boolean;
+  is_local?: boolean;
   car_id?: number;
   car_name?: string;
   mvp?: boolean;

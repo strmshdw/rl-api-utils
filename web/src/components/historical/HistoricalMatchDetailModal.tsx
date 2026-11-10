@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { HistoricalMatchRecord, ReplayPlayerStats } from '../../types/api';
 import { Modal } from '../common/Modal';
 import { MvpChip, SectionLabel } from '../common/ui';
@@ -50,10 +50,45 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
   const [activeTab, setActiveTab] = useState<TelemetryTab>('core');
   const [copiedGuid, setCopiedGuid] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
+  const [fetchedMatch, setFetchedMatch] = useState<HistoricalMatchRecord | null>(null);
 
-  const outcome = match ? historyOutcome(match, localPlayerIds) : null;
-  const players: ReplayPlayerStats[] = match?.stats?.players ?? [];
-  const status = match ? replayStatus(match) : { label: '', ink: '' };
+  useEffect(() => {
+    if (!match?.match_guid) {
+      setFetchedMatch(null);
+      return;
+    }
+    const initialHasTelemetry = (match.stats?.players ?? []).some(
+      (p) => p.boost !== undefined || p.movement !== undefined || p.positioning !== undefined,
+    );
+    if (initialHasTelemetry) {
+      setFetchedMatch(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/matches/${encodeURIComponent(match.match_guid)}`);
+        if (!res || !res.ok) return;
+        const data = (await res.json()) as HistoricalMatchRecord;
+        if (!cancelled && data && data.match_guid) {
+          const fetchedHasPlayers = (data.stats?.players?.length ?? 0) > 0;
+          if (fetchedHasPlayers) {
+            setFetchedMatch(data);
+          }
+        }
+      } catch {
+        // Ignore network errors in test/preview environments
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [match]);
+
+  const effectiveMatch = fetchedMatch && fetchedMatch.match_guid === match?.match_guid ? fetchedMatch : match;
+  const outcome = effectiveMatch ? historyOutcome(effectiveMatch, localPlayerIds) : null;
+  const players: ReplayPlayerStats[] = effectiveMatch?.stats?.players ?? [];
+  const status = effectiveMatch ? replayStatus(effectiveMatch) : { label: '', ink: '' };
 
   const bluePlayers = useMemo(
     () => players.filter((p) => p.team === 0).sort((a, b) => (b.score || 0) - (a.score || 0)),
@@ -65,34 +100,34 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
   );
 
   const mvpKey = useMemo(
-    () => (match ? findReplayMvpKey(players, match.winner_team, match.blue_score, match.orange_score) : null),
-    [match, players],
+    () => (effectiveMatch ? findReplayMvpKey(players, effectiveMatch.winner_team, effectiveMatch.blue_score, effectiveMatch.orange_score) : null),
+    [effectiveMatch, players],
   );
 
   const rawJsonString = useMemo(() => {
-    if (!match) return '';
-    if (match.stats?.raw_json) {
+    if (!effectiveMatch) return '';
+    if (effectiveMatch.stats?.raw_json) {
       try {
-        return JSON.stringify(JSON.parse(match.stats.raw_json), null, 2);
+        return JSON.stringify(JSON.parse(effectiveMatch.stats.raw_json), null, 2);
       } catch {
-        return match.stats.raw_json;
+        return effectiveMatch.stats.raw_json;
       }
     }
-    if (match.replay_stats_json) {
+    if (effectiveMatch.replay_stats_json) {
       try {
-        return JSON.stringify(JSON.parse(match.replay_stats_json), null, 2);
+        return JSON.stringify(JSON.parse(effectiveMatch.replay_stats_json), null, 2);
       } catch {
-        return match.replay_stats_json;
+        return effectiveMatch.replay_stats_json;
       }
     }
-    return JSON.stringify(match, null, 2);
-  }, [match]);
+    return JSON.stringify(effectiveMatch, null, 2);
+  }, [effectiveMatch]);
 
-  if (!match) return null;
+  if (!effectiveMatch) return null;
 
   const copyGuid = () => {
     try {
-      navigator.clipboard?.writeText(match.match_guid);
+      navigator.clipboard?.writeText(effectiveMatch.match_guid);
     } catch {}
     setCopiedGuid(true);
     setTimeout(() => setCopiedGuid(false), 2000);
@@ -470,15 +505,15 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
   ];
 
   const kickerText = kickerPrefix
-    ? `${kickerPrefix} · ${playlistLabels(match.playlist).name} · FULL BALLCHASING TELEMETRY`
-    : `${playlistLabels(match.playlist).name} · ${formatAgo(match.stats?.date || match.created_at)} · FULL BALLCHASING TELEMETRY`;
+    ? `${kickerPrefix} · ${playlistLabels(effectiveMatch.playlist).name} · FULL BALLCHASING TELEMETRY`
+    : `${playlistLabels(effectiveMatch.playlist).name} · ${formatAgo(effectiveMatch.stats?.date || effectiveMatch.created_at)} · FULL BALLCHASING TELEMETRY`;
 
   return (
     <Modal
       isOpen
       onClose={onClose}
       kicker={kickerText}
-      title={`${match.map_name || match.stats?.map_name || 'Unknown arena'} (BLUE ${match.blue_score} – ${match.orange_score} ORANGE)`}
+      title={`${effectiveMatch.map_name || effectiveMatch.stats?.map_name || 'Unknown arena'} (BLUE ${effectiveMatch.blue_score} – ${effectiveMatch.orange_score} ORANGE)`}
       meta={
         <>
           {outcome && (
@@ -487,18 +522,18 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
             </span>
           )}
           <span className="font-extrabold text-xl leading-none t-font-mono">
-            <span className="text-blue-ink">{match.blue_score}</span>
+            <span className="text-blue-ink">{effectiveMatch.blue_score}</span>
             <span className="text-faint"> – </span>
-            <span className="text-orange-ink">{match.orange_score}</span>
+            <span className="text-orange-ink">{effectiveMatch.orange_score}</span>
           </span>
-          {match.stats?.duration ? (
+          {effectiveMatch.stats?.duration ? (
             <span>
-              {formatDuration(match.stats.duration)}
-              {match.stats.overtime && <span className="text-loss"> OT</span>}
+              {formatDuration(effectiveMatch.stats.duration)}
+              {effectiveMatch.stats.overtime && <span className="text-loss"> OT</span>}
             </span>
           ) : null}
-          <span className="text-ink-2 normal-case truncate max-w-[280px] t-font-mono" title={match.match_guid}>
-            {match.match_guid}
+          <span className="text-ink-2 normal-case truncate max-w-[280px] t-font-mono" title={effectiveMatch.match_guid}>
+            {effectiveMatch.match_guid}
           </span>
           <button type="button" onClick={copyGuid} className="text-muted hover:text-ink transition-colors duration-120">
             {copiedGuid ? 'COPIED ✓' : 'COPY GUID'}

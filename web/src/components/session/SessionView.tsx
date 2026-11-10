@@ -236,6 +236,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
     try {
       await fetch('/api/sync/now', { method: 'POST' });
       await fetch('/api/sync/ballchasing', { method: 'POST' });
+      for (let attempt = 0; attempt < 15; attempt++) {
+        const stRes = await fetch('/api/sync/ballchasing/status');
+        if (!stRes || !stRes.ok) break;
+        const st = await stRes.json();
+        if (!st?.running) break;
+        await new Promise((r) => setTimeout(r, 400));
+      }
     } catch {
       // ignore network error in preview/test
     }

@@ -507,7 +507,15 @@ func (d *Daemon) executeStatsPoll(ctx context.Context, poller StatsPoller) error
 		d.mu.Unlock()
 	}()
 
-	return poller.PollAndSyncPendingStats(ctx)
+	err := poller.PollAndSyncPendingStats(ctx)
+	if err == nil && d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
+		summary := d.enrichSessionTelemetry(ctx, d.sessionTracker.GetSessionSummary())
+		d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
+			Event: session.EventSessionUpdate,
+			Data:  summary,
+		})
+	}
+	return err
 }
 
 // executeCycle runs a single synchronization cycle, tracking in-flight status,

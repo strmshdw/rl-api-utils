@@ -1686,6 +1686,12 @@ func computeSessionDerivedStats(
 			}
 			mps, _ := store.GetMatchPlayers(context.Background(), guid)
 			if len(mps) > 0 {
+				nameByID := make(map[string]string, len(m.Players))
+				for _, sp := range m.Players {
+					if sp.PlayerID != "" && sp.Name != "" {
+						nameByID[strings.ToLower(strings.TrimSpace(sp.PlayerID))] = sp.Name
+					}
+				}
 				var localMP *storage.MatchPlayerRecord
 				var oppMPs []*storage.MatchPlayerRecord
 				for _, mp := range mps {
@@ -1702,14 +1708,22 @@ func computeSessionDerivedStats(
 				}
 				if localMP != nil || len(oppMPs) > 0 {
 					if localMP != nil {
-						stJSON := storage.ExtractPlayerStatsJSONFromReplay(localMP.StatsJSON, replayJSON, localMP.PlayerID, "", localMP.TeamNum)
+						localName := localMP.PlayerName
+						if localName == "" {
+							localName = nameByID[strings.ToLower(strings.TrimSpace(localMP.PlayerID))]
+						}
+						stJSON := storage.ExtractPlayerStatsJSONFromReplay(localMP.StatsJSON, replayJSON, localMP.PlayerID, localName, localMP.TeamNum)
 						forAcc.AddPlayerBoxAndTelemetry(localMP.Score, localMP.Goals, localMP.Assists, localMP.Saves, localMP.Shots, localMP.Demos, stJSON)
 					} else {
 						forAcc.AddPlayerBoxAndTelemetry(0, 0, 0, 0, 0, 0, "")
 					}
 					if len(oppMPs) > 0 {
 						for _, op := range oppMPs {
-							stJSON := storage.ExtractPlayerStatsJSONFromReplay(op.StatsJSON, replayJSON, op.PlayerID, "", op.TeamNum)
+							opName := op.PlayerName
+							if opName == "" {
+								opName = nameByID[strings.ToLower(strings.TrimSpace(op.PlayerID))]
+							}
+							stJSON := storage.ExtractPlayerStatsJSONFromReplay(op.StatsJSON, replayJSON, op.PlayerID, opName, op.TeamNum)
 							againstAcc.AddPlayerBoxAndTelemetry(op.Score, op.Goals, op.Assists, op.Saves, op.Shots, op.Demos, stJSON)
 						}
 					} else {
@@ -1730,7 +1744,7 @@ func computeSessionDerivedStats(
 					for i := range st.Players {
 						rp := &st.Players[i]
 						fullID := fmt.Sprintf("%s|%s|0", rp.Platform, rp.OnlineID)
-						if localSet[fullID] || localSet[rp.OnlineID] {
+						if rp.IsLocal || localSet[fullID] || localSet[rp.OnlineID] {
 							localRP = rp
 						} else if rp.Team == localTeam && localRP == nil {
 							localRP = rp

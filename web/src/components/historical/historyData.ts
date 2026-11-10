@@ -4,7 +4,9 @@ import { SAMPLE_HISTORICAL_MATCHES } from '../../utils/sampleData';
 import { BoxScoreRow } from '../common/BoxScore';
 
 export const isLocal = (p: ReplayPlayerStats, ids: Set<string>): boolean => {
-  if (p.is_bot || !p.online_id || p.online_id === '0') return false;
+  if (p.is_bot) return false;
+  if (p.is_local) return true;
+  if (!p.online_id || p.online_id === '0') return false;
   const onlineId = p.online_id.toLowerCase();
   if (ids.has(onlineId)) return true;
   for (const raw of ids) {
@@ -44,15 +46,17 @@ export interface ReplayStatus {
 }
 
 export function replayStatus(m: HistoricalMatchRecord): ReplayStatus {
+  const bcId = m.ballchasing_id || m.stats?.ballchasing_id;
   let url = m.ballchasing_url || m.stats?.ballchasing_url;
   if (url && url.includes('/api/replays/')) {
     url = url.replace('https://ballchasing.com/api/replays/', 'https://ballchasing.com/replay/');
-  } else if (!url && m.ballchasing_id) {
-    url = `https://ballchasing.com/replay/${m.ballchasing_id}`;
+  } else if (!url && bcId) {
+    url = `https://ballchasing.com/replay/${bcId}`;
   }
   const upload = (m.upload_status || '').toUpperCase();
   const download = (m.download_status || '').toUpperCase();
-  if (url || upload === 'UPLOADED' || upload === 'DUPLICATE') {
+  const statsSync = (m.stats_sync_status || '').toUpperCase();
+  if (url || bcId || upload === 'UPLOADED' || upload === 'DUPLICATE' || statsSync === 'SYNCED') {
     return { label: 'BALLCHASING ↗', ink: 'text-ink', href: url || undefined };
   }
   if (download === 'FAILED' || upload === 'FAILED') {
@@ -127,6 +131,7 @@ export function sessionMatchToHistoricalRecord(match: SessionMatchDetail): Histo
       platform: p.platform || 'Steam',
       online_id: oid,
       is_bot: p.is_bot,
+      is_local: p.is_local,
       team: p.team_num,
       score: p.stats?.score ?? sp?.score ?? 0,
       goals: p.stats?.goals ?? sp?.goals ?? 0,
