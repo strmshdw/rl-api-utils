@@ -118,8 +118,19 @@ describe('App shell', () => {
     darkBtn.click();
     await new Promise((r) => setTimeout(r, 10));
     expect(document.documentElement.style.getPropertyValue('--t-page')).toBe('#000000');
-    expect(document.documentElement.style.getPropertyValue('--t-blue-slab')).toBe('#1d4ed8');
-    expect(document.documentElement.style.getPropertyValue('--t-orange-slab')).toBe('#ea580c');
+    expect(document.documentElement.style.getPropertyValue('--t-blue-slab')).toBe('#163878');
+    expect(document.documentElement.style.getPropertyValue('--t-orange-slab')).toBe('#a33f14');
+
+    themeSelect.value = 'classic';
+    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.documentElement.getAttribute('data-style')).toBe('classic');
+    expect(document.documentElement.style.getPropertyValue('--t-page')).toBe('#0a0b0d');
+    expect(document.documentElement.style.getPropertyValue('--t-panel')).toBe('#121418');
+    expect(document.documentElement.style.getPropertyValue('--t-blue-slab')).toBe('#12598c');
+    expect(document.documentElement.style.getPropertyValue('--t-orange-slab')).toBe('#b85214');
+    expect(document.documentElement.style.getPropertyValue('--t-blue-ink')).toBe('#30aff8');
+    expect(document.documentElement.style.getPropertyValue('--t-orange-ink')).toBe('#f67f2f');
 
     themeSelect.value = 'arena';
     themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
