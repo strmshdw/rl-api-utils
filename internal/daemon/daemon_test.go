@@ -1598,3 +1598,93 @@ func TestDaemon_HTTP_Phase2_PlayersMatchesSessionAndPrune(t *testing.T) {
 	}
 }
 
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestDaemon_ShutdownWithActiveSSEClient(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	cfg := makeTestConfig(10*time.Second, false)
+	cfg.Web.Enabled = true
+	cfg.Web.Host = "127.0.0.1"
+	cfg.Web.Port = port
+
+	var logBuf syncLogBuffer
+	logger := daemon.NewLogger(config.LoggingConfig{Level: "info", Format: "text"}, &logBuf)
+
+	d, err := daemon.New(newMockSyncer(), cfg, daemon.WithLogger(logger))
+	if err != nil {
+		t.Fatalf("failed to create daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- d.Start(ctx)
+	}()
+
+	// Wait for HTTP server to come up
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(baseURL + "/healthz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+
+	// Open a persistent SSE stream to /api/events (just like an open browser dashboard tab)
+	sseResp, err := http.Get(baseURL + "/api/events")
+	if err != nil {
+		t.Fatalf("failed to open /api/events SSE stream: %v", err)
+	}
+	defer sseResp.Body.Close()
+
+	// Trigger daemon shutdown while the SSE client is still connected
+	shutdownStart := time.Now()
+	cancel()
+
+	select {
+	case err := <-doneCh:
+		if err != nil {
+			t.Fatalf("daemon.Start returned error on shutdown: %v", err)
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("daemon failed to drain within 1.5s while SSE stream was active")
+	}
+
+	elapsed := time.Since(shutdownStart)
+	if elapsed >= 1500*time.Millisecond {
+		t.Errorf("expected immediate SSE drain (<1.5s), took %v", elapsed)
+	}
+	if strings.Contains(logBuf.String(), "HTTP server shutdown encountered error") {
+		t.Errorf("expected zero HTTP server shutdown errors, got logs:\n%s", logBuf.String())
+	}
+}
+
+
