@@ -16,19 +16,20 @@
   --t-ink: #f2efe9;
   --t-ink-strong: #fbf9f5;
   --t-ink-on-accent: #12100e;
-  --t-on-slab: #12100e;
+  --t-on-slab: #fbf9f5;
   --t-ink-2: #cfc7b8;
   --t-ink-3: #b8afa0;
   --t-muted: #918779;
   --t-muted-2: #786f62;
   --t-faint: #5c544b;
-  --t-blue-slab: #f2efe9;
-  --t-orange-slab: #b81d13;
-  --t-blue-ink: #f2efe9;
-  --t-orange-ink: #d9382e;
+  --t-blue-slab: #1c4c70;
+  --t-orange-slab: #c45119;
+  --t-blue-ink: #68a8d4;
+  --t-orange-ink: #eb7f47;
   --t-vermilion-display: #d4261d;
+  --t-loss-slab: #b81d13;
   --t-win: #82a890;
-  --t-loss: #d9382e;
+  --t-loss: #e03e33;
   --t-gold: #deb052;
   --t-carry-ink: #7da8c4;
   --t-font-display: 'Josefin Sans', 'Space Grotesk', 'Inter', sans-serif;
@@ -197,9 +198,9 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  background-color: var(--t-orange-slab);
+  background-color: var(--t-loss-slab, var(--t-loss));
   color: #fbf9f5;
-  border: 1.5px solid var(--t-orange-slab);
+  border: 1.5px solid var(--t-loss-slab, var(--t-loss));
   outline: 1px solid rgba(255, 255, 255, 0.28);
   outline-offset: -3px;
 }

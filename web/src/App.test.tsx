@@ -117,7 +117,9 @@ describe('App shell', () => {
     const darkBtn = container.querySelector<HTMLButtonElement>('#btn-color-dark')!;
     darkBtn.click();
     await new Promise((r) => setTimeout(r, 10));
-    expect(document.documentElement.style.getPropertyValue('--t-on-slab')).toBe('#000000');
+    expect(document.documentElement.style.getPropertyValue('--t-page')).toBe('#000000');
+    expect(document.documentElement.style.getPropertyValue('--t-blue-slab')).toBe('#1d4ed8');
+    expect(document.documentElement.style.getPropertyValue('--t-orange-slab')).toBe('#ea580c');
 
     themeSelect.value = 'arena';
     themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -205,6 +207,19 @@ describe('App shell', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(banner.textContent).toContain('REPLAY HISTORY LIMIT EXCEEDED');
     expect(banner.textContent).toContain('20 / 20 UNDOWNLOADED REPLAYS');
+
+    // Dismiss banner on demand even in exceeded state, and restore via SHOW SYNC BANNER
+    const dismissBtn = banner.querySelector<HTMLButtonElement>('[data-testid="banner-dismiss-btn"]')!;
+    expect(dismissBtn).not.toBeNull();
+    dismissBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(container.querySelector('#replay-limit-banner')).toBeNull();
+
+    const restoreBtn = container.querySelector<HTMLButtonElement>('[data-testid="restore-sync-banner-btn"]')!;
+    expect(restoreBtn).not.toBeNull();
+    restoreBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(container.querySelector('#replay-limit-banner')).not.toBeNull();
   });
 });
 

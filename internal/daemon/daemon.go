@@ -24,6 +24,7 @@ import (
 	"github.com/dank/rl-api-utils/internal/statsapi"
 	"github.com/dank/rl-api-utils/internal/storage"
 	"github.com/dank/rl-api-utils/internal/syncer"
+	"github.com/dank/rl-api-utils/internal/version"
 	"github.com/dank/rl-api-utils/internal/web"
 )
 
@@ -57,6 +58,9 @@ type PlayerDetailResponse struct {
 // DaemonStatusResponse represents the composite payload returned by GET /status.
 type DaemonStatusResponse struct {
 	Status             string                  `json:"status"`
+	Version            string                  `json:"version,omitempty"`
+	Commit             string                  `json:"commit,omitempty"`
+	BuildMode          string                  `json:"build_mode,omitempty"`
 	Enabled            bool                    `json:"enabled"`
 	GameConnected      bool                    `json:"game_connected"`
 	PendingCount       int                     `json:"pending_count"`
@@ -646,6 +650,9 @@ func (d *Daemon) buildStatusResponse(ctx context.Context) DaemonStatusResponse {
 
 	resp := DaemonStatusResponse{
 		Status:             "running",
+		Version:            version.Version,
+		Commit:             version.Commit,
+		BuildMode:          version.BuildMode,
 		MMRPollerState:     "idle",
 		TriggerThreshold:   defaultThreshold,
 		ForceSyncOnTrigger: defaultForceSync,

@@ -179,9 +179,9 @@ describe('LiveGameView — in match', () => {
 
   it('renders Threat, Carry, and Smurf detection badges and toggles historical split tables', async () => {
     const { container } = await renderLive(liveMatch());
-    expect(container.textContent).toContain('戒 · HIGHER MMR');
-    expect(container.textContent).toContain('双 · CARRYING');
-    expect(container.textContent).toContain('印 · SMURF');
+    expect(container.textContent).toContain('◆ HIGHER MMR');
+    expect(container.textContent).toContain('◆ CARRYING');
+    expect(container.textContent).toContain('◆ SMURF');
 
     const youCard = cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
     expect(youCard.textContent).toContain('YOU · ACTIVE SESSION');

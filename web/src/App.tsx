@@ -22,7 +22,7 @@ const DashboardShell: React.FC = () => {
   const [telemetryMatch, setTelemetryMatch] = useState<SessionMatchDetail | null>(null);
   const [fullPagePlayer, setFullPagePlayer] = useState<{ id: string; name?: string } | null>(null);
 
-  const { liveModeOverride } = useDashboard();
+  const { liveModeOverride, isDevBuild, previewMode } = useDashboard();
 
   const {
     session: liveSession,
@@ -36,16 +36,18 @@ const DashboardShell: React.FC = () => {
   } = useSession();
   const { match: liveMatch, status } = useLiveMatch();
 
-  // Preview / demo mode (?preview=true, or ?preview=idle) falls back to sample data.
+  // Preview / demo mode (dev/debug build only) falls back to sample data when enabled.
+  const activePreview = isDevBuild && (previewMode || isDemoMode());
   const session = useMemo(() => {
     if (liveSession && liveSession.matches?.length > 0) return liveSession;
-    return isDemoMode() ? SAMPLE_SESSION_RESPONSE : liveSession;
-  }, [liveSession]);
+    return activePreview ? SAMPLE_SESSION_RESPONSE : liveSession;
+  }, [liveSession, activePreview]);
 
   const match = useMemo(() => {
     if (liveMatch && (liveMatch.active_match || liveMatch.match_ended)) return liveMatch;
-    return isDemoLiveMatch() ? SAMPLE_CURRENT_MATCH : liveMatch;
-  }, [liveMatch]);
+    if (!activePreview) return liveMatch;
+    return previewMode || isDemoLiveMatch() ? SAMPLE_CURRENT_MATCH : liveMatch;
+  }, [liveMatch, activePreview, previewMode]);
 
   // IDs the local player has appeared under, used to orient historical replays.
   const localPlayerIds = useMemo(() => {
@@ -60,7 +62,11 @@ const DashboardShell: React.FC = () => {
 
   const realInMatch = !!match?.active_match;
   const inMatch =
-    liveModeOverride === 'match' ? true : liveModeOverride === 'idle' ? false : realInMatch;
+    activePreview && liveModeOverride === 'match'
+      ? true
+      : activePreview && liveModeOverride === 'idle'
+      ? false
+      : realInMatch;
   const lastMatch = chronological(session?.matches).pop();
   const headerPlaylistId = inMatch ? match?.playlist_id ?? 11 : lastMatch?.playlist_id;
 
@@ -89,10 +95,10 @@ const DashboardShell: React.FC = () => {
           <div className="deco-medallion-bar px-5 py-1.5">
             <span className="flex items-center gap-2">
               <span className="text-orange-ink">◆</span>
-              <span>ARASHIKAGE MONOLITH // 嵐影之印 · GINZA GEOMETRIC TELEMETRY SCROLL</span>
+              <span>RL/SYNC TELEMETRY DESK // REAL-TIME MATCH &amp; SESSION ANALYTICS</span>
             </span>
             <span className="t-font-mono text-[11px] text-muted hidden md:inline">
-              25S POST-WHISTLE MMR BURST INTERROGATOR · ACTIVE
+              25S POST-WHISTLE MMR BURST POLLING · ACTIVE
             </span>
           </div>
           <div className="p-4 sm:p-6">

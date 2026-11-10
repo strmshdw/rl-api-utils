@@ -10,13 +10,70 @@ import {
 } from '../types/api';
 import { synthesizeRoleStats } from './broadcast';
 
+declare const __APP_VERSION__: string | undefined;
+declare const __APP_BUILD_MODE__: string | undefined;
+declare const __ENABLE_PREVIEW__: boolean | undefined;
+
+export const PREVIEW_STORAGE_KEY = 'rlsync_preview_mode';
+
+export function getAppVersion(): string {
+  try {
+    if (typeof __APP_VERSION__ !== 'undefined' && __APP_VERSION__) {
+      return __APP_VERSION__;
+    }
+  } catch {
+    // ignore
+  }
+  return '2.0.0';
+}
+
+export function getAppBuildMode(): 'production' | 'development' {
+  try {
+    if (typeof __APP_BUILD_MODE__ !== 'undefined') {
+      return __APP_BUILD_MODE__ === 'production' ? 'production' : 'development';
+    }
+  } catch {
+    // ignore
+  }
+  const env = (import.meta as unknown as { env?: { DEV?: boolean; MODE?: string } }).env;
+  return env?.DEV || env?.MODE === 'test' || env?.MODE === 'development' ? 'development' : 'production';
+}
+
 /**
- * Checks whether preview / demo mode is activated via URL query parameters,
- * or when running in the local Vite dev server inside a real browser (non-happyDOM).
- * Supported query params: ?demo=true, ?test=true, ?preview=true, ?preview=idle
+ * Preview / Demo mode is ONLY allowed in dev/debug/test builds.
+ * Production builds (__ENABLE_PREVIEW__ === false) permanently disable preview mode.
+ */
+export function isPreviewBuildAllowed(): boolean {
+  try {
+    if (typeof __ENABLE_PREVIEW__ !== 'undefined') {
+      return Boolean(__ENABLE_PREVIEW__);
+    }
+  } catch {
+    // ignore
+  }
+  const env = (import.meta as unknown as { env?: { DEV?: boolean; MODE?: string } }).env;
+  return Boolean(env?.DEV || env?.MODE === 'test' || env?.MODE === 'development');
+}
+
+/**
+ * Checks whether preview / demo mode is currently active.
+ * - Never active in production builds (!isPreviewBuildAllowed()).
+ * - In dev/debug builds, defaults to OFF unless explicitly enabled via the UI toggle
+ *   (localStorage 'rlsync_preview_mode' === 'on') or URL query parameters
+ *   (?demo=true, ?test=true, ?preview=true, ?preview=idle).
  */
 export function isDemoMode(): boolean {
   if (typeof window === 'undefined') return false;
+  if (!isPreviewBuildAllowed()) return false;
+
+  try {
+    const stored = window.localStorage.getItem(PREVIEW_STORAGE_KEY);
+    if (stored === 'off') return false;
+    if (stored === 'on') return true;
+  } catch {
+    // ignore storage errors
+  }
+
   const params = new URLSearchParams(window.location.search);
   if (
     params.get('demo') === 'true' ||
@@ -26,11 +83,31 @@ export function isDemoMode(): boolean {
   ) {
     return true;
   }
-  const env = (import.meta as unknown as { env?: { DEV?: boolean; MODE?: string } }).env;
-  if (env?.DEV && env?.MODE !== 'test' && !('happyDOM' in window)) {
-    return true;
-  }
   return false;
+}
+
+export function setPreviewModeEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (enabled && isPreviewBuildAllowed()) {
+      window.localStorage.setItem(PREVIEW_STORAGE_KEY, 'on');
+    } else {
+      window.localStorage.setItem(PREVIEW_STORAGE_KEY, 'off');
+      const url = new URL(window.location.href);
+      let mutated = false;
+      for (const k of ['demo', 'test', 'preview']) {
+        if (url.searchParams.has(k)) {
+          url.searchParams.delete(k);
+          mutated = true;
+        }
+      }
+      if (mutated && window.history?.replaceState) {
+        window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      }
+    }
+  } catch {
+    // ignore
+  }
 }
 
 /** Demo mode with the simulated live match; ?preview=idle previews the between-matches state. */
