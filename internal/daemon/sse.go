@@ -30,8 +30,18 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	var daemonDone <-chan struct{}
+	d.mu.Lock()
+	if d.ctx != nil {
+		daemonDone = d.ctx.Done()
+	}
+	d.mu.Unlock()
+
 	if d.sessionTracker == nil {
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-daemonDone:
+		}
 		return
 	}
 
@@ -89,6 +99,10 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			// Client disconnected (tab closed, page navigated)
+			return
+
+		case <-daemonDone:
+			// Daemon shutting down; exit SSE stream immediately so httpSrv.Shutdown drains cleanly
 			return
 
 		case <-keepaliveTicker.C:

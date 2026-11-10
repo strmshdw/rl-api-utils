@@ -396,13 +396,13 @@ func (d *Daemon) Start(ctx context.Context) error {
 		go func() {
 			defer d.wg.Done()
 			<-ctx.Done()
+			if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
+				d.sessionTracker.Broadcaster().Close()
+			}
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			if err := httpSrv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("HTTP server shutdown encountered error", slog.Any("error", err))
-			}
-			if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-				d.sessionTracker.Broadcaster().Close()
 			}
 		}()
 	}
