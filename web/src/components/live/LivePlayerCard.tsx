@@ -275,15 +275,15 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         onInspectPlayer && !player.is_bot ? 'cursor-pointer t-hover-panel' : ''
       }`}
     >
-      {/* Full-Bleed Woodblock Monolith Header Slab */}
+      {/* Full-Bleed Team Monolith Header Slab */}
       <div
         className={`px-4 py-2.5 flex items-center justify-between gap-3 border-b border-line ${
           isAlly ? 't-bg-blue-slab bg-blue-slab t-on-slab' : 't-bg-orange-slab bg-orange-slab text-white'
         }`}
       >
         <div className="flex flex-col min-w-0">
-          <span className="t-font-mono text-[10px] font-bold tracking-widest uppercase opacity-75">
-            {isAlly ? '嵐 STORM SQUAD // DRIVER' : '影 RIVAL SQUAD // OPPONENT'}
+          <span className="t-font-mono text-[10px] font-bold tracking-widest uppercase opacity-80">
+            {isAlly ? 'BLUE TEAM // PLAYER' : 'ORANGE TEAM // PLAYER'}
           </span>
           <div className="flex items-baseline gap-2.5 flex-wrap">
             <div
@@ -327,7 +327,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
           {isLocal && (
             <>
               <span className="text-[11px] t-font-display font-bold px-2 py-0.5 cartouche-monolith uppercase tracking-wider">
-                嵐 · YOU · ACTIVE SESSION
+                ◆ YOU · ACTIVE SESSION
               </span>
               <span className="text-[11px] t-font-mono font-bold px-2 py-0.5 cartouche-mono uppercase">
                 IN RANGE {wins}W–{losses}L
@@ -345,7 +345,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
           )}
           {!isLocal && threatBadges.length === 0 && (!player.tags || player.tags.length === 0) && !player.notes && (
             <span className="text-[11px] t-font-mono font-bold px-2 py-0.5 cartouche-mono uppercase">
-              {isTeammate ? '鎖 · SQUAD ALLY' : '影 · MATCHUP FOE'}
+              {isTeammate ? '◆ TEAMMATE' : '◆ OPPONENT'}
             </span>
           )}
 

@@ -33,17 +33,17 @@ const TABS: ReadonlyArray<{ id: DashboardTab; label: string }> = [
 ];
 
 const THEME_OPTIONS: ReadonlyArray<{ id: ThemeStyleKey; label: string }> = [
-  { id: 'broadcast', label: '01 · 版画 Ginza Deco: Sumi Woodblock (D2-K3 Default)' },
-  { id: 'tactical', label: '02 · 漆 Ginza Deco: Urushi & Brass (D2-K2)' },
-  { id: 'swiss', label: '03 · 硯 Ginza Deco: Suzuri Inkstone (D2-K1)' },
-  { id: 'arashi', label: '04 · 嵐 Ginza Deco: Arashi Washi & Sumi (D2 Light)' },
+  { id: 'broadcast', label: '01 · Deco Monolith: Woodblock (Default)' },
+  { id: 'tactical', label: '02 · Deco Monolith: Lacquer & Brass' },
+  { id: 'swiss', label: '03 · Deco Monolith: Carved Inkstone' },
+  { id: 'arashi', label: '04 · Deco Monolith: Warm Parchment (Light)' },
   { id: 'arena', label: '05 · Glassmorphic Arena (Frosted HUD)' },
-  { id: 'carbon', label: '06 · Carbon Paddock (Motorsport Gold)' },
+  { id: 'carbon', label: '06 · Carbon Paddock (Motorsport Telemetry)' },
   { id: 'synthwave', label: '07 · Mannfield Night (Neon Violet)' },
   { id: 'editorial', label: '08 · Editorial Gazette (Fraunces Serif)' },
   { id: 'nordic', label: '09 · Nordic Frost (Arctic Slate & Ice)' },
   { id: 'terminal', label: '10 · Retro CRT Phosphor (Monospace)' },
-  { id: 'solar', label: '11 · Utopia Daylight (Warm Sand & Teal)' },
+  { id: 'solar', label: '11 · Utopia Daylight (Warm Sand & Blue)' },
   { id: 'industrial', label: '12 · Cobalt Blueprint (CAD Grid)' },
   { id: 'oled', label: '13 · Pure OLED Pitch (True Zero Black)' },
 ];
@@ -78,8 +78,14 @@ export const TopBar: React.FC<TopBarProps> = ({
     setShowCustomCalendar,
     replayLimitPreview,
     setReplayLimitPreview,
+    replayBannerDismissed,
+    setReplayBannerDismissed,
     liveModeOverride,
     setLiveModeOverride,
+    isDevBuild,
+    appVersion,
+    previewMode,
+    setPreviewMode,
   } = useDashboard();
 
   const matchCount = session?.matches?.length ?? 0;
@@ -97,25 +103,21 @@ export const TopBar: React.FC<TopBarProps> = ({
       >
         {/* Row 1: Primary Brand, Navigation Tabs & Studio Theme Controls on a Single Balanced Row */}
         <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-1.5 flex flex-wrap xl:flex-nowrap items-center justify-between gap-2">
-          {/* Left: Arashikage Crest + Brand + Primary Navigation */}
+          {/* Left: Brand Mark + Primary Navigation */}
           <div className="flex items-center gap-3.5 min-w-0 shrink-0">
             <div className="flex items-center gap-2 select-none">
-              <div className="p-1 surface-plaque border border-line flex items-center justify-center">
-                <div className="arashikage-hex" aria-hidden="true">
-                  <div className="hex-solid" />
-                  <div className="hex-broken"><span /><span /></div>
-                  <div className="hex-solid" />
-                  <div className="hex-broken"><span /><span /></div>
-                  <div className="hex-solid" />
-                  <div className="hex-broken"><span /><span /></div>
-                </div>
-              </div>
-              <span className="hanko-square-stamp" aria-hidden="true">印</span>
+              <span
+                aria-hidden="true"
+                className="inline-flex items-center justify-center w-6 h-6 surface-plaque border border-outline text-xs font-extrabold t-text-blue"
+              >
+                ◆
+              </span>
               <span className="t-font-display font-bold text-xl tracking-widest t-text-strong whitespace-nowrap">
-                RL<span className="t-text-orange text-orange-ink">◆</span>SYNC
+                RL<span className="t-text-orange text-orange-ink">/</span>SYNC
               </span>
               <span className="text-[11px] t-font-mono cartouche-mono px-1.5 py-0.5 hidden sm:inline whitespace-nowrap">
-                嵐影 · v2.6
+                v{appVersion}
+                {isDevBuild ? '-dev' : ''}
               </span>
             </div>
 
@@ -150,7 +152,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             </nav>
           </div>
 
-          {/* Right: Theme Expression Selector, Dark/Light Polarity, Scale, Replay Buffer & Overlay */}
+          {/* Right: Theme Expression Selector, Dark/Light Polarity, Scale, Sync Banner Restore & Dev Preview Controls */}
           <div className="flex flex-wrap xl:flex-nowrap items-center gap-1.5 text-xs shrink-0">
             {/* Design Style Switcher */}
             <div className="flex items-center gap-1">
@@ -196,7 +198,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     : 'surface-plaque t-text-muted hover:opacity-80'
                 }`}
               >
-                影 DARK
+                DARK
               </button>
               <button
                 type="button"
@@ -208,7 +210,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     : 'surface-plaque t-text-muted hover:opacity-80'
                 }`}
               >
-                嵐 LIGHT
+                LIGHT
               </button>
             </div>
 
@@ -242,26 +244,63 @@ export const TopBar: React.FC<TopBarProps> = ({
               </button>
             </div>
 
-            {/* Replay Limit State Preview Selector */}
-            <div className="flex items-center gap-1">
-              <label
-                htmlFor="limit-state-select"
-                className="t-text-muted t-font-display font-bold uppercase tracking-wider text-xs hidden 2xl:inline"
+            {/* Restore Sync Banner button when hidden */}
+            {replayBannerDismissed && (
+              <button
+                type="button"
+                id="btn-restore-sync-banner"
+                data-testid="restore-sync-banner-btn"
+                onClick={() => setReplayBannerDismissed(false)}
+                className="px-2 py-1 surface-plaque t-border t-font-display font-bold text-xs uppercase tracking-wider t-text-muted hover:text-ink t-radius cursor-pointer whitespace-nowrap"
+                title="Restore the replay queue sync banner if any warning is active"
               >
-                BUFFER:
-              </label>
-              <select
-                id="limit-state-select"
-                value={replayLimitPreview}
-                onChange={(e) => setReplayLimitPreview(e.target.value as ReplayLimitPreviewState)}
-                className="surface-plaque t-text-strong t-border px-2 py-1 text-xs font-semibold t-radius focus:outline-none cursor-pointer"
-              >
-                <option value="auto">BUFFER: AUTO (5/20)</option>
-                <option value="warn">BUFFER: WARN (16/20)</option>
-                <option value="error">BUFFER: FULL (20/20)</option>
-                <option value="ok">BUFFER: OK (HIDDEN)</option>
-              </select>
-            </div>
+                SHOW SYNC BANNER
+              </button>
+            )}
+
+            {/* Dev/Debug-Only Preview Mode Toggle & Buffer Simulator */}
+            {isDevBuild && (
+              <>
+                <button
+                  type="button"
+                  id="btn-preview-toggle"
+                  data-testid="preview-mode-toggle"
+                  onClick={() => {
+                    const next = !previewMode;
+                    setPreviewMode(next);
+                    setLiveModeOverride(next ? 'match' : 'auto');
+                  }}
+                  className={`px-2.5 py-1 t-border t-radius t-font-display font-bold text-xs uppercase tracking-wider cursor-pointer whitespace-nowrap ${
+                    previewMode
+                      ? 'cartouche-gold'
+                      : 'surface-plaque t-text-muted hover:text-ink'
+                  }`}
+                  title="Dev/Debug build only: Toggle simulated demo/preview telemetry ON or OFF"
+                >
+                  PREVIEW: {previewMode ? 'ON' : 'OFF'}
+                </button>
+
+                <div className="flex items-center gap-1">
+                  <label
+                    htmlFor="limit-state-select"
+                    className="t-text-muted t-font-display font-bold uppercase tracking-wider text-xs hidden 2xl:inline"
+                  >
+                    BUFFER:
+                  </label>
+                  <select
+                    id="limit-state-select"
+                    value={replayLimitPreview}
+                    onChange={(e) => setReplayLimitPreview(e.target.value as ReplayLimitPreviewState)}
+                    className="surface-plaque t-text-strong t-border px-2 py-1 text-xs font-semibold t-radius focus:outline-none cursor-pointer"
+                  >
+                    <option value="auto">BUFFER: AUTO (5/20)</option>
+                    <option value="warn">BUFFER: WARN (16/20)</option>
+                    <option value="error">BUFFER: FULL (20/20)</option>
+                    <option value="ok">BUFFER: OK (HIDDEN)</option>
+                  </select>
+                </div>
+              </>
+            )}
 
             <a href="/?mode=overlay" target="_blank" rel="noopener noreferrer" className={GHOST_LINK}>
               OVERLAY ↗
@@ -273,39 +312,42 @@ export const TopBar: React.FC<TopBarProps> = ({
         <div className="border-t border-line surface-plaque">
           <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-1 flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex flex-wrap items-center gap-2">
-              {/* Live / Idle View Switch */}
-              <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Live or Idle view mode">
-                <button
-                  type="button"
-                  id="btn-mode-match"
-                  onClick={() => {
-                    setLiveModeOverride('match');
-                    if (activeTab !== 'live') onTabChange('live');
-                  }}
-                  className={`px-2.5 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider ${
-                    inMatch
-                      ? 't-bg-blue-ink t-text-on-accent'
-                      : 't-bg-page t-text-muted hover:opacity-80'
-                  }`}
-                >
-                  IN-MATCH
-                </button>
-                <button
-                  type="button"
-                  id="btn-mode-idle"
-                  onClick={() => {
-                    setLiveModeOverride(liveModeOverride === 'idle' ? 'auto' : 'idle');
-                    if (activeTab !== 'live') onTabChange('live');
-                  }}
-                  className={`px-2.5 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border ${
-                    !inMatch
-                      ? 't-bg-blue-ink t-text-on-accent'
-                      : 't-bg-page t-text-muted hover:opacity-80'
-                  }`}
-                >
-                  IDLE VIEW
-                </button>
-              </div>
+              {/* Dev/Debug-Only Live / Idle View Switch */}
+              {isDevBuild && (
+                <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Live or Idle view mode">
+                  <button
+                    type="button"
+                    id="btn-mode-match"
+                    onClick={() => {
+                      if (!previewMode) setPreviewMode(true);
+                      setLiveModeOverride('match');
+                      if (activeTab !== 'live') onTabChange('live');
+                    }}
+                    className={`px-2.5 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider ${
+                      inMatch
+                        ? 't-bg-blue-ink t-text-on-accent'
+                        : 't-bg-page t-text-muted hover:opacity-80'
+                    }`}
+                  >
+                    IN-MATCH
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-mode-idle"
+                    onClick={() => {
+                      setLiveModeOverride(liveModeOverride === 'idle' ? 'auto' : 'idle');
+                      if (activeTab !== 'live') onTabChange('live');
+                    }}
+                    className={`px-2.5 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border ${
+                      !inMatch
+                        ? 't-bg-blue-ink t-text-on-accent'
+                        : 't-bg-page t-text-muted hover:opacity-80'
+                    }`}
+                  >
+                    IDLE VIEW
+                  </button>
+                </div>
+              )}
 
               {/* Global AVG / G vs TOTALS Toggle */}
               <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Stat aggregation mode">

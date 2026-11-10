@@ -98,9 +98,8 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
       className={`surface-plaque border border-outline px-5 pt-3.5 pb-4 border-t-[3px] ${TEAM_SLAB_BORDER[team]} flex flex-col min-w-0 overflow-hidden font-display t-radius`}
     >
       <div className={`grid gap-x-2 pb-1.5 ${COLUMN_HEADER}`} style={{ gridTemplateColumns }}>
-        <span className={team === 0 ? 't-text-strong' : 't-text-orange'}>
-          <span className="sr-only">{label} </span>
-          {team === 0 ? label.replace(/^BLUE/, '嵐 STORM') : label.replace(/^ORANGE/, '影 RIVAL')}
+        <span className={team === 0 ? 't-text-blue' : 't-text-orange'}>
+          {label}
         </span>
         {withRanks && <span className="text-right">MMR</span>}
         {withRanks && <span className="pl-1">RANK · DIV</span>}

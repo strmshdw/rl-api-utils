@@ -520,7 +520,7 @@ export function computeLiveThreatBadges(
     if (diff > 0) {
       badges.push({
         type: 'higher',
-        label: `戒 · HIGHER MMR (+${diff} VS YOU)`,
+        label: `◆ HIGHER MMR (+${diff} VS YOU)`,
         title: `Active playlist MMR is +${diff} higher than yours (${Math.round(playerActiveMmr)} vs ${Math.round(localActiveMmr)})`,
         classes: 'cartouche-gold',
       });
@@ -542,7 +542,7 @@ export function computeLiveThreatBadges(
     if (maxMateDiff >= 80) {
       badges.push({
         type: 'carry',
-        label: `双 · CARRYING (+${maxMateDiff} MMR VS MATE)`,
+        label: `◆ CARRYING (+${maxMateDiff} MMR VS MATE)`,
         title: `Significantly higher MMR (+${maxMateDiff}) than their teammate on the opposing team`,
         classes: 'cartouche-carry',
       });
@@ -582,7 +582,7 @@ export function computeLiveThreatBadges(
     if (bestSmurf) {
       badges.push({
         type: 'smurf',
-        label: `印 · SMURF · ${bestSmurf.modeLabel} ${bestSmurf.rankShort} (${bestSmurf.mmr} · +${bestSmurf.diffVsYou} VS YOU)`,
+        label: `◆ SMURF · ${bestSmurf.modeLabel} ${bestSmurf.rankShort} (${bestSmurf.mmr} · +${bestSmurf.diffVsYou} VS YOU)`,
         title: `Off-playlist peak: ${bestSmurf.modeLabel} ${bestSmurf.rankShort} (${bestSmurf.mmr} MMR, +${bestSmurf.diffVsYou} above you in that playlist)`,
         classes: 'hanko-seal-vermilion',
       });

@@ -18,6 +18,7 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
     setReplayLimitPreview,
     replayBannerDismissed,
     setReplayBannerDismissed,
+    isDevBuild,
   } = useDashboard();
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -48,29 +49,24 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
 
   const maxHostedReplays = session?.max_hosted_replays || 20;
   const triggerThreshold = localThreshold > 0 ? localThreshold : 15;
-  let pendingCount = syncedClearOverride ? 0 : (session?.pending_count ?? 5);
+  let pendingCount = syncedClearOverride ? 0 : (session?.pending_count ?? 0);
 
   let effectiveStatus: 'ok' | 'warning' | 'exceeded' = 'ok';
+  const activePreview = isDevBuild ? replayLimitPreview : 'auto';
 
-  if (replayLimitPreview === 'warn') {
+  if (activePreview === 'warn') {
     effectiveStatus = 'warning';
     pendingCount = syncedClearOverride ? 0 : Math.max(triggerThreshold, 16);
-  } else if (replayLimitPreview === 'error') {
+  } else if (activePreview === 'error') {
     effectiveStatus = 'exceeded';
     pendingCount = syncedClearOverride ? 0 : 20;
-  } else if (replayLimitPreview === 'ok') {
+  } else if (activePreview === 'ok') {
     effectiveStatus = 'ok';
   } else {
     if (pendingCount >= maxHostedReplays) {
       effectiveStatus = 'exceeded';
     } else if (pendingCount >= triggerThreshold) {
       effectiveStatus = 'warning';
-    } else if (session?.replay_limit_status === 'exceeded') {
-      effectiveStatus = 'exceeded';
-      if (pendingCount === 0) pendingCount = maxHostedReplays;
-    } else if (session?.replay_limit_status === 'warning') {
-      effectiveStatus = 'warning';
-      if (pendingCount === 0) pendingCount = triggerThreshold;
     }
   }
 
@@ -173,8 +169,8 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
           >
             {
               isExceeded
-                ? '印 · REPLAY HISTORY LIMIT EXCEEDED · 20-GAME CAP'
-                : '戒 · REPLAY LIMIT WARNING · 20-GAME BUFFER'
+                ? '◆ REPLAY HISTORY LIMIT EXCEEDED · 20-GAME CAP'
+                : '◆ REPLAY LIMIT WARNING · 20-GAME BUFFER'
             }
           </span>
 
@@ -246,7 +242,7 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
             }`}
             title="Automatically sync and download all outstanding replays from Rocket League when the game threshold is reached"
           >
-            鎖 AUTO-SYNC AT {triggerThreshold}G: {localForceSync ? 'ON' : 'OFF'}
+            AUTO-SYNC AT {triggerThreshold}G: {localForceSync ? 'ON' : 'OFF'}
           </button>
 
           {/* Desktop Toast Notification Toggle */}
@@ -264,16 +260,17 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
             ◆ NOTIFY: {localEnableToast ? 'ON' : 'OFF'}
           </button>
 
-          {!isExceeded && (
-            <button
-              type="button"
-              aria-label="Dismiss replay limit warning"
-              onClick={() => setReplayBannerDismissed(true)}
-              className="px-2 py-1 text-sm t-text-muted hover:opacity-80 cursor-pointer"
-            >
-              ✕
-            </button>
-          )}
+          {/* Always allow hiding/ignoring the sync banner on demand in both warning and exceeded states */}
+          <button
+            type="button"
+            data-testid="banner-dismiss-btn"
+            aria-label="Dismiss replay limit warning"
+            onClick={() => setReplayBannerDismissed(true)}
+            className="px-2.5 py-1 t-bg-page t-border t-font-display font-bold text-xs uppercase tracking-wider t-text-muted hover:text-ink cursor-pointer whitespace-nowrap"
+            title="Hide this sync banner (you can restore it anytime from the top bar)"
+          >
+            HIDE BANNER ✕
+          </button>
         </div>
       </div>
     </div>

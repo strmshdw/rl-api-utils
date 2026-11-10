@@ -79,20 +79,16 @@ const LastMatch: React.FC<{
           >
             {outcome ? OUTCOME_WORD[outcome] : 'FINAL'}
           </span>
-          <span>
-            <span className="sr-only">{slabText(0)} </span>
-            嵐 STORM{localTeam === 0 ? ' · YOU' : ''}
-          </span>
+          <span>{slabText(0)}</span>
         </div>
-        <div className="min-h-[64px] w-[68px] surface-plaque border-x border-line t-text-strong flex items-center justify-center font-extrabold text-4xl leading-none t-font-mono">
+        <div className="min-h-[64px] w-[68px] surface-plaque border-x border-line t-text-blue text-blue-ink flex items-center justify-center font-extrabold text-4xl leading-none t-font-mono">
           {match.blue_score}
         </div>
         <div className="min-h-[64px] w-[68px] surface-plaque border-r border-line text-orange-ink flex items-center justify-center font-extrabold text-4xl leading-none t-font-mono">
           {match.orange_score}
         </div>
         <div className="min-h-[64px] flex-[0_1_210px] min-w-[130px] t-bg-orange-slab bg-orange-slab text-white flex items-center pl-4 whitespace-nowrap overflow-hidden font-bold text-lg tracking-wider">
-          <span className="sr-only">{slabText(1)} </span>
-          影 RIVAL{localTeam === 1 ? ' · YOU' : ''}
+          {slabText(1)}
         </div>
         <div className="flex-[1_1_360px] min-h-[68px] flex flex-wrap items-center justify-between gap-4 px-5 py-2.5 min-w-0">
           <div className="flex flex-col gap-0.5 min-w-0 font-semibold text-sm tracking-t8 text-muted">
@@ -140,7 +136,7 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
   onInspectPlayer,
   onOpenMatchTelemetry,
 }) => {
-  const { setLiveModeOverride } = useDashboard();
+  const { setLiveModeOverride, isDevBuild, previewMode } = useDashboard();
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
   const [showAllModes, setShowAllModes] = useState(false);
   const summary = useMemo(() => summarizeSession(session), [session]);
@@ -152,6 +148,7 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
 
   const corePlaylists = useMemo(() => {
     const localRanks = session?.active_match?.local_player?.ranks || {};
+    const useSampleFallbacks = isDevBuild && previewMode;
     const specs = [
       { id: 13, label: 'RANKED 3V3 (STANDARD)', defaultMmr: 1460, defaultRank: 'Grand Champion I', defaultDiv: 1 },
       { id: 11, label: 'RANKED 2V2 (DOUBLES)', defaultMmr: 1485, defaultRank: 'Grand Champion I', defaultDiv: 2 },
@@ -160,9 +157,9 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
     return specs.map((spec) => {
       const plStat = session?.playlists?.[String(spec.id)];
       const rInfo = localRanks[String(spec.id)];
-      const mmr = plStat?.current_mmr || rInfo?.mmr || spec.defaultMmr;
-      const rankName = rInfo?.rank_name || spec.defaultRank;
-      const div = rInfo?.division ?? spec.defaultDiv;
+      const mmr = plStat?.current_mmr || rInfo?.mmr || (useSampleFallbacks ? spec.defaultMmr : 0);
+      const rankName = rInfo?.rank_name || (useSampleFallbacks ? spec.defaultRank : mmr > 0 ? 'RANKED' : 'UNRANKED');
+      const div = rInfo?.division ?? (useSampleFallbacks ? spec.defaultDiv : undefined);
       const delta = plStat?.mmr_delta ?? 0;
       const games = plStat?.matches_played ?? rInfo?.matches_played ?? 0;
       return {
@@ -174,15 +171,38 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
         games,
       };
     });
-  }, [session]);
+  }, [session, isDevBuild, previewMode]);
 
-  const extraPlaylists = [
-    { id: 27, label: 'HOOPS (2V2)', rank: 'CHAMPION II · DIV III', mmr: '1165' },
-    { id: 28, label: 'RUMBLE (3V3)', rank: 'GRAND CHAMPION I · DIV I', mmr: '1290' },
-    { id: 29, label: 'DROPSHOT (3V3)', rank: 'DIAMOND III · DIV IV', mmr: '985' },
-    { id: 30, label: 'SNOW DAY (3V3)', rank: 'CHAMPION I · DIV II', mmr: '1040' },
-    { id: 34, label: 'TOURNAMENTS (3V3)', rank: 'GRAND CHAMPION I · DIV III', mmr: '1510' },
-  ];
+  const extraPlaylists = useMemo(() => {
+    const localRanks = session?.active_match?.local_player?.ranks || {};
+    const useSampleFallbacks = isDevBuild && previewMode;
+    const specs = [
+      { id: 27, label: 'HOOPS (2V2)', sampleRank: 'CHAMPION II · DIV III', sampleMmr: '1165' },
+      { id: 28, label: 'RUMBLE (3V3)', sampleRank: 'GRAND CHAMPION I · DIV I', sampleMmr: '1290' },
+      { id: 29, label: 'DROPSHOT (3V3)', sampleRank: 'DIAMOND III · DIV IV', sampleMmr: '985' },
+      { id: 30, label: 'SNOW DAY (3V3)', sampleRank: 'CHAMPION I · DIV II', sampleMmr: '1040' },
+      { id: 34, label: 'TOURNAMENTS (3V3)', sampleRank: 'GRAND CHAMPION I · DIV III', sampleMmr: '1510' },
+    ];
+    return specs.map((spec) => {
+      const plStat = session?.playlists?.[String(spec.id)];
+      const rInfo = localRanks[String(spec.id)];
+      const mmr = plStat?.current_mmr || rInfo?.mmr;
+      if (mmr && mmr > 0) {
+        return {
+          id: spec.id,
+          label: spec.label,
+          rank: shortRank(rInfo?.rank_name || 'RANKED', rInfo?.division),
+          mmr: formatMmr(mmr),
+        };
+      }
+      return {
+        id: spec.id,
+        label: spec.label,
+        rank: useSampleFallbacks ? spec.sampleRank : 'UNRANKED',
+        mmr: useSampleFallbacks ? spec.sampleMmr : '—',
+      };
+    });
+  }, [session, isDevBuild, previewMode]);
 
   return (
     <div data-testid="live-idle" className="font-display flex flex-col gap-4">
@@ -215,15 +235,17 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setLiveModeOverride('match')}
-            className="px-2.5 py-0.5 t-bg-page border border-outline t-font-display font-bold text-xs uppercase tracking-wider t-text-strong hover:opacity-80 t-radius"
-          >
-            PREVIEW IN-MATCH TELEMETRY →
-          </button>
-        </div>
+        {isDevBuild && previewMode && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setLiveModeOverride('match')}
+              className="px-2.5 py-0.5 t-bg-page border border-outline t-font-display font-bold text-xs uppercase tracking-wider t-text-strong hover:opacity-80 t-radius"
+            >
+              PREVIEW IN-MATCH TELEMETRY →
+            </button>
+          </div>
+        )}
       </div>
 
       {session?.continuable_session && (

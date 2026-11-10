@@ -68,6 +68,8 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
     showLiveHistData,
     setShowLiveHistData,
     dateRangeLabel,
+    isDevBuild,
+    previewMode,
   } = useDashboard();
   const [playlistScope, setPlaylistScope] = useState<string>('all');
   const [fallbackPlayer, setFallbackPlayer] = useState<{ id: string; name?: string } | null>(null);
@@ -84,14 +86,20 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
   };
 
   const realDisplayable = !!match && (match.active_match || match.match_ended);
+  const canOverride = isDevBuild && previewMode;
   const shouldShowMatch =
-    liveModeOverride === 'match' ? true : liveModeOverride === 'idle' ? false : realDisplayable;
+    canOverride && liveModeOverride === 'match'
+      ? true
+      : canOverride && liveModeOverride === 'idle'
+      ? false
+      : realDisplayable;
 
   const effectiveMatch = useMemo<CurrentMatchResponse | null>(() => {
     if (!shouldShowMatch) return null;
     if (realDisplayable && match) return match;
-    return SAMPLE_CURRENT_MATCH;
-  }, [shouldShowMatch, realDisplayable, match]);
+    if (canOverride) return SAMPLE_CURRENT_MATCH;
+    return null;
+  }, [shouldShowMatch, realDisplayable, match, canOverride]);
 
   const lobby = useMemo(
     () => (effectiveMatch ? lobbyPlayers(effectiveMatch) : []),
@@ -187,12 +195,12 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 t-bg-loss bg-loss animate-pulse" />
             <span className="t-font-display font-bold text-xs tracking-widest uppercase t-text-loss">
-              印 · LIVE TELEMETRY STREAM
+              LIVE TELEMETRY STREAM
             </span>
           </div>
           <span className="t-text-faint">|</span>
           <span className="text-xs t-text-muted font-semibold uppercase">
-            CLICK ANY PLAYER MONOLITH FOR QUICK SCOUTING SCROLL
+            CLICK ANY PLAYER CARD FOR QUICK SCOUTING PROFILE
           </span>
         </div>
 

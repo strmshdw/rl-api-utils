@@ -1,4 +1,10 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
+import {
+  getAppVersion,
+  isDemoMode,
+  isPreviewBuildAllowed,
+  setPreviewModeEnabled,
+} from '../utils/sampleData';
 
 export type ThemeStyleKey =
   | 'broadcast'
@@ -46,6 +52,7 @@ export interface ThemePalette {
   blueInk: string;
   orangeInk: string;
   vermilionDisplay?: string;
+  lossSlab?: string;
   win: string;
   loss: string;
   gold?: string;
@@ -92,11 +99,12 @@ const D2_ARASHI_LIGHT_PALETTE: ThemePalette = {
   muted: '#615548',
   muted2: '#786b5c',
   faint: '#968877',
-  blueSlab: '#1c1917',
-  orangeSlab: '#b81d13',
-  blueInk: '#171412',
-  orangeInk: '#9e140a',
-  vermilionDisplay: '#b81d13',
+  blueSlab: '#184361',
+  orangeSlab: '#bf4a13',
+  blueInk: '#16425b',
+  orangeInk: '#9e3908',
+  vermilionDisplay: '#a8180e',
+  lossSlab: '#a8180e',
   win: '#1e523b',
   loss: '#9e140a',
   gold: '#8c5604',
@@ -106,7 +114,7 @@ const D2_ARASHI_LIGHT_PALETTE: ThemePalette = {
 
 export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
   broadcast: {
-    name: '01 · 版画 Ginza Deco: Sumi Woodblock (D2-K3 Default)',
+    name: '01 · Deco Monolith: Woodblock (Default)',
     fontDisplay: F_DECO,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -117,16 +125,17 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#0a0908', panel: '#181614', plaque: '#0f0d0b', panelHover: '#221f1c', modal: '#181614',
       line: '#38332d', line2: '#292520', outline: '#e2dbd0', frieze: '#d8d0c5',
-      ink: '#f2efe9', strong: '#fbf9f5', onAccent: '#12100e', onSlab: '#12100e', ink2: '#cfc7b8', ink3: '#b8afa0',
+      ink: '#f2efe9', strong: '#fbf9f5', onAccent: '#12100e', onSlab: '#fbf9f5', ink2: '#cfc7b8', ink3: '#b8afa0',
       muted: '#918779', muted2: '#786f62', faint: '#5c544b',
-      blueSlab: '#f2efe9', orangeSlab: '#b81d13', blueInk: '#f2efe9', orangeInk: '#d9382e', vermilionDisplay: '#d4261d',
-      win: '#82a890', loss: '#d9382e', gold: '#deb052', carryInk: '#7da8c4',
+      blueSlab: '#1c4c70', orangeSlab: '#c45119', blueInk: '#68a8d4', orangeInk: '#eb7f47',
+      vermilionDisplay: '#d4261d', lossSlab: '#b81d13',
+      win: '#82a890', loss: '#e03e33', gold: '#deb052', carryInk: '#7da8c4',
       bgImage: 'none',
     },
     light: D2_ARASHI_LIGHT_PALETTE,
   },
   tactical: {
-    name: '02 · 漆 Ginza Deco: Urushi & Brass (D2-K2)',
+    name: '02 · Deco Monolith: Lacquer & Brass',
     fontDisplay: F_DECO,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -137,16 +146,17 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#040302', panel: '#120e09', plaque: '#080604', panelHover: '#1d160e', modal: '#120e09',
       line: '#4d391d', line2: '#332512', outline: '#d4a853', frieze: '#e5b85c',
-      ink: '#f5ebd6', strong: '#fffdf7', onAccent: '#120e09', onSlab: '#120e09', ink2: '#d4c3a3', ink3: '#b8a482',
+      ink: '#f5ebd6', strong: '#fffdf7', onAccent: '#120e09', onSlab: '#fffdf9', ink2: '#d4c3a3', ink3: '#b8a482',
       muted: '#9e8866', muted2: '#806c4e', faint: '#5e4f37',
-      blueSlab: '#e8d5b5', orangeSlab: '#a8180e', blueInk: '#e5b85c', orangeInk: '#d9382e', vermilionDisplay: '#d4261d',
-      win: '#82a890', loss: '#d9382e', gold: '#e5b85c', carryInk: '#7da8c4',
+      blueSlab: '#18456b', orangeSlab: '#bd4b14', blueInk: '#66a3cf', orangeInk: '#e87b42',
+      vermilionDisplay: '#d4261d', lossSlab: '#a8180e',
+      win: '#82a890', loss: '#e03e33', gold: '#e5b85c', carryInk: '#7da8c4',
       bgImage: 'none',
     },
     light: D2_ARASHI_LIGHT_PALETTE,
   },
   swiss: {
-    name: '03 · 硯 Ginza Deco: Suzuri Inkstone (D2-K1)',
+    name: '03 · Deco Monolith: Carved Inkstone',
     fontDisplay: F_DECO,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -157,16 +167,17 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#0c0b0a', panel: '#1d1916', plaque: '#12100e', panelHover: '#26211d', modal: '#1d1916',
       line: '#3d352e', line2: '#2b2520', outline: '#b5a692', frieze: '#cfc2b0',
-      ink: '#ede6d8', strong: '#fbf8f3', onAccent: '#12100e', onSlab: '#12100e', ink2: '#bfb5a2', ink3: '#a69b88',
+      ink: '#ede6d8', strong: '#fbf8f3', onAccent: '#12100e', onSlab: '#fbf8f3', ink2: '#bfb5a2', ink3: '#a69b88',
       muted: '#8f8270', muted2: '#736859', faint: '#574e42',
-      blueSlab: '#dfd7c8', orangeSlab: '#b81d13', blueInk: '#ede6d8', orangeInk: '#d9382e', vermilionDisplay: '#d4261d',
-      win: '#82a890', loss: '#d9382e', gold: '#deb052', carryInk: '#7da8c4',
+      blueSlab: '#225070', orangeSlab: '#ba501c', blueInk: '#72aacf', orangeInk: '#e3804b',
+      vermilionDisplay: '#d4261d', lossSlab: '#b81d13',
+      win: '#82a890', loss: '#dc3c32', gold: '#deb052', carryInk: '#7da8c4',
       bgImage: 'none',
     },
     light: D2_ARASHI_LIGHT_PALETTE,
   },
   arashi: {
-    name: '04 · 嵐 Ginza Deco: Arashi Washi & Sumi (D2 Light)',
+    name: '04 · Deco Monolith: Warm Parchment (Light)',
     fontDisplay: F_DECO,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -178,7 +189,7 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     light: D2_ARASHI_LIGHT_PALETTE,
   },
   arena: {
-    name: 'Glassmorphic Arena (Translucent Frosted HUD)',
+    name: '05 · Glassmorphic Arena (Translucent Frosted HUD)',
     fontDisplay: F_GROT,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -189,26 +200,26 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#070913', panel: 'rgba(19, 25, 43, 0.78)', panelHover: 'rgba(28, 37, 62, 0.88)', modal: '#111626',
       line: 'rgba(148, 163, 184, 0.2)', line2: 'rgba(148, 163, 184, 0.1)', outline: 'rgba(148, 163, 184, 0.35)',
-      ink: '#f8fafc', strong: '#ffffff', onAccent: '#070913', onSlab: '#070913', ink2: '#e2e8f0', ink3: '#cbd5e1',
+      ink: '#f8fafc', strong: '#ffffff', onAccent: '#070913', onSlab: '#ffffff', ink2: '#e2e8f0', ink3: '#cbd5e1',
       muted: '#94a3b8', muted2: '#78879c', faint: '#566378',
-      blueSlab: '#38bdf8', orangeSlab: '#fb7185', blueInk: '#38bdf8', orangeInk: '#fb7185',
-      win: '#34d399', loss: '#f43f5e',
+      blueSlab: '#0284c7', orangeSlab: '#ea580c', blueInk: '#38bdf8', orangeInk: '#fb923c',
+      lossSlab: '#be123c', win: '#34d399', loss: '#f43f5e',
       bgImage:
-        'radial-gradient(circle at 12% 18%, rgba(56, 189, 248, 0.16), transparent 40%), radial-gradient(circle at 88% 15%, rgba(251, 113, 133, 0.14), transparent 40%)',
+        'radial-gradient(circle at 12% 18%, rgba(56, 189, 248, 0.16), transparent 40%), radial-gradient(circle at 88% 15%, rgba(234, 88, 12, 0.14), transparent 40%)',
     },
     light: {
       page: '#eef2ff', panel: 'rgba(255, 255, 255, 0.82)', panelHover: 'rgba(255, 255, 255, 0.96)', modal: '#ffffff',
       line: 'rgba(99, 102, 241, 0.2)', line2: 'rgba(99, 102, 241, 0.1)', outline: 'rgba(99, 102, 241, 0.38)',
       ink: '#0f172a', strong: '#020617', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#1e293b', ink3: '#334155',
       muted: '#475569', muted2: '#64748b', faint: '#94a3b8',
-      blueSlab: '#0284c7', orangeSlab: '#e11d48', blueInk: '#0369a1', orangeInk: '#be123c',
-      win: '#059669', loss: '#dc2626',
+      blueSlab: '#0284c7', orangeSlab: '#ea580c', blueInk: '#0369a1', orangeInk: '#c2410c',
+      lossSlab: '#b91c1c', win: '#059669', loss: '#dc2626',
       bgImage:
-        'radial-gradient(circle at 12% 18%, rgba(2, 132, 199, 0.12), transparent 40%), radial-gradient(circle at 88% 15%, rgba(225, 29, 72, 0.10), transparent 40%)',
+        'radial-gradient(circle at 12% 18%, rgba(2, 132, 199, 0.12), transparent 40%), radial-gradient(circle at 88% 15%, rgba(234, 88, 12, 0.10), transparent 40%)',
     },
   },
   carbon: {
-    name: 'Carbon Paddock (Motorsport Crimson & Gold)',
+    name: '06 · Carbon Paddock (Motorsport Telemetry)',
     fontDisplay: F_SANS,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -221,20 +232,20 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
       line: '#222228', line2: '#18181d', outline: '#32323b',
       ink: '#fafafa', strong: '#ffffff', onAccent: '#09090b', onSlab: '#ffffff', ink2: '#e4e4e7', ink3: '#d4d4d8',
       muted: '#a1a1aa', muted2: '#82828c', faint: '#5a5a66',
-      blueSlab: '#4f46e5', orangeSlab: '#e11d48', blueInk: '#818cf8', orangeInk: '#fb7185',
-      win: '#10b981', loss: '#f43f5e', bgImage: 'none',
+      blueSlab: '#2563eb', orangeSlab: '#ea580c', blueInk: '#60a5fa', orangeInk: '#fb923c',
+      lossSlab: '#be123c', win: '#10b981', loss: '#f43f5e', bgImage: 'none',
     },
     light: {
       page: '#fafafa', panel: '#ffffff', panelHover: '#f4f4f5', modal: '#ffffff',
       line: '#e4e4e7', line2: '#f4f4f5', outline: '#d4d4d8',
       ink: '#09090b', strong: '#000000', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#18181b', ink3: '#27272a',
       muted: '#52525b', muted2: '#71717a', faint: '#a1a1aa',
-      blueSlab: '#4338ca', orangeSlab: '#be123c', blueInk: '#3730a3', orangeInk: '#9f1239',
-      win: '#047857', loss: '#be123c', bgImage: 'none',
+      blueSlab: '#1d4ed8', orangeSlab: '#ea580c', blueInk: '#1e40af', orangeInk: '#c2410c',
+      lossSlab: '#9f1239', win: '#047857', loss: '#be123c', bgImage: 'none',
     },
   },
   synthwave: {
-    name: 'Mannfield Night脉冲 (Neon Violet & Laser)',
+    name: '07 · Mannfield Night (Neon Violet & Laser)',
     fontDisplay: F_GROT,
     fontSans: F_GROT,
     fontMono: F_MONO,
@@ -245,24 +256,24 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#0d061a', panel: '#160b2b', panelHover: '#21113e', modal: '#190d30',
       line: '#331c5c', line2: '#231242', outline: '#522d91',
-      ink: '#f5f0ff', strong: '#ffffff', onAccent: '#0d061a', onSlab: '#0d061a', ink2: '#e4d4ff', ink3: '#cdb4ff',
+      ink: '#f5f0ff', strong: '#ffffff', onAccent: '#0d061a', onSlab: '#ffffff', ink2: '#e4d4ff', ink3: '#cdb4ff',
       muted: '#a78bfa', muted2: '#8b6ce0', faint: '#6546b5',
-      blueSlab: '#00f5d4', orangeSlab: '#ff2a85', blueInk: '#00f5d4', orangeInk: '#ff5ca1',
-      win: '#00f59b', loss: '#ff3366',
+      blueSlab: '#0284c7', orangeSlab: '#ea580c', blueInk: '#38bdf8', orangeInk: '#fb923c',
+      lossSlab: '#be123c', win: '#00f59b', loss: '#ff3366',
       bgImage:
-        'radial-gradient(circle at 50% 0%, rgba(255, 42, 133, 0.15), transparent 55%)',
+        'radial-gradient(circle at 50% 0%, rgba(234, 88, 12, 0.15), transparent 55%)',
     },
     light: {
       page: '#f8f5ff', panel: '#ffffff', panelHover: '#f3edff', modal: '#ffffff',
       line: '#dfd2fc', line2: '#efe8ff', outline: '#c4abfa',
       ink: '#1e0b3b', strong: '#0d031c', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#2e1459', ink3: '#43207a',
       muted: '#623ca1', muted2: '#7c57ba', faint: '#a688db',
-      blueSlab: '#0891b2', orangeSlab: '#db2777', blueInk: '#0e7490', orangeInk: '#be185d',
-      win: '#059669', loss: '#e11d48', bgImage: 'none',
+      blueSlab: '#0284c7', orangeSlab: '#ea580c', blueInk: '#0369a1', orangeInk: '#c2410c',
+      lossSlab: '#b91c1c', win: '#059669', loss: '#e11d48', bgImage: 'none',
     },
   },
   editorial: {
-    name: 'Editorial Gazette (Fraunces Serif & Warm Press)',
+    name: '08 · Editorial Gazette (Fraunces Serif & Warm Press)',
     fontDisplay: F_SERIF,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -275,20 +286,20 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
       line: '#332d27', line2: '#26221d', outline: '#4d443b',
       ink: '#f5efe6', strong: '#ffffff', onAccent: '#141210', onSlab: '#ffffff', ink2: '#e6dec3', ink3: '#d4c8be',
       muted: '#a89b8c', muted2: '#8c7f70', faint: '#695e52',
-      blueSlab: '#3b82f6', orangeSlab: '#d97706', blueInk: '#60a5fa', orangeInk: '#fbbf24',
-      win: '#34d399', loss: '#f87171', bgImage: 'none',
+      blueSlab: '#2563eb', orangeSlab: '#d97706', blueInk: '#60a5fa', orangeInk: '#fbbf24',
+      lossSlab: '#b91c1c', win: '#34d399', loss: '#f87171', bgImage: 'none',
     },
     light: {
       page: '#f7f3eb', panel: '#fffdf9', panelHover: '#f2ece1', modal: '#fffdf9',
       line: '#dcd3c2', line2: '#eae3d5', outline: '#b8ab96',
       ink: '#1c1814', strong: '#000000', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#332c25', ink3: '#4a4036',
       muted: '#695c4e', muted2: '#827363', faint: '#a89b8c',
-      blueSlab: '#1d4ed8', orangeSlab: '#b45309', blueInk: '#1e40af', orangeInk: '#92400e',
-      win: '#15803d', loss: '#b91c1c', bgImage: 'none',
+      blueSlab: '#1d4ed8', orangeSlab: '#c2410c', blueInk: '#1e40af', orangeInk: '#9a3412',
+      lossSlab: '#991b1b', win: '#15803d', loss: '#b91c1c', bgImage: 'none',
     },
   },
   nordic: {
-    name: 'Nordic Frost (Clean Arctic Slate & Ice)',
+    name: '09 · Nordic Frost (Clean Arctic Slate & Ice)',
     fontDisplay: F_GROT,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -299,22 +310,22 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#1e222a', panel: '#262b36', panelHover: '#2e3440', modal: '#292f3b',
       line: '#3b4252', line2: '#2e3440', outline: '#4c566a',
-      ink: '#eceff4', strong: '#ffffff', onAccent: '#1e222a', onSlab: '#1e222a', ink2: '#e5e9f0', ink3: '#d8dee9',
+      ink: '#eceff4', strong: '#ffffff', onAccent: '#1e222a', onSlab: '#ffffff', ink2: '#e5e9f0', ink3: '#d8dee9',
       muted: '#9aa5b8', muted2: '#7e8a9e', faint: '#616e88',
-      blueSlab: '#88c0d0', orangeSlab: '#d08770', blueInk: '#88c0d0', orangeInk: '#ebcb8b',
-      win: '#a3be8c', loss: '#bf616a', bgImage: 'none',
+      blueSlab: '#2b6cb0', orangeSlab: '#c05621', blueInk: '#88c0d0', orangeInk: '#ed8936',
+      lossSlab: '#9b2c2c', win: '#a3be8c', loss: '#bf616a', bgImage: 'none',
     },
     light: {
       page: '#eceff4', panel: '#ffffff', panelHover: '#e5e9f0', modal: '#ffffff',
       line: '#d8dee9', line2: '#e5e9f0', outline: '#b8c2d4',
       ink: '#2e3440', strong: '#191d24', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#3b4252', ink3: '#434c5e',
       muted: '#4c566a', muted2: '#647087', faint: '#8f9bb3',
-      blueSlab: '#5e81ac', orangeSlab: '#bf616a', blueInk: '#43648f', orangeInk: '#a8424c',
-      win: '#4f7a38', loss: '#b53845', bgImage: 'none',
+      blueSlab: '#2b6cb0', orangeSlab: '#c05621', blueInk: '#2c5282', orangeInk: '#9c4221',
+      lossSlab: '#9b2c2c', win: '#4f7a38', loss: '#b53845', bgImage: 'none',
     },
   },
   terminal: {
-    name: 'Retro CRT Phosphor (Monospace Mainframe)',
+    name: '10 · Retro CRT Phosphor (Monospace Mainframe)',
     fontDisplay: F_MONO,
     fontSans: F_MONO,
     fontMono: F_MONO,
@@ -325,10 +336,10 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#040a06', panel: '#08140c', panelHover: '#0d2114', modal: '#09170e',
       line: '#163822', line2: '#0f2617', outline: '#235c37',
-      ink: '#d1fae5', strong: '#ecfdf5', onAccent: '#040a06', onSlab: '#040a06', ink2: '#a7f3d0', ink3: '#6ee7b7',
+      ink: '#d1fae5', strong: '#ecfdf5', onAccent: '#040a06', onSlab: '#ecfdf5', ink2: '#a7f3d0', ink3: '#6ee7b7',
       muted: '#34d399', muted2: '#10b981', faint: '#047857',
-      blueSlab: '#22d3ee', orangeSlab: '#facc15', blueInk: '#22d3ee', orangeInk: '#facc15',
-      win: '#4ade80', loss: '#fb7185',
+      blueSlab: '#0369a1', orangeSlab: '#c2410c', blueInk: '#38bdf8', orangeInk: '#fb923c',
+      lossSlab: '#991b1b', win: '#4ade80', loss: '#fb7185',
       bgImage: 'repeating-linear-gradient(0deg, rgba(16, 185, 129, 0.03) 0px, rgba(16, 185, 129, 0.03) 1px, transparent 1px, transparent 3px)',
     },
     light: {
@@ -336,12 +347,12 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
       line: '#a7cbb6', line2: '#cce3d5', outline: '#6ca384',
       ink: '#062413', strong: '#021208', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#0c381f', ink3: '#144d2c',
       muted: '#23663f', muted2: '#357d52', faint: '#6ca384',
-      blueSlab: '#0284c7', orangeSlab: '#d97706', blueInk: '#0369a1', orangeInk: '#b45309',
-      win: '#047857', loss: '#be123c', bgImage: 'none',
+      blueSlab: '#0284c7', orangeSlab: '#ea580c', blueInk: '#0369a1', orangeInk: '#c2410c',
+      lossSlab: '#991b1b', win: '#047857', loss: '#be123c', bgImage: 'none',
     },
   },
   solar: {
-    name: 'Utopia Daylight (Warm Sand, Teal & Terracotta)',
+    name: '11 · Utopia Daylight (Warm Sand, Blue & Terracotta)',
     fontDisplay: F_COND,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -352,22 +363,22 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#0f1416', panel: '#171f22', panelHover: '#1f2a2e', modal: '#192226',
       line: '#2a383d', line2: '#1e282b', outline: '#3d5159',
-      ink: '#f4f1ea', strong: '#ffffff', onAccent: '#0f1416', onSlab: '#0f1416', ink2: '#e2ddd2', ink3: '#ccc5b8',
+      ink: '#f4f1ea', strong: '#ffffff', onAccent: '#0f1416', onSlab: '#ffffff', ink2: '#e2ddd2', ink3: '#ccc5b8',
       muted: '#9ca8ab', muted2: '#7e8c90', faint: '#5c696d',
-      blueSlab: '#14b8a6', orangeSlab: '#f97316', blueInk: '#2dd4bf', orangeInk: '#fb923c',
-      win: '#22c55e', loss: '#ef4444', bgImage: 'none',
+      blueSlab: '#0284c7', orangeSlab: '#ea580c', blueInk: '#38bdf8', orangeInk: '#fb923c',
+      lossSlab: '#b91c1c', win: '#22c55e', loss: '#ef4444', bgImage: 'none',
     },
     light: {
       page: '#f5efe6', panel: '#fffdf9', panelHover: '#efe7da', modal: '#fffdf9',
       line: '#dcd2c0', line2: '#ebe3d5', outline: '#bfb29b',
       ink: '#182226', strong: '#0a1012', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#29383d', ink3: '#3d4f57',
       muted: '#596c73', muted2: '#73868c', faint: '#9ba9ad',
-      blueSlab: '#0d9488', orangeSlab: '#ea580c', blueInk: '#0f766e', orangeInk: '#c2410c',
-      win: '#15803d', loss: '#dc2626', bgImage: 'none',
+      blueSlab: '#0369a1', orangeSlab: '#ea580c', blueInk: '#075985', orangeInk: '#c2410c',
+      lossSlab: '#991b1b', win: '#15803d', loss: '#dc2626', bgImage: 'none',
     },
   },
   industrial: {
-    name: 'Cobalt Blueprint (CAD Engineering Grid)',
+    name: '12 · Cobalt Blueprint (CAD Engineering Grid)',
     fontDisplay: F_COND,
     fontSans: F_MONO,
     fontMono: F_MONO,
@@ -378,10 +389,10 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#091936', panel: '#0e234a', panelHover: '#142f61', modal: '#102752',
       line: '#234582', line2: '#173263', outline: '#3b67b5',
-      ink: '#f0f6ff', strong: '#ffffff', onAccent: '#091936', onSlab: '#091936', ink2: '#d6e6ff', ink3: '#b3d1ff',
+      ink: '#f0f6ff', strong: '#ffffff', onAccent: '#091936', onSlab: '#ffffff', ink2: '#d6e6ff', ink3: '#b3d1ff',
       muted: '#85b2f2', muted2: '#6394db', faint: '#4272b8',
-      blueSlab: '#38bdf8', orangeSlab: '#facc15', blueInk: '#7dd3fc', orangeInk: '#fde047',
-      win: '#4ade80', loss: '#fb7185',
+      blueSlab: '#1d4ed8', orangeSlab: '#ea580c', blueInk: '#7dd3fc', orangeInk: '#fb923c',
+      lossSlab: '#be123c', win: '#4ade80', loss: '#fb7185',
       bgImage:
         'linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)',
     },
@@ -391,13 +402,13 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
       ink: '#081b42', strong: '#030d24', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#102a63', ink3: '#1d3c7d',
       muted: '#34589e', muted2: '#4d71b8', faint: '#82a2de',
       blueSlab: '#0284c7', orangeSlab: '#ea580c', blueInk: '#0369a1', orangeInk: '#c2410c',
-      win: '#059669', loss: '#e11d48',
+      lossSlab: '#b91c1c', win: '#059669', loss: '#e11d48',
       bgImage:
         'linear-gradient(rgba(8,27,66,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(8,27,66,0.05) 1px, transparent 1px)',
     },
   },
   oled: {
-    name: 'Pure OLED Pitch (Zero-Glow True Black)',
+    name: '13 · Pure OLED Pitch (Zero-Glow True Black)',
     fontDisplay: F_COND,
     fontSans: F_SANS,
     fontMono: F_MONO,
@@ -408,10 +419,10 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
     dark: {
       page: '#000000', panel: '#070709', panelHover: '#101014', modal: '#0a0a0d',
       line: '#1c1c24', line2: '#121217', outline: '#2e2e3b',
-      ink: '#ffffff', strong: '#ffffff', onAccent: '#000000', onSlab: '#000000', ink2: '#e4e4eb', ink3: '#c6c6d1',
+      ink: '#ffffff', strong: '#ffffff', onAccent: '#000000', onSlab: '#ffffff', ink2: '#e4e4eb', ink3: '#c6c6d1',
       muted: '#9898a8', muted2: '#7a7a8c', faint: '#555566',
-      blueSlab: '#3b82f6', orangeSlab: '#f97316', blueInk: '#60a5fa', orangeInk: '#fb923c',
-      win: '#22c55e', loss: '#ef4444', bgImage: 'none',
+      blueSlab: '#1d4ed8', orangeSlab: '#ea580c', blueInk: '#60a5fa', orangeInk: '#fb923c',
+      lossSlab: '#b91c1c', win: '#22c55e', loss: '#ef4444', bgImage: 'none',
     },
     light: {
       page: '#ffffff', panel: '#f8fafc', panelHover: '#f1f5f9', modal: '#ffffff',
@@ -419,7 +430,7 @@ export const THEME_STYLES: Record<ThemeStyleKey, ThemeStyleDefinition> = {
       ink: '#020617', strong: '#000000', onAccent: '#ffffff', onSlab: '#ffffff', ink2: '#0f172a', ink3: '#1e293b',
       muted: '#475569', muted2: '#64748b', faint: '#94a3b8',
       blueSlab: '#1d4ed8', orangeSlab: '#ea580c', blueInk: '#1e40af', orangeInk: '#c2410c',
-      win: '#15803d', loss: '#b91c1c', bgImage: 'none',
+      lossSlab: '#991b1b', win: '#15803d', loss: '#b91c1c', bgImage: 'none',
     },
   },
 };
@@ -470,6 +481,10 @@ export interface DashboardContextValue {
   pinnedPlayerIds: string[];
   togglePinPlayer: (playerId: string) => void;
   isPlayerPinned: (playerId: string) => boolean;
+  isDevBuild: boolean;
+  appVersion: string;
+  previewMode: boolean;
+  setPreviewMode: (enabled: boolean) => void;
 }
 
 const DEFAULT_CUSTOM_FROM = '2026-10-01';
@@ -574,6 +589,7 @@ function applyThemeToDOM(styleKey: ThemeStyleKey, mode: ColorMode) {
   r.setProperty('--t-blue-ink', p.blueInk);
   r.setProperty('--t-orange-ink', p.orangeInk);
   r.setProperty('--t-vermilion-display', p.vermilionDisplay || p.orangeSlab);
+  r.setProperty('--t-loss-slab', p.lossSlab || p.loss);
   r.setProperty('--t-win', p.win);
   r.setProperty('--t-loss', p.loss);
   r.setProperty('--t-gold', p.gold || (mode === 'dark' ? '#deb052' : '#8c5604'));
@@ -630,11 +646,20 @@ const DEFAULT_CONTEXT: DashboardContextValue = {
   pinnedPlayerIds: [],
   togglePinPlayer: () => {},
   isPlayerPinned: () => false,
+  isDevBuild: false,
+  appVersion: '2.0.0',
+  previewMode: false,
+  setPreviewMode: () => {},
 };
 
 const DashboardContext = createContext<DashboardContextValue>(DEFAULT_CONTEXT);
 
 export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const isDevBuild = useMemo(() => isPreviewBuildAllowed(), []);
+  const appVersion = useMemo(() => getAppVersion(), []);
+
+  const [previewMode, setPreviewModeState] = useState<boolean>(() => isDemoMode());
+
   const [themeStyle, setThemeStyleState] = useState<ThemeStyleKey>(() => {
     const saved = safeStorageGet('rlsync_theme_style') as ThemeStyleKey | null;
     return saved && THEME_STYLES[saved] ? saved : 'broadcast';
@@ -657,7 +682,9 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [showCustomCalendar, setShowCustomCalendar] = useState<boolean>(false);
 
   const [replayLimitPreview, setReplayLimitPreviewState] = useState<ReplayLimitPreviewState>('auto');
-  const [replayBannerDismissed, setReplayBannerDismissed] = useState<boolean>(false);
+  const [replayBannerDismissed, setReplayBannerDismissedState] = useState<boolean>(() => {
+    return safeStorageGet('rlsync_replay_banner_dismissed') === 'true';
+  });
   const [liveModeOverride, setLiveModeOverride] = useState<'auto' | 'match' | 'idle'>('auto');
   const [showLiveHistData, setShowLiveHistData] = useState<boolean>(true);
 
@@ -738,9 +765,29 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     [customFrom]
   );
 
-  const setReplayLimitPreview = useCallback((state: ReplayLimitPreviewState) => {
-    setReplayLimitPreviewState(state);
-    setReplayBannerDismissed(false);
+  const setReplayBannerDismissed = useCallback((dismissed: boolean) => {
+    setReplayBannerDismissedState(dismissed);
+    safeStorageSet('rlsync_replay_banner_dismissed', dismissed ? 'true' : 'false');
+  }, []);
+
+  const setReplayLimitPreview = useCallback(
+    (state: ReplayLimitPreviewState) => {
+      setReplayLimitPreviewState(state);
+      if (state !== 'auto') {
+        setReplayBannerDismissed(false);
+      }
+    },
+    [setReplayBannerDismissed]
+  );
+
+  const setPreviewMode = useCallback((enabled: boolean) => {
+    const next = Boolean(enabled && isPreviewBuildAllowed());
+    setPreviewModeEnabled(next);
+    setPreviewModeState(next);
+    if (!next) {
+      setLiveModeOverride('auto');
+      setReplayLimitPreviewState('auto');
+    }
   }, []);
 
   const togglePinPlayer = useCallback((playerId: string) => {
@@ -810,11 +857,16 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       pinnedPlayerIds,
       togglePinPlayer,
       isPlayerPinned,
+      isDevBuild,
+      appVersion,
+      previewMode,
+      setPreviewMode,
     }),
     [
       themeStyle,
       colorMode,
       setTheme,
+      fontScale,
       fontScale,
       setFontScale,
       statMode,
@@ -831,11 +883,16 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       replayLimitPreview,
       setReplayLimitPreview,
       replayBannerDismissed,
+      setReplayBannerDismissed,
       liveModeOverride,
       showLiveHistData,
       pinnedPlayerIds,
       togglePinPlayer,
       isPlayerPinned,
+      isDevBuild,
+      appVersion,
+      previewMode,
+      setPreviewMode,
     ]
   );
 

@@ -24,11 +24,11 @@ export function parityLabel(blueAvg: number | null, orangeAvg: number | null): s
   return diff > 0 ? `+${Math.round(diff)} BLUE` : `+${Math.round(-diff)} ORANGE`;
 }
 
-const ScoreTile: React.FC<{ value: number; testId: string; isRival?: boolean }> = ({ value, testId, isRival }) => (
+const ScoreTile: React.FC<{ value: number; testId: string; isOrange?: boolean }> = ({ value, testId, isOrange }) => (
   <div
     data-testid={testId}
     className={`w-[108px] shrink-0 surface-plaque border-x border-line flex items-center justify-center font-extrabold text-[68px] leading-none t-font-mono ${
-      isRival ? 'text-orange-ink' : 't-text-strong text-ink-strong'
+      isOrange ? 'text-orange-ink' : 't-text-blue text-blue-ink'
     }`}
   >
     {value}
@@ -71,13 +71,10 @@ export const Scorebug: React.FC<ScorebugProps> = ({ match, bluePlayers, orangePl
         <div className="team-split-rule" />
         <div className="flex items-stretch h-[82px] w-full justify-between">
           <div className="slab-left relative flex-1 min-w-0 t-bg-blue-slab bg-blue-slab t-on-slab flex flex-col justify-center items-end pr-6 pl-8 overflow-hidden">
-            <span aria-hidden="true" className="f-serif-jp font-black text-[64px] leading-none opacity-10 absolute left-4 select-none pointer-events-none">
-              嵐
-            </span>
             <div className="font-bold text-[26px] tracking-widest leading-none z-10 uppercase">
-              <span className="sr-only">BLUE </span>嵐 STORM
+              BLUE
             </div>
-            <div className="font-mono font-bold text-[12px] tracking-wider opacity-85 max-w-full truncate z-10 mt-1">
+            <div className="font-mono font-bold text-[12px] tracking-wider opacity-90 max-w-full truncate z-10 mt-1">
               {sub(blueAvg, 0)}
             </div>
           </div>
@@ -93,13 +90,10 @@ export const Scorebug: React.FC<ScorebugProps> = ({ match, bluePlayers, orangePl
               </div>
             )}
           </div>
-          <ScoreTile value={goals(orangePlayers)} testId="score-orange" isRival />
+          <ScoreTile value={goals(orangePlayers)} testId="score-orange" isOrange />
           <div className="slab-right relative flex-1 min-w-0 t-bg-orange-slab bg-orange-slab text-white flex flex-col justify-center items-start pl-6 pr-8 overflow-hidden">
-            <span aria-hidden="true" className="f-serif-jp font-black text-[64px] leading-none opacity-15 absolute right-4 select-none pointer-events-none">
-              影
-            </span>
             <div className="font-bold text-[26px] tracking-widest leading-none z-10 uppercase">
-              <span className="sr-only">ORANGE </span>影 RIVAL
+              ORANGE
             </div>
             <div className="font-mono font-bold text-[12px] tracking-wider opacity-90 max-w-full truncate z-10 mt-1">
               {sub(orangeAvg, 1)}
