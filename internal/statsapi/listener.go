@@ -123,8 +123,9 @@ func (l *Listener) Start(ctx context.Context) error {
 	defer func() {
 		l.mu.Lock()
 		l.running = false
-		l.setConnected(false)
+		l.connected = false
 		l.mu.Unlock()
+		l.tracker.SetGameConnected(false)
 	}()
 
 	l.logger.Info("starting Rocket League Stats API listener",
@@ -158,8 +159,18 @@ func (l *Listener) Start(ctx context.Context) error {
 
 		select {
 		case <-runCtx.Done():
+			l.logger.Info("Stats API listener stopping due to context cancellation")
 			return nil
-		case <-time.After(l.cfg.ReconnectDelay):
+		default:
+		}
+
+		retryTimer := time.NewTimer(l.cfg.ReconnectDelay)
+		select {
+		case <-runCtx.Done():
+			retryTimer.Stop()
+			l.logger.Info("Stats API listener stopping due to context cancellation")
+			return nil
+		case <-retryTimer.C:
 		}
 	}
 }
@@ -210,7 +221,19 @@ func (l *Listener) runWebSocket(ctx context.Context) error {
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
 	}
-	defer conn.Close()
+	connDone := make(chan struct{})
+	defer func() {
+		close(connDone)
+		_ = conn.Close()
+	}()
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.SetReadDeadline(time.Now())
+			_ = conn.Close()
+		case <-connDone:
+		}
+	}()
 
 	l.setConnected(true)
 	l.logger.Info("connected to Rocket League Stats API via WebSocket", slog.String("url", u.String()))
@@ -224,6 +247,9 @@ func (l *Listener) runWebSocket(ctx context.Context) error {
 
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return err
 		}
 
@@ -237,7 +263,19 @@ func (l *Listener) runTCP(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	connDone := make(chan struct{})
+	defer func() {
+		close(connDone)
+		_ = conn.Close()
+	}()
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.SetReadDeadline(time.Now())
+			_ = conn.Close()
+		case <-connDone:
+		}
+	}()
 
 	l.setConnected(true)
 	l.logger.Info("connected to Rocket League Stats API via TCP", slog.String("address", l.cfg.Address))
@@ -255,6 +293,9 @@ func (l *Listener) runTCP(ctx context.Context) error {
 			l.handleRawMessage(ctx, line)
 		}
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if errors.Is(err, io.EOF) {
 				return errors.New("TCP server closed connection")
 			}

@@ -1716,4 +1716,110 @@ func TestDaemon_ShutdownWithActiveSSEClient(t *testing.T) {
 	}
 }
 
+func TestDaemon_StatsListenerConnectedIdle_DrainsImmediatelyOnShutdown(t *testing.T) {
+	// Start an idle TCP listener simulating Rocket League Stats API connected with zero games played
+	statsLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start mock stats TCP server: %v", err)
+	}
+	defer statsLn.Close()
+
+	acceptedCh := make(chan net.Conn, 1)
+	go func() {
+		conn, acceptErr := statsLn.Accept()
+		if acceptErr == nil {
+			acceptedCh <- conn
+		}
+	}()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free HTTP port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	cfg := makeTestConfig(10*time.Second, false)
+	cfg.Web.Enabled = true
+	cfg.Web.Host = "127.0.0.1"
+	cfg.Web.Port = port
+	cfg.StatsAPI.Enabled = true
+	cfg.StatsAPI.Address = statsLn.Addr().String()
+	cfg.StatsAPI.Protocol = "tcp"
+
+	var logBuf syncLogBuffer
+	logger := daemon.NewLogger(config.LoggingConfig{Level: "info", Format: "text"}, &logBuf)
+
+	store, err := storage.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	tracker, err := statsapi.NewTracker(store, statsapi.TrackerConfig{TriggerThreshold: 15}, statsapi.WithLogger(logger))
+	if err != nil {
+		t.Fatalf("failed to create stats tracker: %v", err)
+	}
+	listener, err := statsapi.NewListener(statsapi.ListenerConfig{
+		Address:  cfg.StatsAPI.Address,
+		Protocol: "tcp",
+	}, tracker, logger)
+	if err != nil {
+		t.Fatalf("failed to create stats listener: %v", err)
+	}
+
+	d, err := daemon.New(
+		newMockSyncer(),
+		cfg,
+		daemon.WithLogger(logger),
+		daemon.WithStateStore(store),
+		daemon.WithStatsTracker(tracker),
+		daemon.WithStatsListener(listener),
+	)
+	if err != nil {
+		t.Fatalf("failed to create daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- d.Start(ctx)
+	}()
+
+	// Wait for Stats API listener to connect and enter blocking read with zero messages sent
+	var serverConn net.Conn
+	select {
+	case serverConn = <-acceptedCh:
+		defer serverConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for statsListener to connect to idle Stats API server")
+	}
+
+	// Wait for listener.IsConnected() to be true
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) && !listener.IsConnected() {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Cancel context (simulating Ctrl+C while connected with no games played)
+	shutdownStart := time.Now()
+	cancel()
+
+	select {
+	case err := <-doneCh:
+		if err != nil {
+			t.Fatalf("daemon.Start returned error on shutdown: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("daemon hung on awaiting in-flight drain when Stats API listener was idle")
+	}
+
+	if elapsed := time.Since(shutdownStart); elapsed >= 1*time.Second {
+		t.Errorf("expected immediate drain (<1s), took %v", elapsed)
+	}
+}
+
+
 

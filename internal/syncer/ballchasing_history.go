@@ -191,7 +191,7 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			}
 			if existingMatch != nil &&
 				existingMatch.BallchasingID != "" &&
-				(existingMatch.BlueScore > 0 || existingMatch.OrangeScore > 0) &&
+				(existingMatch.BlueScore > 0 || existingMatch.OrangeScore > 0 || existingMatch.StatsSyncStatus == storage.StatsSyncSynced) &&
 				strings.Contains(existingMatch.ReplayStatsJSON, `"boost":`) {
 				syncedMatches++
 				b.mu.Lock()
@@ -220,6 +220,12 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 			// Fetch full replay detail individually from Ballchasing to obtain MatchGUID and full rosters
 			detail, err := b.client.GetReplay(ctx, replayID)
 			if err != nil {
+				if ctx.Err() != nil {
+					b.mu.Lock()
+					b.progress.LastError = ctx.Err().Error()
+					b.mu.Unlock()
+					return nil, ctx.Err()
+				}
 				b.logger.Warn("failed to fetch individual replay detail from Ballchasing, falling back to list item",
 					slog.String("id", replayID),
 					slog.Any("error", err),

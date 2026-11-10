@@ -2737,6 +2737,9 @@ func (s *SQLiteStore) GetPlayerMatchups(ctx context.Context, playerID string) ([
 // SyncReplayStats enriches or upserts a match record with end-of-game replay statistics,
 // keyed by MatchGUID, and populates player records and match_players.
 func (s *SQLiteStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats) error {
+	if err := ctx.Err(); err != nil {
+		return wrapContextErr(err)
+	}
 	if stats == nil || strings.TrimSpace(stats.MatchGUID) == "" {
 		return ErrInvalidGUID
 	}
@@ -3822,6 +3825,9 @@ func (s *SQLiteStore) hydrateRanksFromStats(ctx context.Context, stats *ReplayMa
 
 // SaveMatchPlayers bulk upserts player match participation records for a match.
 func (s *SQLiteStore) SaveMatchPlayers(ctx context.Context, matchGUID string, players []*MatchPlayerRecord) error {
+	if err := ctx.Err(); err != nil {
+		return wrapContextErr(err)
+	}
 	if strings.TrimSpace(matchGUID) == "" {
 		return ErrInvalidGUID
 	}
