@@ -3,27 +3,98 @@ import {
   SessionResponse,
   HistoricalMatchRecord,
   SessionMatchDetail,
+  ReplayPlayerStats,
+  PlayerSummary,
+  PlayerDetailResponse,
+  PlayerMatchDetail,
 } from '../types/api';
+import { synthesizeRoleStats } from './broadcast';
 
 /**
- * Checks whether preview / demo mode is activated via URL query parameters.
+ * Checks whether preview / demo mode is activated via URL query parameters,
+ * or when running in the local Vite dev server inside a real browser (non-happyDOM).
  * Supported query params: ?demo=true, ?test=true, ?preview=true, ?preview=idle
  */
 export function isDemoMode(): boolean {
   if (typeof window === 'undefined') return false;
   const params = new URLSearchParams(window.location.search);
-  return (
+  if (
     params.get('demo') === 'true' ||
     params.get('test') === 'true' ||
     params.get('preview') === 'true' ||
     params.get('preview') === 'idle'
-  );
+  ) {
+    return true;
+  }
+  const env = (import.meta as unknown as { env?: { DEV?: boolean; MODE?: string } }).env;
+  if (env?.DEV && env?.MODE !== 'test' && !('happyDOM' in window)) {
+    return true;
+  }
+  return false;
 }
 
 /** Demo mode with the simulated live match; ?preview=idle previews the between-matches state. */
 export function isDemoLiveMatch(): boolean {
   if (!isDemoMode()) return false;
   return new URLSearchParams(window.location.search).get('preview') !== 'idle';
+}
+
+function enrichTelemetryPlayer(p: ReplayPlayerStats): ReplayPlayerStats {
+  const seed = p.score || 350;
+  const g = p.goals || 0;
+  const sh = p.shots || 1;
+  const d = p.demos || 0;
+  return {
+    ...p,
+    mmr: p.mmr ?? (p.team === 0 ? 1495 : 1505),
+    rank_name: p.rank_name ?? 'Grand Champion I',
+    short_rank: p.short_rank ?? 'GC I · DIV II',
+    core: p.core ?? {
+      score: p.score,
+      goals: p.goals,
+      assists: p.assists,
+      saves: p.saves,
+      shots: p.shots,
+      shooting_percentage: sh > 0 ? Math.round((g / sh) * 100) : 0,
+    },
+    boost: p.boost ?? {
+      bpm: Math.round(370 + (seed % 110)),
+      bcpm: Math.round(385 + (seed % 115)),
+      avg_amount: Math.round(41 + (seed % 14)),
+      amount_collected: Math.round(2150 + seed * 1.4),
+      amount_stolen: Math.round(420 + (seed % 260)),
+      count_collected_big: Math.round(18 + (seed % 11)),
+      count_collected_small: Math.round(58 + (seed % 28)),
+      amount_overfill: Math.round(280 + (seed % 160)),
+      percent_zero_boost: Number((7.2 + (seed % 6)).toFixed(1)),
+      percent_full_boost: Number((10.5 + (seed % 5)).toFixed(1)),
+    },
+    movement: p.movement ?? {
+      avg_speed: Math.round(1465 + (seed % 120)),
+      percent_supersonic_speed: Number((16.5 + (seed % 8)).toFixed(1)),
+      percent_boost_speed: Number((38.2 + (seed % 6)).toFixed(1)),
+      percent_slow_speed: Number((45.3 - (seed % 8)).toFixed(1)),
+      percent_ground: Number((54.0 + (seed % 7)).toFixed(1)),
+      percent_low_air: Number((34.5 - (seed % 5)).toFixed(1)),
+      percent_high_air: Number((11.5 - (seed % 2)).toFixed(1)),
+      count_powerslide: Math.round(42 + (seed % 28)),
+      time_powerslide: Number((6.4 + (seed % 4) * 0.7).toFixed(1)),
+    },
+    positioning: p.positioning ?? {
+      percent_defensive_third: Number((39 + (seed % 10)).toFixed(0)),
+      percent_neutral_third: 35,
+      percent_offensive_third: Number((26 - (seed % 10)).toFixed(0)),
+      percent_behind_ball: Number((66 + (seed % 11)).toFixed(0)),
+      percent_infront_ball: Number((34 - (seed % 11)).toFixed(0)),
+      percent_most_forward: Number((34 + (seed % 9)).toFixed(0)),
+      percent_most_back: Number((33 + (seed % 8)).toFixed(0)),
+      avg_distance_to_ball: Math.round(2380 + (seed % 290)),
+    },
+    demo: p.demo ?? {
+      inflicted: d,
+      taken: p.team === 0 ? 1 : 2,
+    },
+  };
 }
 
 export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
@@ -57,6 +128,52 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
       rank_name: 'Grand Champion I',
       mmr: 1485,
     },
+    ranks: {
+      '10': {
+        playlist_id: 10,
+        playlist_name: 'Ranked Duel',
+        tier: 14,
+        division: 2,
+        rank_name: 'Champion II',
+        mmr: 1120,
+      },
+      '11': {
+        playlist_id: 11,
+        playlist_name: 'Ranked Doubles',
+        tier: 16,
+        division: 2,
+        rank_name: 'Grand Champion I',
+        mmr: 1485,
+      },
+      '13': {
+        playlist_id: 13,
+        playlist_name: 'Ranked Standard',
+        tier: 16,
+        division: 1,
+        rank_name: 'Grand Champion I',
+        mmr: 1460,
+      },
+    },
+    in_wins_stats: synthesizeRoleStats(4, 4, 0, {
+      avg_score: 518,
+      avg_goals: 2.2,
+      avg_assists: 1.3,
+      avg_saves: 2.1,
+      avg_shots: 4.9,
+      shooting_pct: 45,
+      avg_demos_inflicted: 1.8,
+      avg_boost: 49,
+    }),
+    in_losses_stats: synthesizeRoleStats(1, 0, 1, {
+      avg_score: 365,
+      avg_goals: 1.0,
+      avg_assists: 0.5,
+      avg_saves: 1.5,
+      avg_shots: 3.5,
+      shooting_pct: 29,
+      avg_demos_inflicted: 0.8,
+      avg_boost: 43,
+    }),
   },
   teammates: [
     {
@@ -82,6 +199,24 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         rank_name: 'Grand Champion I',
         mmr: 1502,
       },
+      ranks: {
+        '11': {
+          playlist_id: 11,
+          playlist_name: 'Ranked Doubles',
+          tier: 16,
+          division: 3,
+          rank_name: 'Grand Champion I',
+          mmr: 1502,
+        },
+        '13': {
+          playlist_id: 13,
+          playlist_name: 'Ranked Standard',
+          tier: 18,
+          division: 2,
+          rank_name: 'Grand Champion III',
+          mmr: 1795,
+        },
+      },
       matchup_record: {
         player_id: 'Steam|76561198000000010|0',
         playlist_id: 11,
@@ -92,6 +227,26 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         total_matches: 8,
         last_played_at: new Date(Date.now() - 3600000).toISOString(),
       },
+      with_you_stats: synthesizeRoleStats(5, 4, 1, {
+        avg_score: 446,
+        avg_goals: 1.6,
+        avg_assists: 1.2,
+        avg_saves: 1.8,
+        avg_shots: 4.1,
+        shooting_pct: 39,
+        avg_demos_inflicted: 1.4,
+        avg_boost: 48,
+      }),
+      against_you_stats: synthesizeRoleStats(3, 2, 1, {
+        avg_score: 412,
+        avg_goals: 1.3,
+        avg_assists: 0.7,
+        avg_saves: 1.7,
+        avg_shots: 3.7,
+        shooting_pct: 35,
+        avg_demos_inflicted: 1.0,
+        avg_boost: 45,
+      }),
     },
   ],
   opponents: [
@@ -113,10 +268,28 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
       current_rank: {
         playlist_id: 11,
         playlist_name: 'Ranked Doubles',
-        tier: 16,
-        division: 2,
-        rank_name: 'Grand Champion I',
-        mmr: 1478,
+        tier: 15,
+        division: 4,
+        rank_name: 'Champion III',
+        mmr: 1414,
+      },
+      ranks: {
+        '11': {
+          playlist_id: 11,
+          playlist_name: 'Ranked Doubles',
+          tier: 15,
+          division: 4,
+          rank_name: 'Champion III',
+          mmr: 1414,
+        },
+        '13': {
+          playlist_id: 13,
+          playlist_name: 'Ranked Standard',
+          tier: 19,
+          division: 1,
+          rank_name: 'Supersonic Legend',
+          mmr: 1890,
+        },
       },
       matchup_record: {
         player_id: 'Steam|76561198000000020|0',
@@ -128,6 +301,26 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         total_matches: 6,
         last_played_at: new Date(Date.now() - 7200000).toISOString(),
       },
+      with_you_stats: synthesizeRoleStats(1, 1, 0, {
+        avg_score: 410,
+        avg_goals: 1.0,
+        avg_assists: 1.0,
+        avg_saves: 2.0,
+        avg_shots: 3.0,
+        shooting_pct: 33,
+        avg_demos_inflicted: 1.0,
+        avg_boost: 46,
+      }),
+      against_you_stats: synthesizeRoleStats(5, 2, 3, {
+        avg_score: 468,
+        avg_goals: 1.8,
+        avg_assists: 1.0,
+        avg_saves: 2.2,
+        avg_shots: 4.4,
+        shooting_pct: 41,
+        avg_demos_inflicted: 1.6,
+        avg_boost: 51,
+      }),
     },
     {
       player_id: 'PS4|psn_zenith99|0',
@@ -147,10 +340,28 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
       current_rank: {
         playlist_id: 11,
         playlist_name: 'Ranked Doubles',
-        tier: 16,
-        division: 4,
-        rank_name: 'Grand Champion I',
-        mmr: 1515,
+        tier: 17,
+        division: 2,
+        rank_name: 'Grand Champion II',
+        mmr: 1580,
+      },
+      ranks: {
+        '11': {
+          playlist_id: 11,
+          playlist_name: 'Ranked Doubles',
+          tier: 17,
+          division: 2,
+          rank_name: 'Grand Champion II',
+          mmr: 1580,
+        },
+        '13': {
+          playlist_id: 13,
+          playlist_name: 'Ranked Standard',
+          tier: 17,
+          division: 1,
+          rank_name: 'Grand Champion II',
+          mmr: 1595,
+        },
       },
       matchup_record: {
         player_id: 'PS4|psn_zenith99|0',
@@ -162,6 +373,17 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         total_matches: 2,
         last_played_at: new Date(Date.now() - 86400000).toISOString(),
       },
+      with_you_stats: synthesizeRoleStats(0, 0, 0),
+      against_you_stats: synthesizeRoleStats(2, 1, 1, {
+        avg_score: 492,
+        avg_goals: 2.0,
+        avg_assists: 1.0,
+        avg_saves: 2.5,
+        avg_shots: 4.5,
+        shooting_pct: 44,
+        avg_demos_inflicted: 2.0,
+        avg_boost: 52,
+      }),
     },
   ],
   spectators: [],
@@ -344,6 +566,52 @@ export const SAMPLE_SESSION_RESPONSE: SessionResponse = {
       mmr_delta: 11,
     },
   },
+  most_played_playlist: {
+    id: 11,
+    name: 'Ranked Doubles',
+    net_mmr: 29,
+    wins: 3,
+    losses: 1,
+    matches_count: 4,
+  },
+  for_stats: synthesizeRoleStats(5, 4, 1, {
+    avg_score: 486,
+    avg_goals: 1.9,
+    avg_assists: 1.1,
+    avg_saves: 2.0,
+    avg_shots: 4.5,
+    shooting_pct: 42,
+    avg_demos_inflicted: 1.6,
+    avg_bpm: 432,
+    avg_boost: 48,
+    avg_supersonic_pct: 19.4,
+  }),
+  against_stats: synthesizeRoleStats(5, 1, 4, {
+    avg_score: 382,
+    avg_goals: 1.2,
+    avg_assists: 0.7,
+    avg_saves: 1.7,
+    avg_shots: 3.6,
+    shooting_pct: 33,
+    avg_demos_inflicted: 1.1,
+    avg_bpm: 398,
+    avg_boost: 44,
+    avg_supersonic_pct: 16.8,
+  }),
+  stats_api_ready: true,
+  rank_api_ready: true,
+  mmr_poller_state: 'READY',
+  game_connected: true,
+  pending_count: 5,
+  trigger_threshold: 15,
+  force_sync_on_trigger: false,
+  enable_toast: true,
+  auto_sync_on_exit: true,
+  max_hosted_replays: 20,
+  replay_count: 142,
+  replay_limit: 250,
+  replay_usage_pct: 56.8,
+  replay_limit_status: 'ok',
   matches: SAMPLE_MATCHES,
   active_match: SAMPLE_CURRENT_MATCH,
 };
@@ -380,10 +648,10 @@ export const SAMPLE_HISTORICAL_MATCHES: HistoricalMatchRecord[] = [
       ballchasing_id: 'bc-demo-001',
       ballchasing_url: 'https://ballchasing.com/replay/bc-demo-001',
       players: [
-        { name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 550, goals: 2, assists: 1, saves: 3, shots: 5, demos: 1 },
-        { name: 'AeroPulse', platform: 'Steam', online_id: 'p2', team: 0, score: 410, goals: 2, assists: 1, saves: 2, shots: 4, demos: 0 },
-        { name: 'VortexRL', platform: 'Steam', online_id: 'p3', team: 1, score: 380, goals: 1, assists: 1, saves: 3, shots: 4, demos: 2 },
-        { name: 'Zenith_99', platform: 'PlayStation', online_id: 'p4', team: 1, score: 310, goals: 1, assists: 0, saves: 1, shots: 3, demos: 0 },
+        enrichTelemetryPlayer({ name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 550, goals: 2, assists: 1, saves: 3, shots: 5, demos: 1, mmr: 1485, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV II' }),
+        enrichTelemetryPlayer({ name: 'AeroPulse', platform: 'Steam', online_id: 'p2', team: 0, score: 410, goals: 2, assists: 1, saves: 2, shots: 4, demos: 0, mmr: 1502, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV III' }),
+        enrichTelemetryPlayer({ name: 'VortexRL', platform: 'Steam', online_id: 'p3', team: 1, score: 380, goals: 1, assists: 1, saves: 3, shots: 4, demos: 2, mmr: 1478, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV II' }),
+        enrichTelemetryPlayer({ name: 'Zenith_99', platform: 'PlayStation', online_id: 'p4', team: 1, score: 310, goals: 1, assists: 0, saves: 1, shots: 3, demos: 0, mmr: 1515, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV IV' }),
       ],
     },
   },
@@ -418,12 +686,12 @@ export const SAMPLE_HISTORICAL_MATCHES: HistoricalMatchRecord[] = [
       ballchasing_id: 'bc-demo-002',
       ballchasing_url: 'https://ballchasing.com/replay/bc-demo-002',
       players: [
-        { name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 480, goals: 2, assists: 0, saves: 2, shots: 4, demos: 0 },
-        { name: 'Squishy', platform: 'Steam', online_id: 'sq', team: 0, score: 430, goals: 1, assists: 2, saves: 1, shots: 3, demos: 1 },
-        { name: 'GarrettG', platform: 'Steam', online_id: 'gg', team: 0, score: 390, goals: 0, assists: 1, saves: 3, shots: 2, demos: 0 },
-        { name: 'Jstn', platform: 'Epic', online_id: 'jstn', team: 1, score: 450, goals: 1, assists: 0, saves: 4, shots: 5, demos: 2 },
-        { name: 'Chicago', platform: 'Epic', online_id: 'chi', team: 1, score: 340, goals: 0, assists: 1, saves: 2, shots: 3, demos: 0 },
-        { name: 'Firstkiller', platform: 'Epic', online_id: 'fk', team: 1, score: 310, goals: 0, assists: 0, saves: 2, shots: 3, demos: 1 },
+        enrichTelemetryPlayer({ name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 480, goals: 2, assists: 0, saves: 2, shots: 4, demos: 0, mmr: 1460, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV I' }),
+        enrichTelemetryPlayer({ name: 'Squishy', platform: 'Steam', online_id: 'sq', team: 0, score: 430, goals: 1, assists: 2, saves: 1, shots: 3, demos: 1, mmr: 1480, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV II' }),
+        enrichTelemetryPlayer({ name: 'GarrettG', platform: 'Steam', online_id: 'gg', team: 0, score: 390, goals: 0, assists: 1, saves: 3, shots: 2, demos: 0, mmr: 1470, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV II' }),
+        enrichTelemetryPlayer({ name: 'Jstn', platform: 'Epic', online_id: 'jstn', team: 1, score: 450, goals: 1, assists: 0, saves: 4, shots: 5, demos: 2, mmr: 1490, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV III' }),
+        enrichTelemetryPlayer({ name: 'Chicago', platform: 'Epic', online_id: 'chi', team: 1, score: 340, goals: 0, assists: 1, saves: 2, shots: 3, demos: 0, mmr: 1465, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV I' }),
+        enrichTelemetryPlayer({ name: 'Firstkiller', platform: 'Epic', online_id: 'fk', team: 1, score: 310, goals: 0, assists: 0, saves: 2, shots: 3, demos: 1, mmr: 1475, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV II' }),
       ],
     },
   },
@@ -458,11 +726,203 @@ export const SAMPLE_HISTORICAL_MATCHES: HistoricalMatchRecord[] = [
       ballchasing_id: 'bc-demo-003',
       ballchasing_url: 'https://ballchasing.com/replay/bc-demo-003',
       players: [
-        { name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 510, goals: 1, assists: 1, saves: 4, shots: 6, demos: 2 },
-        { name: 'AeroPulse', platform: 'Steam', online_id: 'p2', team: 0, score: 340, goals: 1, assists: 0, saves: 2, shots: 3, demos: 0 },
-        { name: 'DanielRL', platform: 'Epic', online_id: 'dan', team: 1, score: 620, goals: 2, assists: 1, saves: 5, shots: 7, demos: 1 },
-        { name: 'BeastMode', platform: 'Steam', online_id: 'bm', team: 1, score: 440, goals: 1, assists: 2, saves: 3, shots: 4, demos: 3 },
+        enrichTelemetryPlayer({ name: 'You (Demo)', platform: 'Epic', online_id: 'demo_local_player', team: 0, score: 510, goals: 1, assists: 1, saves: 4, shots: 6, demos: 2, mmr: 1475, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV II' }),
+        enrichTelemetryPlayer({ name: 'AeroPulse', platform: 'Steam', online_id: 'p2', team: 0, score: 340, goals: 1, assists: 0, saves: 2, shots: 3, demos: 0, mmr: 1495, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV III' }),
+        enrichTelemetryPlayer({ name: 'DanielRL', platform: 'Epic', online_id: 'dan', team: 1, score: 620, goals: 2, assists: 1, saves: 5, shots: 7, demos: 1, mmr: 1530, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV IV' }),
+        enrichTelemetryPlayer({ name: 'BeastMode', platform: 'Steam', online_id: 'bm', team: 1, score: 440, goals: 1, assists: 2, saves: 3, shots: 4, demos: 3, mmr: 1510, rank_name: 'Grand Champion I', short_rank: 'GC I · DIV III' }),
       ],
     },
   },
 ];
+
+export const SAMPLE_PLAYERS: PlayerSummary[] = [
+  {
+    player_id: 'Steam|76561198000000010|0',
+    platform: 'Steam',
+    player_name: 'AeroPulse',
+    ranks_json: JSON.stringify({
+      '10': { playlist_id: 10, playlist_name: 'Ranked Duel', tier: 15, division: 2, rank_name: 'Champion III', mmr: 1245, matches_played: 34 },
+      '11': { playlist_id: 11, playlist_name: 'Ranked Doubles', tier: 16, division: 3, rank_name: 'Grand Champion I', mmr: 1502, matches_played: 142 },
+      '13': { playlist_id: 13, playlist_name: 'Ranked Standard', tier: 18, division: 2, rank_name: 'Grand Champion III', mmr: 1795, matches_played: 88 },
+    }),
+    first_seen_at: '2026-08-14T12:00:00Z',
+    last_seen_at: new Date(Date.now() - 9 * 60000).toISOString(),
+    total_wins_as_teammate: 4,
+    total_losses_as_teammate: 1,
+    total_wins_as_opponent: 2,
+    total_losses_as_opponent: 1,
+    total_matches: 8,
+    with_you_stats: synthesizeRoleStats(5, 4, 1, {
+      avg_score: 446,
+      avg_goals: 1.6,
+      avg_assists: 1.2,
+      avg_saves: 1.8,
+      avg_shots: 4.1,
+      shooting_pct: 39,
+      avg_demos_inflicted: 1.4,
+      avg_bpm: 438,
+      avg_boost: 48,
+      avg_supersonic_pct: 19,
+    }),
+    against_you_stats: synthesizeRoleStats(3, 2, 1, {
+      avg_score: 412,
+      avg_goals: 1.3,
+      avg_assists: 0.7,
+      avg_saves: 1.7,
+      avg_shots: 3.7,
+      shooting_pct: 35,
+      avg_demos_inflicted: 1.0,
+      avg_bpm: 415,
+      avg_boost: 45,
+      avg_supersonic_pct: 17,
+    }),
+  },
+  {
+    player_id: 'Steam|76561198000000020|0',
+    platform: 'Steam',
+    player_name: 'VortexRL',
+    ranks_json: JSON.stringify({
+      '10': { playlist_id: 10, playlist_name: 'Ranked Duel', tier: 16, division: 1, rank_name: 'Grand Champion I', mmr: 1310, matches_played: 45 },
+      '11': { playlist_id: 11, playlist_name: 'Ranked Doubles', tier: 15, division: 4, rank_name: 'Champion III', mmr: 1414, matches_played: 110 },
+      '13': { playlist_id: 13, playlist_name: 'Ranked Standard', tier: 19, division: 1, rank_name: 'Supersonic Legend', mmr: 1890, matches_played: 215 },
+    }),
+    first_seen_at: '2026-08-20T15:30:00Z',
+    last_seen_at: new Date(Date.now() - 18 * 60000).toISOString(),
+    total_wins_as_teammate: 1,
+    total_losses_as_teammate: 0,
+    total_wins_as_opponent: 2,
+    total_losses_as_opponent: 3,
+    total_matches: 6,
+    with_you_stats: synthesizeRoleStats(1, 1, 0, { avg_score: 410, avg_goals: 1.0, avg_assists: 1.0, avg_saves: 2.0 }),
+    against_you_stats: synthesizeRoleStats(5, 2, 3, { avg_score: 468, avg_goals: 1.8, avg_assists: 1.0, avg_saves: 2.2 }),
+  },
+  {
+    player_id: 'PS4|psn_zenith99|0',
+    platform: 'PlayStation',
+    player_name: 'Zenith_99',
+    ranks_json: JSON.stringify({
+      '11': { playlist_id: 11, playlist_name: 'Ranked Doubles', tier: 17, division: 2, rank_name: 'Grand Champion II', mmr: 1580, matches_played: 190 },
+      '13': { playlist_id: 13, playlist_name: 'Ranked Standard', tier: 17, division: 1, rank_name: 'Grand Champion II', mmr: 1595, matches_played: 95 },
+    }),
+    first_seen_at: '2026-09-02T19:00:00Z',
+    last_seen_at: new Date(Date.now() - 35 * 60000).toISOString(),
+    total_wins_as_teammate: 0,
+    total_losses_as_teammate: 0,
+    total_wins_as_opponent: 1,
+    total_losses_as_opponent: 3,
+    total_matches: 4,
+    with_you_stats: synthesizeRoleStats(0, 0, 0),
+    against_you_stats: synthesizeRoleStats(4, 1, 3, { avg_score: 492, avg_goals: 2.0, avg_assists: 1.0, avg_saves: 2.5 }),
+  },
+  {
+    player_id: 'Epic|dan_rl|0',
+    platform: 'Epic',
+    player_name: 'DanielRL',
+    ranks_json: JSON.stringify({
+      '10': { playlist_id: 10, playlist_name: 'Ranked Duel', tier: 19, division: 1, rank_name: 'Supersonic Legend', mmr: 1520, matches_played: 120 },
+      '11': { playlist_id: 11, playlist_name: 'Ranked Doubles', tier: 18, division: 4, rank_name: 'Grand Champion III', mmr: 1810, matches_played: 240 },
+      '13': { playlist_id: 13, playlist_name: 'Ranked Standard', tier: 19, division: 1, rank_name: 'Supersonic Legend', mmr: 1960, matches_played: 180 },
+    }),
+    first_seen_at: '2026-09-10T21:00:00Z',
+    last_seen_at: new Date(Date.now() - 120 * 60000).toISOString(),
+    total_wins_as_teammate: 0,
+    total_losses_as_teammate: 0,
+    total_wins_as_opponent: 0,
+    total_losses_as_opponent: 3,
+    total_matches: 3,
+    with_you_stats: synthesizeRoleStats(0, 0, 0),
+    against_you_stats: synthesizeRoleStats(3, 0, 3, { avg_score: 615, avg_goals: 2.3, avg_assists: 1.0, avg_saves: 3.7 }),
+  },
+  {
+    player_id: 'Steam|beastmode_rl|0',
+    platform: 'Steam',
+    player_name: 'BeastMode',
+    ranks_json: JSON.stringify({
+      '11': { playlist_id: 11, playlist_name: 'Ranked Doubles', tier: 17, division: 4, rank_name: 'Grand Champion II', mmr: 1645, matches_played: 155 },
+      '13': { playlist_id: 13, playlist_name: 'Ranked Standard', tier: 19, division: 1, rank_name: 'Supersonic Legend', mmr: 1915, matches_played: 170 },
+    }),
+    first_seen_at: '2026-09-12T18:00:00Z',
+    last_seen_at: new Date(Date.now() - 240 * 60000).toISOString(),
+    total_wins_as_teammate: 3,
+    total_losses_as_teammate: 1,
+    total_wins_as_opponent: 1,
+    total_losses_as_opponent: 2,
+    total_matches: 7,
+    with_you_stats: synthesizeRoleStats(4, 3, 1, { avg_score: 488, avg_goals: 1.8, avg_assists: 1.3, avg_saves: 2.1 }),
+    against_you_stats: synthesizeRoleStats(3, 1, 2, { avg_score: 455, avg_goals: 1.5, avg_assists: 1.2, avg_saves: 2.4 }),
+  },
+];
+
+export function getSamplePlayerProfile(playerId: string, playerName?: string): PlayerDetailResponse {
+  const found =
+    SAMPLE_PLAYERS.find(
+      (p) =>
+        p.player_id === playerId ||
+        p.player_name.toLowerCase() === (playerName || '').toLowerCase() ||
+        playerId.toLowerCase().includes(p.player_name.toLowerCase()),
+    ) || SAMPLE_PLAYERS[0];
+
+  return {
+    player_id: playerId || found.player_id,
+    platform: found.platform,
+    player_name: playerName || found.player_name,
+    ranks_json: found.ranks_json,
+    notes: 'High-tempo rotational player; strong backboard defense and fast 50/50 challenges.',
+    tags: ['FAST ROTATOR', 'BACKBOARD', 'HIGH BPM'],
+    first_seen_at: found.first_seen_at,
+    last_seen_at: found.last_seen_at,
+    with_you_stats: found.with_you_stats,
+    against_you_stats: found.against_you_stats,
+    matchups: [
+      {
+        player_id: playerId || found.player_id,
+        playlist_id: 11,
+        wins_as_teammate: found.total_wins_as_teammate,
+        losses_as_teammate: found.total_losses_as_teammate,
+        wins_as_opponent: found.total_wins_as_opponent,
+        losses_as_opponent: found.total_losses_as_opponent,
+        total_matches: found.total_matches,
+        last_played_at: found.last_seen_at,
+      },
+      {
+        player_id: playerId || found.player_id,
+        playlist_id: 13,
+        wins_as_teammate: 1,
+        losses_as_teammate: 0,
+        wins_as_opponent: 1,
+        losses_as_opponent: 0,
+        total_matches: 2,
+        last_played_at: found.last_seen_at,
+      },
+    ],
+  };
+}
+
+export function getSamplePlayerMatches(playerId: string, playerName?: string): PlayerMatchDetail[] {
+  const pNameLower = (playerName || 'AeroPulse').toLowerCase();
+  return SAMPLE_HISTORICAL_MATCHES.map((m, idx) => {
+    const role: 'teammate' | 'opponent' = idx % 2 === 0 ? 'teammate' : 'opponent';
+    const localResult = m.result || (m.winner_team === 0 ? 'victory' : 'defeat');
+    const pl = m.stats?.players?.find((x) => x.name?.toLowerCase() === pNameLower) || m.stats?.players?.[1];
+    return {
+      ...m,
+      result: localResult,
+      local_result: localResult,
+      role,
+      player_stats: {
+        match_guid: m.match_guid,
+        player_id: playerId,
+        team_num: role === 'teammate' ? 0 : 1,
+        is_local: false,
+        won: localResult === 'victory',
+        score: pl?.score ?? 410,
+        goals: pl?.goals ?? 2,
+        assists: pl?.assists ?? 1,
+        saves: pl?.saves ?? 2,
+        shots: pl?.shots ?? 4,
+        demos: pl?.demos ?? 1,
+      },
+    };
+  });
+}
+

@@ -288,3 +288,38 @@ func TestDistHandler_HEAD(t *testing.T) {
 		}
 	})
 }
+
+func TestDistHandler_MissingAssetsReturn404(t *testing.T) {
+	handler := web.DistHandler()
+
+	missingPaths := []string{
+		"/assets/nonexistent-hash.js",
+		"/assets/nonexistent-hash.css",
+		"/assets/missing.woff2",
+		"/assets/",
+		"/missing-script.js",
+		"/missing-style.css",
+		"/missing-icon.svg",
+	}
+
+	for _, p := range missingPaths {
+		t.Run(p, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			res := rec.Result()
+			defer res.Body.Close()
+
+			if res.StatusCode != http.StatusNotFound {
+				t.Errorf("expected status 404 for missing asset %s, got %d", p, res.StatusCode)
+			}
+			body, _ := io.ReadAll(res.Body)
+			if strings.Contains(string(body), "<div id=\"root\"></div>") {
+				t.Errorf("missing asset %s erroneously fell back to index.html", p)
+			}
+		})
+	}
+}
+

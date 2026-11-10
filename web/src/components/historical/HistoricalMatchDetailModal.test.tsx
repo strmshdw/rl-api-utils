@@ -134,7 +134,7 @@ describe('HistoricalMatchDetailModal', () => {
     expect(container.textContent).toContain('PlayerTwo');
   });
 
-  it('switches between telemetry tabs', async () => {
+  it('switches between all 5 ballchasing telemetry tabs and raw json', async () => {
     const { container } = await mount(
       <HistoricalMatchDetailModal
         match={SAMPLE_HISTORICAL_MATCH}
@@ -143,20 +143,34 @@ describe('HistoricalMatchDetailModal', () => {
       />
     );
 
-    // Click BOOST & MOVEMENT tab
-    await clickText(container, 'BOOST & MOVEMENT');
-    expect(container.textContent).toContain('BOOST TELEMETRY');
-    expect(container.textContent).toContain('AVG BOOST');
+    // Tab 1: 1. CORE & MECHANICS (default)
+    expect(container.textContent).toContain('BLUE TEAM TOTALS / AVG');
+    expect(container.textContent).toContain('ORANGE TEAM TOTALS / AVG');
 
-    // Click POSITIONING tab
-    await clickText(container, 'POSITIONING');
-    expect(container.textContent).toContain('FIELD THIRDS & SPACING');
+    // Tab 2: 2. BOOST ECONOMY & PADS
+    await clickText(container, '2. BOOST ECONOMY & PADS');
+    expect(container.textContent).toContain('BPM');
+    expect(container.textContent).toContain('AVG BST');
+    expect(container.textContent).toContain('550');
 
-    // Click DEMOLITIONS & COMBAT tab
-    await clickText(container, 'DEMOLITIONS & COMBAT');
-    expect(container.textContent).toContain('DEMOLITIONS & COMBAT');
+    // Tab 3: 3. SPEED & MOVEMENT
+    await clickText(container, '3. SPEED & MOVEMENT');
+    expect(container.textContent).toContain('AVG SPEED');
+    expect(container.textContent).toContain('SUPERSONIC');
+    expect(container.textContent).toContain('1450 uu/s');
 
-    // Click RAW JSON tab
+    // Tab 4: 4. POSITIONING & ROTATION
+    await clickText(container, '4. POSITIONING & ROTATION');
+    expect(container.textContent).toContain('DEF 1/3');
+    expect(container.textContent).toContain('BEHIND BALL');
+
+    // Tab 5: 5. TEAM HEAD-TO-HEAD
+    await clickText(container, '5. TEAM HEAD-TO-HEAD');
+    expect(container.textContent).toContain('TEAM SCORE (PTS)');
+    expect(container.textContent).toContain('TOTAL BOOST COLLECTED');
+    expect(container.textContent).toContain('DEMOLITIONS INFLICTED');
+
+    // Tab 6: RAW JSON tab
     await clickText(container, 'RAW JSON');
     expect(container.textContent).toContain('RAW TELEMETRY JSON');
     expect(container.textContent).toContain('COPY JSON');

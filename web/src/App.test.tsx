@@ -91,4 +91,120 @@ describe('App shell', () => {
     await clickText(nav(container), 'HISTORY');
     expect(container.querySelector('[data-testid="app-header"]')!.textContent).not.toContain('COLUMNS');
   });
+
+  it('supports 12 design styles, dark/light mode toggle, and anti-squint text scale toggle', async () => {
+    setHooks(null);
+    const { container } = await mount(<App />);
+
+    const lightBtn = container.querySelector<HTMLButtonElement>('#btn-color-light')!;
+    lightBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.documentElement.getAttribute('data-mode')).toBe('light');
+
+    const scaleBtn = container.querySelector<HTMLButtonElement>('#btn-scale-xl')!;
+    expect(scaleBtn.textContent).toContain('TEXT: XL (+15%)');
+    scaleBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.documentElement.style.fontSize).toBe('18.4px');
+
+    const themeSelect = container.querySelector<HTMLSelectElement>('#theme-select')!;
+    themeSelect.value = 'oled';
+    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.documentElement.getAttribute('data-style')).toBe('oled');
+    expect(document.documentElement.style.getPropertyValue('--t-on-slab')).toBe('#ffffff');
+
+    const darkBtn = container.querySelector<HTMLButtonElement>('#btn-color-dark')!;
+    darkBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.documentElement.style.getPropertyValue('--t-on-slab')).toBe('#000000');
+
+    themeSelect.value = 'arena';
+    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.documentElement.style.getPropertyValue('--t-blur')).toBe('blur(12px)');
+  });
+
+  it('prevents accidental modal light-dismiss when pointerdown starts inside the modal panel and releases on backdrop', async () => {
+    setHooks(SAMPLE_CURRENT_MATCH);
+    const { container } = await mount(<App />);
+    await clickText(container.querySelector('[data-testid="app-header"]')!, 'COLUMNS');
+    const dialog = container.querySelector('dialog')!;
+    expect(dialog).not.toBeNull();
+    const backdropWrapper = dialog.firstElementChild as HTMLElement;
+    const panel = backdropWrapper.firstElementChild as HTMLElement;
+
+    // Simulate pointerdown inside panel followed by pointerup and click on backdropWrapper
+    panel.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    backdropWrapper.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    backdropWrapper.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(container.querySelector('dialog')).not.toBeNull();
+
+    // Simulate genuine outside pointerdown + pointerup on backdropWrapper
+    backdropWrapper.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    backdropWrapper.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(container.querySelector('dialog')).toBeNull();
+  });
+
+  it('toggles AVG/G vs TOTALS, IN-MATCH vs IDLE VIEW preview, custom calendar range, and Replay Limit Banner', async () => {
+    setHooks(null);
+    const { container } = await mount(<App />);
+
+    // Toggle IN-MATCH preview when no live match is running
+    const matchBtn = container.querySelector<HTMLButtonElement>('#btn-mode-match')!;
+    matchBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(container.querySelector('[data-testid="live-match"]')).not.toBeNull();
+
+    // Toggle back to IDLE VIEW
+    const idleBtn = container.querySelector<HTMLButtonElement>('#btn-mode-idle')!;
+    idleBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(container.querySelector('[data-testid="live-idle"]')).not.toBeNull();
+
+    // Toggle AVG / G vs TOTALS
+    const totalBtn = container.querySelector<HTMLButtonElement>('#btn-stat-total')!;
+    totalBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(container.textContent).toContain('SHOWING CUMULATIVE TOTALS');
+
+    // Toggle Custom Calendar Range bar
+    const calBtn = container.querySelector<HTMLButtonElement>('#btn-cal-toggle')!;
+    calBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    const calBar = container.querySelector('#custom-calendar-bar')!;
+    expect(calBar.className).toContain('flex');
+    expect(container.querySelector('#custom-date-from')).not.toBeNull();
+    expect(container.querySelector('#custom-date-to')).not.toBeNull();
+
+    // Replay Limit Banner states (20-game hosted replay buffer guard)
+    const limitSelect = container.querySelector<HTMLSelectElement>('#limit-state-select')!;
+    limitSelect.value = 'warn';
+    limitSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    const banner = container.querySelector('#replay-limit-banner')!;
+    expect(banner.textContent).toContain('REPLAY LIMIT WARNING');
+    expect(banner.textContent).toContain('16 / 20 UNDOWNLOADED REPLAYS IN ROCKET LEAGUE QUEUE');
+
+    // Configure threshold & toggle Auto-Sync at Threshold inside banner
+    const thresholdSelect = banner.querySelector<HTMLSelectElement>('#banner-threshold-select')!;
+    thresholdSelect.value = '12';
+    thresholdSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const autoSyncBtn = banner.querySelector<HTMLButtonElement>('[data-testid="banner-autosync-toggle"]')!;
+    expect(autoSyncBtn.textContent).toContain('AUTO-SYNC AT 12G: OFF');
+    autoSyncBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(autoSyncBtn.textContent).toContain('AUTO-SYNC AT 12G: ON');
+
+    limitSelect.value = 'error';
+    limitSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(banner.textContent).toContain('REPLAY HISTORY LIMIT EXCEEDED');
+    expect(banner.textContent).toContain('20 / 20 UNDOWNLOADED REPLAYS');
+  });
 });
+

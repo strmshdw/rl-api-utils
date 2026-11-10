@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -41,8 +42,38 @@ type StatsPoller interface {
 // PlayerDetailResponse represents the composite response for GET /players/{id}.
 type PlayerDetailResponse struct {
 	*storage.PlayerRecord
-	Matchups      []*storage.PlayerMatchup      `json:"matchups"`
-	RecentMatches []*storage.PlayerMatchDetail `json:"recent_matches"`
+	EncountersCount int                             `json:"encounters_count"`
+	TeammateWins    int                             `json:"teammate_wins"`
+	TeammateLosses  int                             `json:"teammate_losses"`
+	OpponentWins    int                             `json:"opponent_wins"`
+	OpponentLosses  int                             `json:"opponent_losses"`
+	RelationshipTag string                          `json:"relationship_tag,omitempty"`
+	WithYouStats    *storage.PlayerRoleStatsSummary `json:"with_you_stats,omitempty"`
+	AgainstYouStats *storage.PlayerRoleStatsSummary `json:"against_you_stats,omitempty"`
+	Matchups        []*storage.PlayerMatchup        `json:"matchups"`
+	RecentMatches   []*storage.PlayerMatchDetail    `json:"recent_matches"`
+}
+
+// DaemonStatusResponse represents the composite payload returned by GET /status.
+type DaemonStatusResponse struct {
+	Status             string                  `json:"status"`
+	Enabled            bool                    `json:"enabled"`
+	GameConnected      bool                    `json:"game_connected"`
+	PendingCount       int                     `json:"pending_count"`
+	TriggerThreshold   int                     `json:"trigger_threshold"`
+	ForceSyncOnTrigger bool                    `json:"force_sync_on_trigger"`
+	EnableToast        bool                    `json:"enable_toast"`
+	AutoSyncOnExit     bool                    `json:"auto_sync_on_exit"`
+	MaxHostedReplays   int                     `json:"max_hosted_replays"`
+	PendingMatches     []statsapi.PendingMatch `json:"pending_matches,omitempty"`
+	StatsAPIReady      bool                    `json:"stats_api_ready"`
+	RankAPIReady       bool                    `json:"rank_api_ready"`
+	MMRPollerState     string                  `json:"mmr_poller_state"`
+	MMRSyncLatencyMs   int64                   `json:"mmr_sync_latency_ms,omitempty"`
+	ReplayCount        int                     `json:"replay_count"`
+	ReplayLimit        int                     `json:"replay_limit"`
+	ReplayUsagePct     float64                 `json:"replay_usage_pct"`
+	ReplayLimitStatus  string                  `json:"replay_limit_status"`
 }
 
 // Daemon coordinates the periodic execution of the synchronization engine.
@@ -63,6 +94,8 @@ type Daemon struct {
 	manualTrigger  chan string
 
 	mu            sync.Mutex
+	ctx           context.Context
+	replayLimit   int
 	inFlight      bool
 	wg            sync.WaitGroup
 	prevConnected bool
@@ -149,10 +182,16 @@ func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
 		return nil, errors.New("daemon: config cannot be nil")
 	}
 
+	replayLimit := cfg.Sync.ReplayLimit
+	if replayLimit <= 0 {
+		replayLimit = 200
+	}
+
 	d := &Daemon{
 		syncer:        s,
 		cfg:           cfg,
 		manualTrigger: make(chan string, 16),
+		replayLimit:   replayLimit,
 	}
 
 	for _, opt := range opts {
@@ -182,6 +221,11 @@ func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
 	// Wire playerTracker -> sessionTracker observer listener
 	if d.playerTracker != nil && d.sessionTracker != nil {
 		d.playerTracker.SetMatchStateListener(d.sessionTracker)
+	}
+
+	// Ensure statsTracker can trigger immediate replay syncs when force_sync_on_trigger fires
+	if d.statsTracker != nil {
+		d.statsTracker.SetSyncTrigger(d.TriggerSync)
 	}
 
 	return d, nil
@@ -254,6 +298,10 @@ func (d *Daemon) Start(ctx context.Context) error {
 	// Trap OS termination signals (SIGINT, SIGTERM) combined with incoming context.
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	d.mu.Lock()
+	d.ctx = ctx
+	d.mu.Unlock()
 
 	pollInterval := d.cfg.Sync.PollInterval.Duration()
 	if pollInterval <= 0 {
@@ -505,6 +553,15 @@ func (d *Daemon) executeCycle(ctx context.Context) error {
 		d.statsTracker.RefreshPending(ctx)
 	}
 
+	// Broadcast updated session & pending replay queue telemetry to connected SSE clients
+	if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
+		summary := d.enrichSessionTelemetry(ctx, d.sessionTracker.GetSessionSummary())
+		d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
+			Event: session.EventSessionUpdate,
+			Data:  summary,
+		})
+	}
+
 	if stats != nil {
 		d.logger.Info("sync cycle completed",
 			slog.Int("discovered", stats.DiscoveredCount),
@@ -532,7 +589,122 @@ func (d *Daemon) Handler(ctx context.Context) http.Handler {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	d.mu.Lock()
+	if d.ctx == nil {
+		d.ctx = ctx
+	}
+	d.mu.Unlock()
 	return corsMiddleware(d.setupRoutes(ctx))
+}
+
+func (d *Daemon) daemonContext() context.Context {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ctx != nil {
+		return d.ctx
+	}
+	return context.Background()
+}
+
+func (d *Daemon) getReplayLimit() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.replayLimit > 0 {
+		return d.replayLimit
+	}
+	if d.cfg != nil && d.cfg.Sync.ReplayLimit > 0 {
+		return d.cfg.Sync.ReplayLimit
+	}
+	return 200
+}
+
+func (d *Daemon) setReplayLimit(limit int) {
+	if limit <= 0 {
+		return
+	}
+	d.mu.Lock()
+	d.replayLimit = limit
+	if d.cfg != nil {
+		d.cfg.Sync.ReplayLimit = limit
+	}
+	d.mu.Unlock()
+}
+
+func (d *Daemon) buildStatusResponse(ctx context.Context) DaemonStatusResponse {
+	defaultThreshold := 15
+	defaultForceSync := false
+	defaultToast := true
+	defaultAutoExit := true
+	if d.cfg != nil {
+		if d.cfg.StatsAPI.TriggerThreshold > 0 {
+			defaultThreshold = d.cfg.StatsAPI.TriggerThreshold
+		}
+		defaultForceSync = d.cfg.StatsAPI.ForceSyncOnTrigger
+		defaultToast = d.cfg.StatsAPI.EnableToast
+		defaultAutoExit = d.cfg.StatsAPI.AutoSyncOnExit
+	}
+
+	resp := DaemonStatusResponse{
+		Status:             "running",
+		MMRPollerState:     "idle",
+		TriggerThreshold:   defaultThreshold,
+		ForceSyncOnTrigger: defaultForceSync,
+		EnableToast:        defaultToast,
+		AutoSyncOnExit:     defaultAutoExit,
+		MaxHostedReplays:   statsapi.MaxHostedReplays,
+	}
+
+	if d.statsTracker != nil {
+		st := d.statsTracker.Status()
+		resp.Enabled = st.Enabled
+		resp.GameConnected = st.GameConnected
+		resp.PendingCount = st.PendingCount
+		resp.TriggerThreshold = st.TriggerThreshold
+		resp.ForceSyncOnTrigger = st.ForceSyncOnTrigger
+		resp.EnableToast = st.EnableToast
+		if st.MaxHostedReplays > 0 {
+			resp.MaxHostedReplays = st.MaxHostedReplays
+		}
+		resp.PendingMatches = st.PendingMatches
+	}
+
+	statsReady := resp.GameConnected
+	if !statsReady && d.statsListener != nil && d.statsListener.IsConnected() {
+		statsReady = true
+	}
+	resp.StatsAPIReady = statsReady
+
+	if d.playerTracker != nil {
+		resp.RankAPIReady = d.playerTracker.IsRankAPIReady()
+		resp.MMRPollerState = d.playerTracker.MMRPollerState()
+		resp.MMRSyncLatencyMs = d.playerTracker.LastMMRSyncLatencyMs()
+	}
+
+	replayLimit := d.getReplayLimit()
+	replayCount := 0
+	if d.stateStore != nil {
+		if _, total, err := d.stateStore.ListHistoricalMatches(ctx, storage.MatchFilter{Limit: 1}); err == nil {
+			replayCount = total
+		}
+	}
+
+	usagePct := 0.0
+	if replayLimit > 0 {
+		usagePct = math.Round((float64(replayCount)/float64(replayLimit))*1000.0) / 10.0
+	}
+	limitStatus := "ok"
+	if replayLimit > 0 && (replayCount >= replayLimit || usagePct >= 100.0) {
+		limitStatus = "exceeded"
+	} else if usagePct >= 85.0 {
+		limitStatus = "warning"
+	}
+
+	resp.ReplayCount = replayCount
+	resp.ReplayLimit = replayLimit
+	resp.ReplayUsagePct = usagePct
+	resp.ReplayLimitStatus = limitStatus
+
+	return resp
 }
 
 func (d *Daemon) httpHost() string {
@@ -578,11 +750,8 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if d.statsTracker != nil {
-			_ = json.NewEncoder(w).Encode(d.statsTracker.Status())
-		} else {
-			w.Write([]byte(`{"status":"running"}`))
-		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(d.buildStatusResponse(r.Context()))
 	})
 
 	// Stats API Trigger Endpoint (Backward compatible)
@@ -621,12 +790,16 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 	mux.HandleFunc("GET /api/players/{id...}", d.handleGetPlayer)
 	mux.HandleFunc("PATCH /api/players/{id...}", d.handlePatchPlayer)
 	mux.HandleFunc("GET /api/matches", d.handleListMatches)
+	mux.HandleFunc("POST /api/matches/prune", d.handlePruneMatches)
 	mux.HandleFunc("POST /api/matches/{guid}/retry", d.handleRetryMatch)
 	mux.HandleFunc("GET /api/matches/{guid...}", d.handleGetMatch)
 	mux.HandleFunc("GET /api/historical-matches", d.handleListMatches)
 	mux.HandleFunc("GET /api/mmr-history", d.handleListMMRHistory)
 	mux.HandleFunc("POST /api/sync/ballchasing", d.handleTriggerBallchasingSync)
 	mux.HandleFunc("GET /api/sync/ballchasing/status", d.handleBallchasingSyncStatus)
+	mux.HandleFunc("GET /api/sync/config", d.handleGetSyncConfig)
+	mux.HandleFunc("POST /api/sync/config", d.handleUpdateSyncConfig)
+	mux.HandleFunc("POST /api/sync/now", d.handleManualSyncNow)
 	mux.HandleFunc("GET /api/events", d.handleEvents)
 
 	// Backward Compatible Player Tracking Aliases

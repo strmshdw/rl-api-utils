@@ -6,19 +6,35 @@ import { formatDuration } from '../../utils/formatters';
 import { TeamBoxScore } from '../common/BoxScore';
 import { COLUMN_HEADER, GhostButton, PageHeader, PrimaryButton, ResultSlab, SearchInput, Segmented } from '../common/ui';
 import { HistoricalMatchDetailModal } from './HistoricalMatchDetailModal';
-import { historyOutcome, playerNames, replayStatus, teamRows } from './historyData';
+import { historyOutcome, isLocal, playerNames, replayStatus, teamRows } from './historyData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
+import { useDashboard } from '../../context/DashboardContext';
 
 type PlaylistFilter = 'all' | 'duel' | 'doubles' | 'standard';
+type StatusFilter = 'all' | 'BALLCHASING' | 'LOCAL';
 type OutcomeFilter = 'all' | 'W' | 'L';
+type HistorySortOption =
+  | 'date-desc'
+  | 'date-asc'
+  | 'pts-desc'
+  | 'goals-desc'
+  | 'saves-desc'
+  | 'demos-desc'
+  | 'duration-desc';
 
 const PLAYLIST_OPTIONS = [
-  ['all', 'ALL'],
+  ['all', 'ALL MODES'],
   ['duel', '1V1'],
   ['doubles', '2V2'],
   ['standard', '3V3'],
 ] as const;
 const PLAYLIST_IDS: Record<PlaylistFilter, number> = { all: 0, duel: 10, doubles: 11, standard: 13 };
+
+const STATUS_OPTIONS = [
+  ['all', 'ALL STATUS'],
+  ['BALLCHASING', 'BALLCHASING'],
+  ['LOCAL', 'LOCAL'],
+] as const;
 
 const OUTCOME_OPTIONS = [
   ['all', 'ALL'],
@@ -32,6 +48,7 @@ const ROW_GRID = '72px 120px minmax(0,1.2fr) minmax(0,1fr) 90px 150px 140px';
 interface HistoryViewProps {
   /** Lower-cased online IDs of the local player, used to orient W/L and highlight "you". */
   localPlayerIds?: Set<string>;
+  onOpenFullProfile?: (playerId: string, playerName?: string) => void;
 }
 
 interface HistoryRowProps {
@@ -59,10 +76,11 @@ const HistoryRow: React.FC<HistoryRowProps> = ({
   const expandable = players.length > 0;
   const status = replayStatus(match);
   const duration = match.stats?.duration;
-  const isFailed = (match.download_status || '').toUpperCase() === 'FAILED' || (match.upload_status || '').toUpperCase() === 'FAILED';
+  const isFailed =
+    (match.download_status || '').toUpperCase() === 'FAILED' || (match.upload_status || '').toUpperCase() === 'FAILED';
 
   return (
-    <div data-testid="history-row" data-guid={match.match_guid} className="flex flex-col bg-panel">
+    <div data-testid="history-row" data-guid={match.match_guid} className="flex flex-col bg-panel t-border border border-line">
       <div
         role={expandable ? 'button' : undefined}
         tabIndex={expandable ? 0 : undefined}
@@ -84,24 +102,26 @@ const HistoryRow: React.FC<HistoryRowProps> = ({
         style={{ gridTemplateColumns: ROW_GRID }}
       >
         <ResultSlab outcome={historyOutcome(match, localIds)} className="text-[20px]" />
-        <div className="flex items-center gap-2 pl-[22px] font-extrabold text-[34px] leading-none">
+        <div className="flex items-center gap-2 pl-[22px] font-extrabold text-[34px] leading-none t-font-mono">
           <span className="text-blue-ink">{match.blue_score}</span>
           <span className="text-faint text-[24px]">–</span>
           <span className="text-orange-ink">{match.orange_score}</span>
         </div>
         <div className="flex flex-col gap-0.5 min-w-0 pr-4">
-          <span className="font-bold text-[18px] tracking-t6 truncate">{playlistLabels(match.playlist).name}</span>
-          <span className="font-medium text-[14px] tracking-t6 text-muted truncate">
+          <span className="font-bold text-lg tracking-t6 truncate">{playlistLabels(match.playlist).name}</span>
+          <span className="font-medium text-sm tracking-t6 text-muted truncate">
             {match.map_name || match.stats?.map_name || 'Unknown arena'}
           </span>
         </div>
-        <span className="font-medium text-[14px] tracking-t4 text-muted truncate pr-4">{playerNames(players, localIds) || '—'}</span>
-        <span className="text-right font-bold text-[18px] tracking-t4 text-ink-2 whitespace-nowrap">
+        <span className="font-medium text-sm tracking-t4 text-muted truncate pr-4">
+          {playerNames(players, localIds) || '—'}
+        </span>
+        <span className="text-right font-bold text-lg tracking-t4 text-ink-2 whitespace-nowrap t-font-mono">
           {duration ? formatDuration(duration) : '—'}
-          {match.stats?.overtime && <span className="text-loss text-[13px] tracking-t12"> OT</span>}
+          {match.stats?.overtime && <span className="text-loss text-sm tracking-t12"> OT</span>}
         </span>
         <div className="flex items-center justify-end gap-2 pr-2">
-          <span className={`text-right font-bold text-[14px] tracking-t10 whitespace-nowrap ${status.ink}`} title={status.title}>
+          <span className={`text-right font-bold text-sm tracking-t10 whitespace-nowrap ${status.ink}`} title={status.title}>
             {status.href ? (
               <a
                 href={status.href}
@@ -124,32 +144,42 @@ const HistoryRow: React.FC<HistoryRowProps> = ({
               title="Retry replay download & upload"
               disabled={isRetrying}
               onClick={(e) => onRetry?.(match.match_guid, e)}
-              className="px-2 py-0.5 bg-loss/15 hover:bg-loss/25 text-loss border border-loss/30 text-[11px] font-bold rounded tracking-wider uppercase transition-colors disabled:opacity-50"
+              className="px-2 py-0.5 bg-loss/15 hover:bg-loss/25 text-loss border border-loss/30 text-sm font-bold rounded tracking-wider uppercase transition-colors disabled:opacity-50"
             >
               {isRetrying ? '…' : 'RETRY'}
             </button>
           )}
         </div>
-        <span className="text-right pr-[22px] font-semibold text-[14px] tracking-t8 text-muted whitespace-nowrap">
+        <span className="text-right pr-[22px] font-semibold text-sm tracking-t8 text-muted whitespace-nowrap">
           {formatAgo(match.stats?.date || match.created_at)}
         </span>
       </div>
 
       {open && expandable && (
-        <div data-testid="history-box-score" className="border-t border-page">
-          <div className="grid grid-cols-2 gap-[2px]">
+        <div data-testid="history-box-score" className="border-t border-page p-4 t-bg-page bg-page flex flex-col gap-3">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-[2px]">
             {[0, 1].map((team) => (
               <TeamBoxScore
                 key={team}
                 team={team as 0 | 1}
                 label={team === 0 ? 'BLUE' : 'ORANGE'}
                 rows={teamRows(players, team, localIds)}
+                withRanks
                 onPlayerClick={onPlayerClick}
               />
             ))}
           </div>
-          <div className="flex justify-end px-[22px] pb-4">
-            <GhostButton onClick={onDetail}>FULL DETAIL →</GhostButton>
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <span className="text-sm font-extrabold text-muted">
+              CLICK ANY PLAYER IN BOX SCORE FOR QUICK MODAL PROFILE (MMR SHOWN BEFORE RANK/DIV)
+            </span>
+            <button
+              type="button"
+              onClick={onDetail}
+              className="px-4 py-2 t-bg-blue-slab bg-blue-slab text-white font-extrabold text-sm uppercase tracking-wider hover:opacity-90 t-radius cursor-pointer"
+            >
+              FULL 5-TAB BALLCHASING TELEMETRY →
+            </button>
           </div>
         </div>
       )}
@@ -159,7 +189,8 @@ const HistoryRow: React.FC<HistoryRowProps> = ({
 
 const EMPTY_IDS = new Set<string>();
 
-export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY_IDS }) => {
+export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY_IDS, onOpenFullProfile }) => {
+  const { dateRangeQueryParams } = useDashboard();
   const [matches, setMatches] = useState<HistoricalMatchRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [serverLocalIds, setServerLocalIds] = useState<string[]>([]);
@@ -170,7 +201,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [playlistFilter, setPlaylistFilter] = useState<PlaylistFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
+  const [sortOption, setSortOption] = useState<HistorySortOption>('date-desc');
   const [openMatchGuid, setOpenMatchGuid] = useState<string | null>(null);
   const [detailMatch, setDetailMatch] = useState<HistoricalMatchRecord | null>(null);
 
@@ -211,9 +244,29 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
     try {
       const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) });
       if (playlistId > 0) params.set('playlist', String(playlistId));
-      if (debouncedQuery) params.set('query', debouncedQuery);
+      if (debouncedQuery) {
+        params.set('query', debouncedQuery);
+        params.set('search', debouncedQuery);
+      }
       if (outcomeFilter === 'W') params.set('result', 'victory');
       if (outcomeFilter === 'L') params.set('result', 'defeat');
+      if (statusFilter === 'BALLCHASING') params.set('status', 'ballchasing');
+      if (statusFilter === 'LOCAL') params.set('status', 'local');
+      if (sortOption !== 'date-desc') {
+        const [field, dir] = sortOption.split('-');
+        const mapField: Record<string, string> = {
+          date: 'date',
+          pts: 'score',
+          goals: 'goals',
+          saves: 'saves',
+          demos: 'demos',
+          duration: 'duration',
+        };
+        params.set('sort_by', mapField[field] || 'date');
+        params.set('sort_dir', dir || 'desc');
+      }
+      if (dateRangeQueryParams.from) params.set('from', dateRangeQueryParams.from);
+      if (dateRangeQueryParams.to) params.set('to', dateRangeQueryParams.to);
 
       const res = await fetch(`/api/matches?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -240,13 +293,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
     } finally {
       setIsLoading(false);
     }
-  }, [page, playlistFilter, debouncedQuery, outcomeFilter]);
+  }, [
+    page,
+    playlistFilter,
+    debouncedQuery,
+    outcomeFilter,
+    statusFilter,
+    sortOption,
+    dateRangeQueryParams.from,
+    dateRangeQueryParams.to,
+  ]);
 
   useEffect(() => {
     fetchMatches();
   }, [fetchMatches]);
 
-  // Pick up a sync that is already running (e.g. started from another tab).
   useEffect(() => {
     fetch('/api/sync/ballchasing/status')
       .then((res) => (res.ok ? res.json() : null))
@@ -332,12 +393,42 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
   };
 
   const rows = useMemo(() => {
-    if (outcomeFilter === 'all') return matches;
-    return matches.filter((m) => historyOutcome(m, effectiveLocalIds) === outcomeFilter);
-  }, [matches, outcomeFilter, effectiveLocalIds]);
+    const filtered = matches.filter((m) => {
+      if (outcomeFilter !== 'all' && historyOutcome(m, effectiveLocalIds) !== outcomeFilter) return false;
+      if (statusFilter !== 'all') {
+        const st = replayStatus(m);
+        const isBc = st.label.startsWith('BALLCHASING');
+        if (statusFilter === 'BALLCHASING' && !isBc) return false;
+        if (statusFilter === 'LOCAL' && isBc) return false;
+      }
+      return true;
+    });
+
+    if (sortOption === 'date-desc') return filtered;
+
+    const localStat = (m: HistoricalMatchRecord, k: 'score' | 'goals' | 'saves' | 'demos') => {
+      const p = m.stats?.players?.find((pl) => isLocal(pl, effectiveLocalIds)) || m.stats?.players?.[0];
+      return p ? Number(p[k]) || 0 : 0;
+    };
+
+    return [...filtered].sort((a, b) => {
+      if (sortOption === 'date-asc') {
+        const tA = new Date(a.stats?.date || a.created_at).getTime() || a.record_start_timestamp;
+        const tB = new Date(b.stats?.date || b.created_at).getTime() || b.record_start_timestamp;
+        return tA - tB;
+      }
+      if (sortOption === 'pts-desc') return localStat(b, 'score') - localStat(a, 'score');
+      if (sortOption === 'goals-desc') return localStat(b, 'goals') - localStat(a, 'goals');
+      if (sortOption === 'saves-desc') return localStat(b, 'saves') - localStat(a, 'saves');
+      if (sortOption === 'demos-desc') return localStat(b, 'demos') - localStat(a, 'demos');
+      if (sortOption === 'duration-desc') return (b.stats?.duration || 0) - (a.stats?.duration || 0);
+      return 0;
+    });
+  }, [matches, outcomeFilter, statusFilter, sortOption, effectiveLocalIds]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const hasFilters = debouncedQuery !== '' || playlistFilter !== 'all' || outcomeFilter !== 'all';
+  const hasFilters =
+    debouncedQuery !== '' || playlistFilter !== 'all' || outcomeFilter !== 'all' || statusFilter !== 'all';
 
   return (
     <div data-testid="history-view" className="font-display">
@@ -345,34 +436,54 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
         kicker="LOCAL STORE · REPLAYS + BALLCHASING"
         title="HISTORY"
         right={
-          <PrimaryButton onClick={triggerSync} disabled={isSyncing}>
+          <PrimaryButton
+            onClick={triggerSync}
+            disabled={isSyncing}
+            className={!isSyncing ? "before:content-['⟳_']" : undefined}
+          >
             {isSyncing ? `SYNCING · ${syncStatus?.synced_matches ?? 0} MATCHES` : 'SYNC FROM BALLCHASING'}
           </PrimaryButton>
         }
       />
 
       {syncMessage && (
-        <div className="mb-4 bg-panel border-l-4 border-blue-ink px-4 py-2 text-[14px] text-ink font-semibold flex items-center justify-between">
+        <div className="mb-4 bg-panel border-l-4 border-blue-ink px-4 py-2 text-sm text-ink font-semibold flex items-center justify-between">
           <span>{syncMessage}</span>
           <button
             type="button"
             onClick={() => setSyncMessage(null)}
-            className="text-muted hover:text-ink text-[12px] uppercase ml-4"
+            className="text-muted hover:text-ink text-sm uppercase ml-4"
           >
             DISMISS
           </button>
         </div>
       )}
 
-      {/* Filter strip */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pb-4">
-        <div className="flex flex-wrap items-center gap-4">
+      {/* Filter & Sort Toolbar */}
+      <div className="t-bg-panel bg-panel t-border border border-line p-3.5 mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <SearchInput
+            id="history-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="SEARCH ARENA, PLAYER OR GUID…"
+            className="w-64 sm:w-72"
+          />
           <Segmented
             label="Filter by playlist"
             options={PLAYLIST_OPTIONS}
             value={playlistFilter}
             onChange={(v) => {
               setPlaylistFilter(v);
+              setPage(1);
+            }}
+          />
+          <Segmented
+            label="Filter by status"
+            options={STATUS_OPTIONS}
+            value={statusFilter}
+            onChange={(v) => {
+              setStatusFilter(v);
               setPage(1);
             }}
           />
@@ -386,7 +497,24 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
             }}
           />
         </div>
-        <SearchInput value={query} onChange={(e) => setQuery(e.target.value)} placeholder="SEARCH ARENA OR GUID…" className="w-72" />
+
+        <div className="flex items-center gap-2">
+          <select
+            id="history-sort"
+            aria-label="Sort matches"
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value as HistorySortOption)}
+            className="h-[38px] t-bg-page bg-page t-border border border-outline px-3 text-sm font-extrabold t-text-strong text-ink-strong uppercase outline-none t-radius"
+          >
+            <option value="date-desc">SORT: NEWEST FIRST</option>
+            <option value="date-asc">SORT: OLDEST FIRST</option>
+            <option value="pts-desc">SORT: YOUR SCORE</option>
+            <option value="goals-desc">SORT: YOUR GOALS</option>
+            <option value="saves-desc">SORT: YOUR SAVES</option>
+            <option value="demos-desc">SORT: YOUR DEMOS</option>
+            <option value="duration-desc">SORT: DURATION</option>
+          </select>
+        </div>
       </div>
 
       {error ? (
@@ -429,14 +557,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
           {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-4 px-2">
-              <span className="text-muted text-[13px] font-semibold">
+              <span className="text-muted text-sm font-semibold">
                 SHOWING {rows.length} OF {total} MATCHES
               </span>
               <div className="flex items-center gap-2">
                 <GhostButton onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
                   PREV
                 </GhostButton>
-                <span className="font-semibold text-[13px] text-ink-2 px-2">
+                <span className="font-semibold text-sm text-ink-2 px-2">
                   PAGE {page} OF {totalPages}
                 </span>
                 <GhostButton onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
@@ -466,6 +594,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ localPlayerIds = EMPTY
           playerName={profilePlayerName}
           onClose={() => setProfilePlayerId(null)}
           localPlayerIds={effectiveLocalIds}
+          onOpenFullProfile={onOpenFullProfile}
         />
       )}
     </div>

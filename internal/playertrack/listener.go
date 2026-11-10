@@ -10,6 +10,12 @@ type MatchStateListener interface {
 	OnMatchConcluded(match *CurrentMatchResponse)
 }
 
+// PostMatchMMRReconciler is an optional interface implemented by MatchStateListeners (such as SessionTracker)
+// to receive delayed post-match MMR updates once PsyNet commits the new skill rating.
+type PostMatchMMRReconciler interface {
+	UpdateLatestMatchMMR(playlistID int, newMMR int, mmrDelta float64)
+}
+
 // WithMatchStateListener configures an initial MatchStateListener observer.
 func WithMatchStateListener(listener MatchStateListener) TrackerOption {
 	return func(t *Tracker) {

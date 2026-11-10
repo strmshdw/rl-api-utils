@@ -28,8 +28,11 @@ var (
 	ErrContinueWindowExpired = errors.New("session continuation window has expired")
 )
 
-// Ensure SessionTracker implements playertrack.MatchStateListener at compile time.
-var _ playertrack.MatchStateListener = (*SessionTracker)(nil)
+// Ensure SessionTracker implements playertrack.MatchStateListener and PostMatchMMRReconciler at compile time.
+var (
+	_ playertrack.MatchStateListener     = (*SessionTracker)(nil)
+	_ playertrack.PostMatchMMRReconciler = (*SessionTracker)(nil)
+)
 
 // Option configures SessionTracker.
 type Option func(*SessionTracker)
@@ -872,7 +875,7 @@ func (s *SessionTracker) ConcludeMatch(match *playertrack.CurrentMatchResponse) 
 			orangeScore += lp.Stats.Goals
 		}
 
-		var rankName string
+		var rankName, shortRank string
 		var tier, div int
 		var mmr float64
 		if lp.CurrentRank != nil {
@@ -880,6 +883,11 @@ func (s *SessionTracker) ConcludeMatch(match *playertrack.CurrentMatchResponse) 
 			tier = lp.CurrentRank.Tier
 			div = lp.CurrentRank.Division
 			mmr = lp.CurrentRank.MMR
+			shortRank = lp.CurrentRank.ShortRank
+			if shortRank == "" && tier > 0 {
+				effDiv := storage.Resolve1BasedDivision(div, rankName)
+				shortRank = storage.FormatShortRankName(tier, effDiv)
+			}
 		}
 
 		var won *bool
@@ -899,6 +907,7 @@ func (s *SessionTracker) ConcludeMatch(match *playertrack.CurrentMatchResponse) 
 			Won:            won,
 			Stats:          lp.Stats,
 			RankName:       rankName,
+			ShortRank:      shortRank,
 			Tier:           tier,
 			Division:       div,
 			MMR:            mmr,
@@ -1049,6 +1058,92 @@ func (s *SessionTracker) ConcludeMatch(match *playertrack.CurrentMatchResponse) 
 	}
 }
 
+// UpdateLatestMatchMMR reconciles the most recently concluded match's EndingMMR and MMRChange
+// once PsyNet commits the post-match skill rating update, updates the playlist session tally,
+// persists the updated session record, and broadcasts a session_update SSE event.
+func (s *SessionTracker) UpdateLatestMatchMMR(playlistID int, newMMR int, mmrDelta float64) {
+	if newMMR <= 0 {
+		return
+	}
+
+	s.mu.Lock()
+	var targetMatch *SessionMatchDetail
+	for i := len(s.matches) - 1; i >= 0; i-- {
+		m := s.matches[i]
+		if playlistID == 0 || m.PlaylistID == playlistID {
+			targetMatch = m
+			break
+		}
+	}
+	if targetMatch == nil && len(s.matches) > 0 {
+		targetMatch = s.matches[len(s.matches)-1]
+	}
+
+	effPlaylistID := playlistID
+	newMMRFloat := float64(newMMR)
+
+	if targetMatch != nil {
+		if effPlaylistID == 0 {
+			effPlaylistID = targetMatch.PlaylistID
+		}
+		targetMatch.EndingMMR = newMMRFloat
+		if mmrDelta != 0 {
+			targetMatch.MMRChange = roundFloat(mmrDelta, 2)
+			if targetMatch.StartingMMR == 0 && newMMRFloat-mmrDelta > 0 {
+				targetMatch.StartingMMR = roundFloat(newMMRFloat-mmrDelta, 2)
+			}
+		} else if targetMatch.StartingMMR > 0 {
+			targetMatch.MMRChange = roundFloat(newMMRFloat-targetMatch.StartingMMR, 2)
+		}
+		for i := range targetMatch.Players {
+			if targetMatch.Players[i].IsLocal {
+				targetMatch.Players[i].MMR = newMMRFloat
+			}
+		}
+	}
+
+	if effPlaylistID != 0 {
+		stats, ok := s.playlists[effPlaylistID]
+		if !ok {
+			initMMR := newMMRFloat - mmrDelta
+			if targetMatch != nil && targetMatch.StartingMMR > 0 {
+				initMMR = targetMatch.StartingMMR
+			}
+			stats = &PlaylistSessionStats{
+				PlaylistID:   effPlaylistID,
+				PlaylistName: playertrack.FormatPlaylist(effPlaylistID),
+				InitialMMR:   initMMR,
+				CurrentMMR:   newMMRFloat,
+			}
+			s.playlists[effPlaylistID] = stats
+		} else {
+			stats.CurrentMMR = newMMRFloat
+			if stats.InitialMMR == 0 {
+				if targetMatch != nil && targetMatch.StartingMMR > 0 {
+					stats.InitialMMR = targetMatch.StartingMMR
+				} else if newMMRFloat-mmrDelta > 0 {
+					stats.InitialMMR = roundFloat(newMMRFloat-mmrDelta, 2)
+				} else {
+					stats.InitialMMR = newMMRFloat
+				}
+			}
+		}
+		if stats.InitialMMR > 0 && stats.CurrentMMR > 0 {
+			stats.MMRDelta = roundFloat(stats.CurrentMMR-stats.InitialMMR, 2)
+		}
+	}
+
+	currentRec := s.buildSessionRecordLocked(nil)
+	s.mu.Unlock()
+
+	s.saveRecordToStore(currentRec)
+
+	summary := s.GetSessionSummary()
+	if s.broadcaster != nil {
+		s.broadcaster.Broadcast(SessionEvent{Event: EventSessionUpdate, Data: summary})
+	}
+}
+
 // GetSessionSummary returns a thread-safe deep clone of the current session state,
 // enriched with ContinuableSession if a previous session is within the continuation window.
 func (s *SessionTracker) GetSessionSummary() *SessionResponse {
@@ -1092,6 +1187,7 @@ func (s *SessionTracker) GetSessionSummary() *SessionResponse {
 
 	cw := s.continueWindow
 	localIDs := s.getLocalPlayerIDsLocked()
+	store := s.store
 	totalWins := s.totalWins
 	totalLosses := s.totalLosses
 	var currentFirstMatch time.Time
@@ -1110,6 +1206,8 @@ func (s *SessionTracker) GetSessionSummary() *SessionResponse {
 		}
 	}
 
+	mostPlayed, forStats, againstStats := computeSessionDerivedStats(playlistClones, matchClones, localIDs, store)
+
 	return &SessionResponse{
 		SessionID:             id,
 		StartedAt:             startedAt,
@@ -1120,6 +1218,9 @@ func (s *SessionTracker) GetSessionSummary() *SessionResponse {
 		TotalLosses:           totalLosses,
 		WinRate:               winRate,
 		Playlists:             playlistClones,
+		MostPlayedPlaylist:    mostPlayed,
+		ForStats:              forStats,
+		AgainstStats:          againstStats,
 		Matches:               matchClones,
 		ActiveMatch:           activeClone,
 		LocalPlayerIDs:        localIDs,
@@ -1132,6 +1233,12 @@ func (s *SessionTracker) sessionResponseFromRecord(rec *storage.SessionRecord, c
 	resp, err := SessionResponseFromRecord(rec, cw, currentSessionID, now)
 	if err != nil {
 		return nil, err
+	}
+	s.mu.RLock()
+	store := s.store
+	s.mu.RUnlock()
+	if store != nil {
+		resp.MostPlayedPlaylist, resp.ForStats, resp.AgainstStats = computeSessionDerivedStats(resp.Playlists, resp.Matches, resp.LocalPlayerIDs, store)
 	}
 	if !resp.CanContinue && rec.SessionID != currentSessionID && rec.TotalMatches > 0 && cw > 0 && !currentFirstMatch.IsZero() {
 		refTime := rec.StartedAt
@@ -1458,6 +1565,8 @@ func SessionResponseFromRecord(rec *storage.SessionRecord, continueWindow time.D
 		lastMatchCopy = &t
 	}
 
+	mostPlayed, forStats, againstStats := computeSessionDerivedStats(playlists, matches, localIDs, nil)
+
 	return &SessionResponse{
 		SessionID:             rec.SessionID,
 		StartedAt:             rec.StartedAt.UTC(),
@@ -1469,11 +1578,320 @@ func SessionResponseFromRecord(rec *storage.SessionRecord, continueWindow time.D
 		TotalLosses:           rec.TotalLosses,
 		WinRate:               rec.WinRate,
 		Playlists:             playlists,
+		MostPlayedPlaylist:    mostPlayed,
+		ForStats:              forStats,
+		AgainstStats:          againstStats,
 		Matches:               matches,
 		LocalPlayerIDs:        localIDs,
 		ContinueWindowSeconds: int(continueWindow.Seconds()),
 		CanContinue:           canContinue,
 	}, nil
+}
+
+func computeSessionDerivedStats(
+	playlists map[string]*PlaylistSessionStats,
+	matches []*SessionMatchDetail,
+	localIDs []string,
+	store storage.StateStore,
+) (*MostPlayedPlaylistSummary, *storage.PlayerRoleStatsSummary, *storage.PlayerRoleStatsSummary) {
+	var bestPS *PlaylistSessionStats
+	for kStr, ps := range playlists {
+		if ps == nil {
+			continue
+		}
+		pid := ps.PlaylistID
+		if pid == 0 {
+			pid, _ = strconv.Atoi(kStr)
+		}
+		if bestPS == nil {
+			cp := *ps
+			cp.PlaylistID = pid
+			bestPS = &cp
+			continue
+		}
+		if ps.MatchesPlayed > bestPS.MatchesPlayed ||
+			(ps.MatchesPlayed == bestPS.MatchesPlayed && ps.Wins > bestPS.Wins) ||
+			(ps.MatchesPlayed == bestPS.MatchesPlayed && ps.Wins == bestPS.Wins && pid > 0 && pid < bestPS.PlaylistID) {
+			cp := *ps
+			cp.PlaylistID = pid
+			bestPS = &cp
+		}
+	}
+
+	var mostPlayed *MostPlayedPlaylistSummary
+	if bestPS != nil && (bestPS.MatchesPlayed > 0 || bestPS.PlaylistID > 0) {
+		pName := bestPS.PlaylistName
+		if pName == "" && bestPS.PlaylistID > 0 {
+			pName = playertrack.FormatPlaylist(bestPS.PlaylistID)
+		}
+		mostPlayed = &MostPlayedPlaylistSummary{
+			ID:           bestPS.PlaylistID,
+			Name:         pName,
+			NetMMR:       bestPS.MMRDelta,
+			Wins:         bestPS.Wins,
+			Losses:       bestPS.Losses,
+			MatchesCount: bestPS.MatchesPlayed,
+		}
+	}
+
+	localSet := make(map[string]bool, len(localIDs))
+	for _, id := range localIDs {
+		if strings.TrimSpace(id) != "" {
+			localSet[strings.TrimSpace(id)] = true
+		}
+	}
+	if len(localSet) == 0 && store != nil {
+		if ids, err := store.GetLocalPlayerIDs(context.Background()); err == nil {
+			for _, id := range ids {
+				if strings.TrimSpace(id) != "" {
+					localSet[strings.TrimSpace(id)] = true
+				}
+			}
+		}
+	}
+
+	var forAcc, againstAcc storage.RoleStatsAccumulator
+
+	for _, m := range matches {
+		if m == nil {
+			continue
+		}
+		youWon := m.Result == "victory"
+		isDraw := m.Result != "victory" && m.Result != "defeat"
+
+		localTeam := -1
+		if m.LocalTeam != nil {
+			localTeam = *m.LocalTeam
+		} else {
+			for _, p := range m.Players {
+				if p.IsLocal || localSet[p.PlayerID] {
+					localTeam = p.TeamNum
+					break
+				}
+			}
+		}
+		if localTeam < 0 {
+			localTeam = 0
+		}
+
+		forAcc.AddMatchOutcome(youWon, isDraw)
+		againstAcc.AddMatchOutcome(youWon, isDraw)
+
+		handledFromStore := false
+		if store != nil && strings.TrimSpace(m.MatchGUID) != "" {
+			guid := strings.TrimSpace(m.MatchGUID)
+			var replayJSON string
+			if mRec, err := store.GetMatch(context.Background(), guid); err == nil && mRec != nil {
+				replayJSON = mRec.ReplayStatsJSON
+			}
+			mps, _ := store.GetMatchPlayers(context.Background(), guid)
+			if len(mps) > 0 {
+				var localMP *storage.MatchPlayerRecord
+				var oppMPs []*storage.MatchPlayerRecord
+				for _, mp := range mps {
+					if mp == nil {
+						continue
+					}
+					if mp.IsLocal || localSet[mp.PlayerID] {
+						localMP = mp
+					} else if mp.TeamNum == localTeam && localMP == nil {
+						localMP = mp
+					} else if mp.TeamNum != localTeam && (mp.TeamNum == 0 || mp.TeamNum == 1) {
+						oppMPs = append(oppMPs, mp)
+					}
+				}
+				if localMP != nil || len(oppMPs) > 0 {
+					if localMP != nil {
+						stJSON := storage.ExtractPlayerStatsJSONFromReplay(localMP.StatsJSON, replayJSON, localMP.PlayerID, "", localMP.TeamNum)
+						forAcc.AddPlayerBoxAndTelemetry(localMP.Score, localMP.Goals, localMP.Assists, localMP.Saves, localMP.Shots, localMP.Demos, stJSON)
+					} else {
+						forAcc.AddPlayerBoxAndTelemetry(0, 0, 0, 0, 0, 0, "")
+					}
+					if len(oppMPs) > 0 {
+						for _, op := range oppMPs {
+							stJSON := storage.ExtractPlayerStatsJSONFromReplay(op.StatsJSON, replayJSON, op.PlayerID, "", op.TeamNum)
+							againstAcc.AddPlayerBoxAndTelemetry(op.Score, op.Goals, op.Assists, op.Saves, op.Shots, op.Demos, stJSON)
+						}
+					} else {
+						oppGoals := m.OrangeScore
+						if localTeam == 1 {
+							oppGoals = m.BlueScore
+						}
+						againstAcc.AddPlayerBoxAndTelemetry(0, oppGoals, 0, 0, 0, 0, "")
+					}
+					handledFromStore = true
+				}
+			}
+			if !handledFromStore && replayJSON != "" {
+				var st storage.ReplayMatchStats
+				if jsonErr := json.Unmarshal([]byte(replayJSON), &st); jsonErr == nil && len(st.Players) > 0 {
+					var localRP *storage.ReplayPlayerStats
+					var oppRPs []storage.ReplayPlayerStats
+					for i := range st.Players {
+						rp := &st.Players[i]
+						fullID := fmt.Sprintf("%s|%s|0", rp.Platform, rp.OnlineID)
+						if localSet[fullID] || localSet[rp.OnlineID] {
+							localRP = rp
+						} else if rp.Team == localTeam && localRP == nil {
+							localRP = rp
+						} else if rp.Team != localTeam && (rp.Team == 0 || rp.Team == 1) {
+							oppRPs = append(oppRPs, *rp)
+						}
+					}
+					if localRP != nil {
+						b, _ := json.Marshal(localRP)
+						forAcc.AddPlayerBoxAndTelemetry(localRP.Score, localRP.Goals, localRP.Assists, localRP.Saves, localRP.Shots, localRP.Demos, string(b))
+					} else {
+						forAcc.AddPlayerBoxAndTelemetry(0, 0, 0, 0, 0, 0, "")
+					}
+					if len(oppRPs) > 0 {
+						for _, op := range oppRPs {
+							b, _ := json.Marshal(op)
+							againstAcc.AddPlayerBoxAndTelemetry(op.Score, op.Goals, op.Assists, op.Saves, op.Shots, op.Demos, string(b))
+						}
+					} else {
+						oppGoals := m.OrangeScore
+						if localTeam == 1 {
+							oppGoals = m.BlueScore
+						}
+						againstAcc.AddPlayerBoxAndTelemetry(0, oppGoals, 0, 0, 0, 0, "")
+					}
+					handledFromStore = true
+				}
+			}
+		}
+
+		if !handledFromStore {
+			var localPlayer *SessionMatchPlayer
+			var oppScore, oppGoals, oppAssists, oppSaves, oppShots, oppDemos int
+			var oppCount int
+			for i := range m.Players {
+				p := &m.Players[i]
+				if p.IsLocal || localSet[p.PlayerID] {
+					localPlayer = p
+				} else if p.TeamNum == localTeam && localPlayer == nil {
+					localPlayer = p
+				} else if p.TeamNum != localTeam && (p.TeamNum == 0 || p.TeamNum == 1) {
+					oppCount++
+					oppScore += p.Stats.Score
+					oppGoals += p.Stats.Goals
+					oppAssists += p.Stats.Assists
+					oppSaves += p.Stats.Saves
+					oppShots += p.Stats.Shots
+					oppDemos += p.Stats.Demos
+				}
+			}
+			if localPlayer != nil {
+				forAcc.AddPlayerBoxAndTelemetry(
+					localPlayer.Stats.Score,
+					localPlayer.Stats.Goals,
+					localPlayer.Stats.Assists,
+					localPlayer.Stats.Saves,
+					localPlayer.Stats.Shots,
+					localPlayer.Stats.Demos,
+					"",
+				)
+			} else {
+				myGoals := m.BlueScore
+				if localTeam == 1 {
+					myGoals = m.OrangeScore
+				}
+				forAcc.AddPlayerBoxAndTelemetry(0, myGoals, 0, 0, 0, 0, "")
+			}
+			if oppCount == 0 {
+				if localTeam == 0 {
+					oppGoals = m.OrangeScore
+				} else {
+					oppGoals = m.BlueScore
+				}
+			}
+			againstAcc.AddPlayerBoxAndTelemetry(oppScore, oppGoals, oppAssists, oppSaves, oppShots, oppDemos, "")
+		}
+	}
+
+	return mostPlayed, forAcc.Finalize(0, 0), againstAcc.Finalize(0, 0)
+}
+
+// FilterSessionSummary scopes a SessionResponse to the requested playlist and date range.
+func FilterSessionSummary(summary *SessionResponse, playlist string, fromUnix, toUnix int64, store storage.StateStore) *SessionResponse {
+	if summary == nil {
+		return nil
+	}
+	playlistIDs := storage.ParsePlaylistFilter(playlist)
+	if len(playlistIDs) == 0 && fromUnix <= 0 && toUnix <= 0 {
+		return summary
+	}
+
+	filteredMatches := make([]*SessionMatchDetail, 0, len(summary.Matches))
+	filteredPlaylists := make(map[string]*PlaylistSessionStats)
+	var wins, losses, totalMatches int
+
+	for _, m := range summary.Matches {
+		if m == nil {
+			continue
+		}
+		if !storage.MatchesPlaylistIDs(m.PlaylistID, playlistIDs) {
+			continue
+		}
+		matchTime := m.EndedAt
+		if matchTime.IsZero() {
+			matchTime = m.StartedAt
+		}
+		if !matchTime.IsZero() {
+			ts := matchTime.Unix()
+			if fromUnix > 0 && ts < fromUnix {
+				continue
+			}
+			if toUnix > 0 && ts > toUnix {
+				continue
+			}
+		}
+		filteredMatches = append(filteredMatches, m)
+		totalMatches++
+		if m.Result == "victory" {
+			wins++
+		} else if m.Result == "defeat" {
+			losses++
+		}
+
+		pKey := strconv.Itoa(m.PlaylistID)
+		ps, ok := filteredPlaylists[pKey]
+		if !ok {
+			pName := m.PlaylistName
+			if pName == "" && m.PlaylistID > 0 {
+				pName = playertrack.FormatPlaylist(m.PlaylistID)
+			}
+			ps = &PlaylistSessionStats{
+				PlaylistID:   m.PlaylistID,
+				PlaylistName: pName,
+			}
+			filteredPlaylists[pKey] = ps
+		}
+		ps.MatchesPlayed++
+		if m.Result == "victory" {
+			ps.Wins++
+		} else if m.Result == "defeat" {
+			ps.Losses++
+		}
+		ps.MMRDelta = math.Round((ps.MMRDelta+m.MMRChange)*100) / 100
+		if m.EndingMMR > 0 {
+			ps.CurrentMMR = m.EndingMMR
+		}
+	}
+
+	cp := *summary
+	cp.TotalMatches = totalMatches
+	cp.TotalWins = wins
+	cp.TotalLosses = losses
+	if wins+losses > 0 {
+		cp.WinRate = math.Round((float64(wins)/float64(wins+losses))*1000) / 10
+	} else {
+		cp.WinRate = 0
+	}
+	cp.Matches = filteredMatches
+	cp.Playlists = filteredPlaylists
+	cp.MostPlayedPlaylist, cp.ForStats, cp.AgainstStats = computeSessionDerivedStats(filteredPlaylists, filteredMatches, cp.LocalPlayerIDs, store)
+	return &cp
 }
 
 // SetLocalPlayerIDs sets the local player IDs known to the daemon.

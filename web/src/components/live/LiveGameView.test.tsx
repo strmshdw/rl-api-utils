@@ -25,11 +25,15 @@ function liveMatch(over: Partial<CurrentMatchResponse> = {}): CurrentMatchRespon
   return { ...SAMPLE_CURRENT_MATCH, ...over };
 }
 
+import { DashboardProvider } from '../../context/DashboardContext';
+
 const noop = () => {};
 
 async function renderLive(match: CurrentMatchResponse | null, session: SessionResponse | null = SAMPLE_SESSION_RESPONSE) {
   return mount(
-    <LiveGameView match={match} session={session} connection="connected" columnsOpen={false} onCloseColumns={noop} onShowSession={noop} />,
+    <DashboardProvider>
+      <LiveGameView match={match} session={session} connection="connected" columnsOpen={false} onCloseColumns={noop} onShowSession={noop} />
+    </DashboardProvider>,
   );
 }
 
@@ -172,15 +176,62 @@ describe('LiveGameView — in match', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(container.textContent).toContain('<img src=x onerror=alert(1)>');
   });
+
+  it('renders Threat, Carry, and Smurf detection badges and toggles historical split tables', async () => {
+    const { container } = await renderLive(liveMatch());
+    expect(container.textContent).toContain('戒 · HIGHER MMR');
+    expect(container.textContent).toContain('双 · CARRYING');
+    expect(container.textContent).toContain('印 · SMURF');
+
+    const youCard = cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
+    expect(youCard.textContent).toContain('YOU · ACTIVE SESSION');
+    expect(youCard.textContent).toContain('IN RANGE 4W–1L');
+    expect(youCard.textContent).toContain('NET MMR +29');
+
+    const toggleBtn = container.querySelector<HTMLButtonElement>('#btn-toggle-live-hist')!;
+    expect(toggleBtn).not.toBeNull();
+    expect(toggleBtn.textContent).toContain('HISTORICAL DATA: SHOWN');
+    expect(container.querySelectorAll('.live-hist-section').length).toBeGreaterThan(0);
+
+    toggleBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(toggleBtn.textContent).toContain('HISTORICAL DATA: HIDDEN');
+  });
+
+  it('scopes player card Rank/MMR and historical split stats when PLAYLIST SCOPE (3V3 / 1V1) is toggled', async () => {
+    const { container } = await renderLive(liveMatch());
+    const aeroCard = () => cards(container).find((c) => c.dataset.playerId === 'Steam|76561198000000010|0')!;
+
+    // Default (ALL) shows 2v2 rank (1502)
+    expect(aeroCard().textContent).toContain('1502');
+
+    // Switch to 3V3 -> AeroPulse's 3v3 rank is Grand Champion III (1795)
+    const btn3v3 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
+      (b) => b.textContent?.trim() === '3V3',
+    )!;
+    btn3v3.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(aeroCard().textContent).toContain('1795');
+
+    // Switch to 1V1 -> AeroPulse has no 1v1 rank or matches -> UNRANKED and 0G dimmed rows
+    const btn1v1 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
+      (b) => b.textContent?.trim() === '1V1',
+    )!;
+    btn1v1.click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(aeroCard().textContent).toContain('UNRANKED');
+    expect(aeroCard().textContent).toContain('— NO MATCHES IN SELECTED RANGE —');
+  });
 });
 
 describe('LiveGameView — between matches', () => {
   afterEach(cleanup);
 
-  it('shows the idle header, last match strip, box score and session KPIs', async () => {
+  it('shows the compact idle header (no giant WAITING FOR KICKOFF banner), last match strip, box score and session KPIs', async () => {
     const { container } = await renderLive(null);
     expect(container.querySelector('[data-testid="live-match"]')).toBeNull();
-    expect(container.textContent).toContain('WAITING FOR KICKOFF');
+    expect(container.textContent).toContain('IDLE · QUEUE READY');
+    expect(container.textContent).not.toContain('WAITING FOR KICKOFF');
 
     const last = container.querySelector('[data-testid="last-match"]')!;
     // Sample data lists newest first; the most recent match (4-2 win, +10) is the one shown.

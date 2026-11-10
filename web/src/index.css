@@ -2,9 +2,49 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --t-page: #0a0908;
+  --t-panel: #181614;
+  --t-plaque: #0f0d0b;
+  --t-panel-hover: #221f1c;
+  --t-modal: #181614;
+  --t-line: #38332d;
+  --t-line-2: #292520;
+  --t-outline: #e2dbd0;
+  --t-frieze: #d8d0c5;
+  --t-ink: #f2efe9;
+  --t-ink-strong: #fbf9f5;
+  --t-ink-on-accent: #12100e;
+  --t-on-slab: #12100e;
+  --t-ink-2: #cfc7b8;
+  --t-ink-3: #b8afa0;
+  --t-muted: #918779;
+  --t-muted-2: #786f62;
+  --t-faint: #5c544b;
+  --t-blue-slab: #f2efe9;
+  --t-orange-slab: #b81d13;
+  --t-blue-ink: #f2efe9;
+  --t-orange-ink: #d9382e;
+  --t-vermilion-display: #d4261d;
+  --t-win: #82a890;
+  --t-loss: #d9382e;
+  --t-gold: #deb052;
+  --t-carry-ink: #7da8c4;
+  --t-font-display: 'Josefin Sans', 'Space Grotesk', 'Inter', sans-serif;
+  --t-font-sans: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
+  --t-font-mono: 'JetBrains Mono', monospace;
+  --t-radius: 0px;
+  --t-slant: 0px;
+  --t-bw: 1.5px;
+  --t-blur: none;
+  --t-bg-image: none;
+}
+
 @layer base {
   body {
     @apply bg-page text-ink min-h-screen font-sans antialiased;
+    overscroll-behavior: contain;
   }
 
   input::placeholder {
@@ -16,16 +56,233 @@
   }
 }
 
-/* Angled outer edges of the live scorebug team slabs (28px slant). */
-.slab-left {
-  clip-path: polygon(28px 0, 100% 0, 100% 100%, 0 100%);
-}
-.slab-right {
-  clip-path: polygon(0 0, calc(100% - 28px) 0, 100% 100%, 0 100%);
+.broadcast-app {
+  background-color: var(--t-page);
+  background-image: var(--t-bg-image);
+  color: var(--t-ink);
+  font-family: var(--t-font-sans);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
 }
 
-/* Native <dialog> resets: no UA padding/border/colours, full-viewport scrim. */
-dialog.broadcast-dialog {
+.t-font-display {
+  font-family: var(--t-font-display);
+  letter-spacing: 0.03em;
+}
+.t-font-sans {
+  font-family: var(--t-font-sans);
+}
+.t-font-mono {
+  font-family: var(--t-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+.t-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+.t-panel,
+.t-bg-panel {
+  background-color: var(--t-panel);
+  border-radius: var(--t-radius);
+  backdrop-filter: var(--t-blur, none);
+  -webkit-backdrop-filter: var(--t-blur, none);
+}
+.t-panel-hover:hover,
+.t-hover-panel:hover,
+.t-bg-panel-hover {
+  background-color: var(--t-panel-hover);
+}
+.t-modal,
+.t-bg-modal {
+  background-color: var(--t-modal);
+  border-radius: var(--t-radius);
+}
+.t-bg-page { background-color: var(--t-page); }
+.t-bg-line { background-color: var(--t-line); }
+.t-bg-line2 { background-color: var(--t-line-2); }
+.t-bg-blue,
+.t-bg-blue-slab { background-color: var(--t-blue-slab); color: var(--t-on-slab); }
+.t-bg-orange,
+.t-bg-orange-slab { background-color: var(--t-orange-slab); color: #fbf9f5; }
+.t-bg-blue-ink { background-color: var(--t-blue-ink); color: var(--t-ink-on-accent); }
+.t-bg-orange-ink { background-color: var(--t-orange-ink); color: #fbf9f5; }
+.t-bg-win { background-color: var(--t-win); color: #12100e; }
+.t-bg-loss { background-color: var(--t-loss); color: #ffffff; }
+.t-bg-ink { background-color: var(--t-ink-strong); color: var(--t-ink-on-accent); }
+.surface-plaque { background-color: var(--t-plaque, var(--t-page)); }
+.f-serif-jp { font-family: 'Noto Serif JP', serif; }
+
+/* Arashikage Monolith Architectural Primitives */
+.ziggurat-monolith {
+  border: 1.5px solid var(--t-outline);
+  box-shadow:
+    0 0 0 4px var(--t-page),
+    0 0 0 5.5px var(--t-line);
+}
+.deco-frieze-rule {
+  height: 5px;
+  background:
+    linear-gradient(90deg,
+      var(--t-blue-slab) 0%,
+      var(--t-blue-slab) 48.5%,
+      transparent 48.5%,
+      transparent 51.5%,
+      var(--t-orange-slab) 51.5%,
+      var(--t-orange-slab) 100%);
+  border-bottom: 1px solid var(--t-line);
+}
+.deco-medallion-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-family: var(--t-font-display);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--t-frieze, var(--t-outline));
+  border-bottom: 1px solid var(--t-line);
+  background-color: var(--t-plaque, var(--t-page));
+}
+.deco-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-family: var(--t-font-display);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--t-frieze, var(--t-outline));
+}
+.deco-section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background-color: var(--t-line);
+}
+.arashikage-hex {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 18px;
+  height: 20px;
+  padding: 1px 0;
+  flex-shrink: 0;
+}
+.arashikage-hex .hex-solid {
+  width: 100%;
+  height: 2px;
+  background-color: var(--t-orange-slab);
+}
+.arashikage-hex .hex-broken {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  height: 2px;
+}
+.arashikage-hex .hex-broken span {
+  width: 42%;
+  height: 100%;
+  background-color: var(--t-orange-slab);
+}
+.team-split-rule {
+  height: 3px;
+  background: linear-gradient(90deg, var(--t-blue-slab) 0%, var(--t-blue-slab) 50%, var(--t-orange-slab) 50%, var(--t-orange-slab) 100%);
+}
+.hanko-seal-vermilion {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: var(--t-orange-slab);
+  color: #fbf9f5;
+  border: 1.5px solid var(--t-orange-slab);
+  outline: 1px solid rgba(255, 255, 255, 0.28);
+  outline-offset: -3px;
+}
+.hanko-square-stamp {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  background-color: var(--t-orange-slab);
+  color: #fbf9f5;
+  border: 1.5px solid var(--t-orange-slab);
+  outline: 1px solid rgba(255, 255, 255, 0.32);
+  outline-offset: -3px;
+  font-family: 'Noto Serif JP', serif;
+  font-weight: 900;
+  font-size: 0.78rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.cartouche-gold {
+  background-color: var(--t-plaque, var(--t-page));
+  color: var(--t-gold, #deb052);
+  border: 1px solid var(--t-gold, #deb052);
+}
+.cartouche-carry {
+  background-color: var(--t-plaque, var(--t-page));
+  color: var(--t-carry-ink, #7da8c4);
+  border: 1px solid var(--t-carry-ink, #7da8c4);
+}
+.cartouche-celadon {
+  background-color: var(--t-plaque, var(--t-page));
+  color: var(--t-win);
+  border: 1px solid var(--t-win);
+}
+.cartouche-mono {
+  background-color: var(--t-plaque, var(--t-page));
+  color: var(--t-ink-2);
+  border: 1px solid var(--t-line);
+}
+.cartouche-monolith {
+  background-color: var(--t-plaque, var(--t-page));
+  color: var(--t-ink-strong);
+  border: 1px solid var(--t-outline);
+}
+
+.t-ink, .t-text-ink { color: var(--t-ink); }
+.t-ink-strong, .t-text-strong { color: var(--t-ink-strong); }
+.t-text-on-accent { color: var(--t-ink-on-accent); }
+.t-on-slab, .t-text-on-slab { color: var(--t-on-slab); }
+.t-ink-2, .t-text-ink2 { color: var(--t-ink-2); }
+.t-ink-3, .t-text-ink3 { color: var(--t-ink-3); }
+.t-muted, .t-text-muted { color: var(--t-muted); }
+.t-muted-2, .t-text-muted2 { color: var(--t-muted-2); }
+.t-faint, .t-text-faint { color: var(--t-faint); }
+.t-blue-ink, .t-text-blue { color: var(--t-blue-ink); }
+.t-orange-ink, .t-text-orange { color: var(--t-orange-ink); }
+.t-win, .t-text-win { color: var(--t-win); }
+.t-loss, .t-text-loss { color: var(--t-loss); }
+
+.t-border { border-color: var(--t-line); border-width: var(--t-bw); }
+.t-border-2 { border-color: var(--t-line-2); }
+.t-outline, .t-border-outline { border-color: var(--t-outline); }
+.t-border-blue { border-color: var(--t-blue-ink); }
+.t-border-orange { border-color: var(--t-orange-ink); }
+.t-border-win { border-color: var(--t-win); }
+.t-border-loss { border-color: var(--t-loss); }
+.t-top-blue { border-top: 3px solid var(--t-blue-slab); }
+.t-top-orange { border-top: 3px solid var(--t-orange-slab); }
+.t-left-blue { border-left: 3px solid var(--t-blue-slab); }
+.t-radius { border-radius: var(--t-radius); overflow: hidden; }
+
+.slab-left,
+.slab-blue-clip {
+  clip-path: polygon(var(--t-slant) 0, 100% 0, 100% 100%, 0 100%);
+}
+.slab-right,
+.slab-orange-clip {
+  clip-path: polygon(0 0, calc(100% - var(--t-slant)) 0, 100% 100%, 0 100%);
+}
+
+/* Native <dialog> resets + prevent-page-scroll-under-modal-dialog */
+dialog.broadcast-dialog,
+dialog.broadcast-modal {
   max-width: none;
   max-height: none;
   width: 100%;
@@ -36,10 +293,24 @@ dialog.broadcast-dialog {
   background: transparent;
   color: inherit;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
-dialog.broadcast-dialog::backdrop {
-  background: rgba(5, 6, 8, 0.82);
+dialog.broadcast-dialog:modal,
+dialog.broadcast-modal:modal {
+  overscroll-behavior: contain;
 }
+dialog.broadcast-dialog::backdrop,
+dialog.broadcast-modal::backdrop {
+  background: rgba(4, 5, 8, 0.84);
+  backdrop-filter: blur(4px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--t-page); }
+::-webkit-scrollbar-thumb { background: var(--t-line-2); }
+::-webkit-scrollbar-thumb:hover { background: var(--t-outline); }
 
 /* Transparent OBS streaming overlay mode */
 html.overlay-mode,
@@ -47,5 +318,7 @@ body.overlay-mode,
 body.overlay-mode #root {
   background: transparent !important;
   background-color: transparent !important;
+  background-image: none !important;
   overflow: hidden !important;
 }
+

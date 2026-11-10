@@ -242,6 +242,53 @@ func (t *Tracker) PendingGUIDs() []string {
 	return guids
 }
 
+// SetSyncTrigger sets the callback invoked when the trigger threshold fires if not already configured.
+func (t *Tracker) SetSyncTrigger(fn SyncTriggerFunc) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.triggerFn == nil && fn != nil {
+		t.triggerFn = fn
+	}
+}
+
+// UpdateConfig updates the tracker's threshold, auto-sync trigger, and desktop toast settings at runtime.
+// If ForceSyncOnTrigger is enabled and the current pending queue already meets or exceeds the threshold,
+// an immediate sync is triggered.
+func (t *Tracker) UpdateConfig(triggerThreshold int, forceSyncOnTrigger *bool, enableToast *bool) {
+	t.mu.Lock()
+	if triggerThreshold > 0 && triggerThreshold <= MaxHostedReplays {
+		t.cfg.TriggerThreshold = triggerThreshold
+	}
+	if forceSyncOnTrigger != nil {
+		t.cfg.ForceSyncOnTrigger = *forceSyncOnTrigger
+	}
+	if enableToast != nil {
+		t.cfg.EnableToast = *enableToast
+	}
+	pendingCount := len(t.pendingMatches)
+	threshold := t.cfg.TriggerThreshold
+	forceSync := t.cfg.ForceSyncOnTrigger
+	triggerFn := t.triggerFn
+	t.mu.Unlock()
+
+	if forceSync && pendingCount >= threshold && pendingCount > 0 && triggerFn != nil {
+		go func() {
+			syncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if syncErr := triggerFn(syncCtx, fmt.Sprintf("config_threshold_%d_reached", pendingCount)); syncErr != nil {
+				t.logger.Error("forced sync trigger on config update failed", slog.Any("error", syncErr))
+			}
+		}()
+	}
+}
+
+// ClearPending clears all pending matches (e.g., when a manual sync is completed).
+func (t *Tracker) ClearPending() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	clear(t.pendingMatches)
+}
+
 // Status returns a snapshot of the current tracker status.
 func (t *Tracker) Status() Status {
 	t.mu.RLock()
@@ -261,6 +308,8 @@ func (t *Tracker) Status() Status {
 		PendingCount:       len(t.pendingMatches),
 		TriggerThreshold:   t.cfg.TriggerThreshold,
 		ForceSyncOnTrigger: t.cfg.ForceSyncOnTrigger,
+		EnableToast:        t.cfg.EnableToast,
+		MaxHostedReplays:   MaxHostedReplays,
 		PendingMatches:     matches,
 	}
 }

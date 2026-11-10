@@ -122,7 +122,13 @@ func DistHandler() http.Handler {
 			}
 		}
 
-		// SPA Fallback: Requested path is not an existing file on disk.
+		// Missing static assets or paths with a file extension must return 404 rather than SPA index.html.
+		if cleanPath == "assets" || strings.HasPrefix(cleanPath, "assets/") || (path.Ext(cleanPath) != "" && cleanPath != "index.html") {
+			http.NotFound(w, r)
+			return
+		}
+
+		// SPA Fallback: Requested path is an extensionless client-side route.
 		// Serve index.html with 200 OK so client-side router (e.g. /session, /players/123, /?mode=overlay) can handle it.
 		serveIndex(w, r, sub)
 	})

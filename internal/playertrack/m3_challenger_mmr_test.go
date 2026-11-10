@@ -243,3 +243,108 @@ func TestM3_RapidSuccessiveMatchConclusions_InvalidateRankCache_NonZeroMMRDelta(
 		t.Errorf("expected playlist MMRDelta +20.00, got %v", plStats.MMRDelta)
 	}
 }
+
+func TestPostMatchMMRPoller_DelayedPsyNetCommitReconcilesSessionAndStore(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.NewJSONStore(t.TempDir() + "/delayed_mmr_state.json")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	localPID := "Steam|76561198000000888|0"
+	activePlaylist := 11 // Ranked Doubles 2v2
+
+	skillFetcher := newDynamicSkillFetcher()
+	// Pre-match: 1200 MMR (raw 55.0)
+	skillFetcher.setPlayerRating(localPID, activePlaylist, 55.00, 17, 2)
+
+	cfg := config.PlayerTrackingConfig{
+		Enabled:        true,
+		AutoFetchRanks: true,
+		LocalPlayerID:  localPID,
+	}
+	authCfg := config.AuthConfig{}
+
+	tracker, err := playertrack.NewTracker(
+		store,
+		skillFetcher,
+		cfg,
+		authCfg,
+		playertrack.WithRankCacheTTL(15*time.Minute),
+		playertrack.WithPostMatchPollSchedule([]time.Duration{
+			20 * time.Millisecond,
+			90 * time.Millisecond,
+			220 * time.Millisecond,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create tracker: %v", err)
+	}
+	defer tracker.Close()
+
+	sessionTracker := session.NewSessionTracker()
+	tracker.SetMatchStateListener(sessionTracker)
+
+	matchGUID := "GUID-DELAYED-MMR-1"
+	players := []statsapi.StatsPlayer{
+		{Name: "LocalAce", PrimaryId: localPID, TeamNum: 0},
+		{Name: "Rival1", PrimaryId: "Epic|rival_delayed_1|0", TeamNum: 1},
+	}
+	game := &statsapi.StatsGame{PlaylistId: activePlaylist, TimeRemaining: 300}
+	if err := tracker.OnUpdateGameState(ctx, matchGUID, activePlaylist, players, game); err != nil {
+		t.Fatalf("OnUpdateGameState failed: %v", err)
+	}
+	time.Sleep(40 * time.Millisecond)
+
+	// Match ends BEFORE PsyNet commits new MMR (still 1200 MMR at 0ms!)
+	winner0 := 0
+	if err := tracker.OnMatchEnded(ctx, matchGUID, &winner0); err != nil {
+		t.Fatalf("OnMatchEnded failed: %v", err)
+	}
+
+	// Immediately after OnMatchEnded, poller should be in "polling" state
+	if st := tracker.MMRPollerState(); st != "polling" {
+		t.Errorf("expected MMRPollerState 'polling' immediately after stale 0ms check, got %q", st)
+	}
+
+	// Simulate PsyNet committing the new MMR (+10 MMR -> 1210 MMR, raw 55.50) after 35ms (between retry 1 and retry 2)
+	time.Sleep(35 * time.Millisecond)
+	skillFetcher.setPlayerRating(localPID, activePlaylist, 55.50, 17, 3)
+
+	// Wait for retry 2 (at 60ms) to pick up the updated MMR
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if tracker.MMRPollerState() == "synced" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if st := tracker.MMRPollerState(); st != "synced" {
+		t.Fatalf("expected MMRPollerState 'synced' after delayed PsyNet update, got %q", st)
+	}
+
+	// Verify SessionTracker match EndingMMR and MMRChange were reconciled to 1210 (+10)
+	summary := sessionTracker.GetSessionSummary()
+	if len(summary.Matches) != 1 {
+		t.Fatalf("expected 1 match in session, got %d", len(summary.Matches))
+	}
+	m := summary.Matches[0]
+	if m.EndingMMR != 1210 || m.MMRChange != 10 {
+		t.Errorf("expected reconciled EndingMMR=1210, MMRChange=+10, got EndingMMR=%v, MMRChange=%v", m.EndingMMR, m.MMRChange)
+	}
+	if pl, ok := summary.Playlists["11"]; !ok || pl.CurrentMMR != 1210 || pl.MMRDelta != 10 {
+		t.Errorf("expected playlist 11 CurrentMMR=1210, MMRDelta=10, got %+v", summary.Playlists["11"])
+	}
+
+	// Verify SQLite mmr_history has the persisted 1210 (+10) record with MatchGUID populated
+	hist, err := store.ListMMRHistory(ctx, activePlaylist, 10)
+	if err != nil || len(hist) == 0 {
+		t.Fatalf("expected mmr_history entry for playlist 11, got len=%d err=%v", len(hist), err)
+	}
+	if hist[0].MMR != 1210 || hist[0].MMRChange != 10 || hist[0].MatchGUID != matchGUID {
+		t.Errorf("expected mmr_history MMR=1210 MMRChange=10 MatchGUID=%q, got %+v", matchGUID, hist[0])
+	}
+}
+
