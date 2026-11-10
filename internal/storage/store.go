@@ -2,10 +2,12 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -119,13 +121,65 @@ type MMRHistoryRecord struct {
 	Division   int       `json:"division"`
 }
 
-// PlayerMatchFilter specifies filtering and pagination for a player's match history.
+// PlayerRoleStatsSummary holds both totals and per-game averages for Core + Ballchasing Mechanics stats.
+type PlayerRoleStatsSummary struct {
+	Games                 int     `json:"games"`
+	Wins                  int     `json:"wins"`
+	Losses                int     `json:"losses"`
+	WinRate               float64 `json:"win_rate"`
+	TotalScore            int     `json:"total_score"`
+	TotalGoals            int     `json:"total_goals"`
+	TotalAssists          int     `json:"total_assists"`
+	TotalSaves            int     `json:"total_saves"`
+	TotalShots            int     `json:"total_shots"`
+	TotalDemosInflicted   int     `json:"total_demos_inflicted"`
+	TotalDemosTaken       int     `json:"total_demos_taken"`
+	AvgScore              float64 `json:"avg_score"`
+	AvgGoals              float64 `json:"avg_goals"`
+	AvgAssists            float64 `json:"avg_assists"`
+	AvgSaves              float64 `json:"avg_saves"`
+	AvgShots              float64 `json:"avg_shots"`
+	ShootingPct           float64 `json:"shooting_pct"`
+	AvgDemosInflicted     float64 `json:"avg_demos_inflicted"`
+	AvgDemosTaken         float64 `json:"avg_demos_taken"`
+	AvgBPM                float64 `json:"avg_bpm"`
+	AvgBCPM               float64 `json:"avg_bcpm"`
+	AvgBoost              float64 `json:"avg_boost"`
+	TotalBoostStolen      int     `json:"total_boost_stolen"`
+	TotalBigPads          int     `json:"total_big_pads"`
+	TotalSmallPads        int     `json:"total_small_pads"`
+	AvgSupersonicPct      float64 `json:"avg_supersonic_pct"`
+	AvgBoostSpeedPct      float64 `json:"avg_boost_speed_pct"`
+	AvgSlowSpeedPct       float64 `json:"avg_slow_speed_pct"`
+	AvgGroundPct          float64 `json:"avg_ground_pct"`
+	AvgLowAirPct          float64 `json:"avg_low_air_pct"`
+	AvgHighAirPct         float64 `json:"avg_high_air_pct"`
+	AvgPowerslideCount    float64 `json:"avg_powerslide_count"`
+	AvgPowerslideDuration float64 `json:"avg_powerslide_duration"`
+	AvgDefThirdPct        float64 `json:"avg_def_third_pct"`
+	AvgNeutralThirdPct    float64 `json:"avg_neutral_third_pct"`
+	AvgOffThirdPct        float64 `json:"avg_off_third_pct"`
+	AvgBehindBallPct      float64 `json:"avg_behind_ball_pct"`
+	AvgFirstManPct        float64 `json:"avg_first_man_pct"`
+	AvgThirdManPct        float64 `json:"avg_third_man_pct"`
+	AvgDistToBall         float64 `json:"avg_dist_to_ball"`
+}
+
+// PlayerMatchFilter specifies filtering, sorting, and pagination for a player's match history.
 type PlayerMatchFilter struct {
-	Role     string `json:"role"`     // "all", "teammate", "opponent"
-	Playlist int    `json:"playlist"` // 0 = all playlists
-	Result   string `json:"result"`   // "all", "victory", "defeat"
-	Limit    int    `json:"limit"`
-	Offset   int    `json:"offset"`
+	Role             string `json:"role"`                        // "all", "teammate"/"with", "opponent"/"against"
+	Playlist         int    `json:"playlist"`                    // 0 = all playlists
+	PlaylistFilter   string `json:"playlist_filter,omitempty"`   // "all", "1v1", "2v2", "3v3", "extra", or numeric/name
+	FromUnix         int64  `json:"from_unix,omitempty"`         // inclusive start timestamp (0 = unbounded)
+	ToUnix           int64  `json:"to_unix,omitempty"`           // inclusive end timestamp (0 = unbounded)
+	Status           string `json:"status,omitempty"`            // "all", "uploaded"/"synced", "local"/"downloaded", "pending", "failed"
+	Result           string `json:"result"`                      // "all", "victory"/"W", "defeat"/"L"
+	Search           string `json:"search,omitempty"`            // matches arena, playlist, match GUID, or participant name
+	SortBy           string `json:"sort_by,omitempty"`           // "date", "score"/"pts", "goals", "assists", "saves", "shots", "demos", "duration"
+	SortDir          string `json:"sort_dir,omitempty"`          // "asc", "desc"
+	LocalPerspective bool   `json:"local_perspective,omitempty"` // when true, result is evaluated from local player's ("US") perspective
+	Limit            int    `json:"limit"`
+	Offset           int    `json:"offset"`
 }
 
 // PlayerMatchDetail combines the parent match record with the player's specific performance.
@@ -133,8 +187,9 @@ type PlayerMatchDetail struct {
 	MatchRecord
 	Stats       *ReplayMatchStats `json:"stats,omitempty"`
 	PlayerStats MatchPlayerRecord `json:"player_stats"`
-	Role        string            `json:"role"`   // "teammate" or "opponent" relative to local player
-	Result      string            `json:"result"` // "victory", "defeat", "draw"
+	Role        string            `json:"role"`                   // "teammate" or "opponent" relative to local player
+	Result      string            `json:"result"`                 // "victory", "defeat", "draw"
+	LocalResult string            `json:"local_result,omitempty"` // always from local player's ("US") perspective
 }
 
 // ReplayPlayerStats contains per-player statistics extracted from a replay or ballchasing record.
@@ -153,6 +208,9 @@ type ReplayPlayerStats struct {
 	CarID               int                           `json:"car_id,omitempty"`
 	CarName             string                        `json:"car_name,omitempty"`
 	MVP                 bool                          `json:"mvp,omitempty"`
+	RankName            string                        `json:"rank_name,omitempty"`
+	ShortRank           string                        `json:"short_rank,omitempty"`
+	MMR                 float64                       `json:"mmr,omitempty"`
 	Camera              *ballchasing.CameraSettings   `json:"camera,omitempty"`
 	SteeringSensitivity float64                       `json:"steering_sensitivity,omitempty"`
 	Rank                *ballchasing.PlayerRank       `json:"rank,omitempty"`
@@ -181,24 +239,37 @@ type ReplayMatchStats struct {
 	RawJSON        string              `json:"raw_json,omitempty"`
 }
 
-// MatchFilter specifies search and pagination criteria for historical matches.
+// MatchFilter specifies search, filtering, sorting, and pagination criteria for historical matches.
 type MatchFilter struct {
-	Playlist int    `json:"playlist"`
-	Query    string `json:"query"`
-	Result   string `json:"result,omitempty"` // "all", "victory", "defeat", "draw"
-	Limit    int    `json:"limit"`
-	Offset   int    `json:"offset"`
+	Playlist       int    `json:"playlist"`
+	PlaylistFilter string `json:"playlist_filter,omitempty"` // "all", "1v1", "2v2", "3v3", "extra", or numeric/name
+	FromUnix       int64  `json:"from_unix,omitempty"`       // inclusive start timestamp (0 = unbounded)
+	ToUnix         int64  `json:"to_unix,omitempty"`         // inclusive end timestamp (0 = unbounded)
+	Status         string `json:"status,omitempty"`          // "all", "uploaded"/"synced", "local"/"downloaded", "pending", "failed"
+	Query          string `json:"query"`
+	Search         string `json:"search,omitempty"`
+	Result         string `json:"result,omitempty"` // "all", "victory"/"W", "defeat"/"L", "draw"
+	SortBy         string `json:"sort_by,omitempty"`
+	SortDir        string `json:"sort_dir,omitempty"`
+	Limit          int    `json:"limit"`
+	Offset         int    `json:"offset"`
 }
 
 // PlayerDirectoryFilter specifies criteria for filtering and sorting the player directory.
 type PlayerDirectoryFilter struct {
-	Query    string `json:"query"`
-	Platform string `json:"platform"`
-	Role     string `json:"role"`  // "all", "frequent", "teammate", "opponent", "synergy"
-	Sort     string `json:"sort"`  // "last_seen", "match_count", "win_rate", "name"
-	Order    string `json:"order"` // "asc", "desc"
-	Limit    int    `json:"limit"`
-	Offset   int    `json:"offset"`
+	Query           string  `json:"query"`
+	Platform        string  `json:"platform"`
+	Role            string  `json:"role"` // "all", "frequent", "teammate", "opponent", "synergy"
+	Playlist        string  `json:"playlist,omitempty"`
+	FromUnix        int64   `json:"from_unix,omitempty"`
+	ToUnix          int64   `json:"to_unix,omitempty"`
+	MinMatches      int     `json:"min_matches,omitempty"`
+	MinSynergyWR    float64 `json:"min_synergy_wr,omitempty"`
+	MinSynergyGames int     `json:"min_synergy_games,omitempty"`
+	Sort            string  `json:"sort"` // "last_seen", "match_count"/"games", "win_rate"/"with_wr", "against_wr", "with_pts", "against_pts", "mmr", "rank", "platform", "name"
+	Order           string  `json:"order"`
+	Limit           int     `json:"limit"`
+	Offset          int     `json:"offset"`
 }
 
 // GlobalSpotlights contains dataset-wide player highlights.
@@ -256,14 +327,22 @@ type PlayerMatchup struct {
 	LastPlayedAt     time.Time `json:"last_played_at"`
 }
 
-// PlayerSummary embeds PlayerRecord with aggregate matchup totals across all playlists.
+// PlayerSummary embeds PlayerRecord with aggregate matchup totals and split role telemetry.
 type PlayerSummary struct {
 	PlayerRecord
-	TotalWinsAsTeammate   int `json:"total_wins_as_teammate"`
-	TotalLossesAsTeammate int `json:"total_losses_as_teammate"`
-	TotalWinsAsOpponent   int `json:"total_wins_as_opponent"`
-	TotalLossesAsOpponent int `json:"total_losses_as_opponent"`
-	TotalMatches          int `json:"total_matches"`
+	TotalWinsAsTeammate   int                     `json:"total_wins_as_teammate"`
+	TotalLossesAsTeammate int                     `json:"total_losses_as_teammate"`
+	TotalWinsAsOpponent   int                     `json:"total_wins_as_opponent"`
+	TotalLossesAsOpponent int                     `json:"total_losses_as_opponent"`
+	TotalMatches          int                     `json:"total_matches"`
+	EncountersCount       int                     `json:"encounters_count"`
+	TeammateWins          int                     `json:"teammate_wins"`
+	TeammateLosses        int                     `json:"teammate_losses"`
+	OpponentWins          int                     `json:"opponent_wins"`
+	OpponentLosses        int                     `json:"opponent_losses"`
+	RelationshipTag       string                  `json:"relationship_tag,omitempty"`
+	WithYouStats          *PlayerRoleStatsSummary `json:"with_you_stats,omitempty"`
+	AgainstYouStats       *PlayerRoleStatsSummary `json:"against_you_stats,omitempty"`
 }
 
 // PlayerOutcome specifies the result for a single player in a concluded match.
@@ -604,3 +683,788 @@ func ComputeGlobalSpotlights(candidates []*PlayerSummary) *GlobalSpotlights {
 	return res
 }
 
+// MatchPruner is an optional interface implemented by StateStore backends that support
+// pruning the oldest stored match/replay records to enforce replay history limits.
+type MatchPruner interface {
+	PruneOldestMatches(ctx context.Context, count int) (int, error)
+}
+
+// ParsePlaylistFilter maps a query parameter ("all", "1v1", "2v2", "3v3", "extra", numeric ID, or canonical name)
+// to a list of matching Rocket League playlist IDs. Returns nil if all playlists should be included.
+func ParsePlaylistFilter(raw string) []int {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" || s == "all" || s == "0" {
+		return nil
+	}
+	if n, err := strconv.Atoi(s); err == nil && n > 0 {
+		return []int{n}
+	}
+	switch s {
+	case "1v1", "duel", "ranked duel", "ranked duel (1v1)", "casual duel", "casual duel (1v1)":
+		return []int{10, 1}
+	case "2v2", "doubles", "ranked doubles", "ranked doubles (2v2)", "casual doubles", "casual doubles (2v2)":
+		return []int{11, 2}
+	case "3v3", "standard", "ranked standard", "ranked standard (3v3)", "casual standard", "casual standard (3v3)", "solo standard":
+		return []int{13, 3, 12}
+	case "4v4", "chaos", "casual chaos", "casual chaos (4v4)":
+		return []int{4}
+	case "extra", "extra modes", "extras":
+		return []int{27, 28, 29, 30, 34}
+	case "hoops", "ranked hoops":
+		return []int{27}
+	case "rumble", "ranked rumble":
+		return []int{28}
+	case "dropshot", "ranked dropshot":
+		return []int{29}
+	case "snow day", "snowday", "ranked snow day":
+		return []int{30}
+	case "tournament", "tournaments", "competitive tournament":
+		return []int{34}
+	}
+	return nil
+}
+
+// ParseDateFilter parses an ISO date ("YYYY-MM-DD"), RFC3339 timestamp, or unix seconds string into a UTC Unix timestamp.
+// When isEndOfDay is true and raw is a date-only string ("YYYY-MM-DD"), it returns 23:59:59 UTC of that day.
+func ParseDateFilter(raw string, isEndOfDay bool) int64 {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0
+	}
+	if len(s) == 10 && s[4] == '-' && s[7] == '-' {
+		if t, err := time.Parse("2006-01-02", s); err == nil {
+			if isEndOfDay {
+				return t.UTC().Add(24*time.Hour - time.Second).Unix()
+			}
+			return t.UTC().Unix()
+		}
+	}
+	if t, ok := ParseReplayDate(s); ok {
+		return t.UTC().Unix()
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+		return n
+	}
+	return 0
+}
+
+// NormalizeResultFilter normalizes result filter aliases ("victory", "w", "win", "wins" -> "victory"; "defeat", "l", "loss", "losses" -> "defeat").
+func NormalizeResultFilter(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "victory", "w", "win", "wins", "won":
+		return "victory"
+	case "defeat", "l", "loss", "losses", "lost":
+		return "defeat"
+	case "draw", "tie", "d":
+		return "draw"
+	default:
+		return ""
+	}
+}
+
+// NormalizeRoleFilter normalizes role filter aliases ("teammate", "with", "with_you" -> "teammate"; "opponent", "against", "against_you", "vs" -> "opponent").
+func NormalizeRoleFilter(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "teammate", "with", "with_you", "ally", "mate":
+		return "teammate"
+	case "opponent", "against", "against_you", "vs", "rival", "foe":
+		return "opponent"
+	case "frequent":
+		return "frequent"
+	case "synergy":
+		return "synergy"
+	default:
+		return "all"
+	}
+}
+
+// ComputeRelationshipTag returns the dynamic broadcast relationship badge for a player based on W-L records.
+// Note: oppWins = games local player ("US") won against them; oppLosses = games local player ("US") lost to them.
+func ComputeRelationshipTag(tmWins, tmLosses, oppWins, oppLosses int) string {
+	tmGames := tmWins + tmLosses
+	oppGames := oppWins + oppLosses
+	if tmGames == 0 && oppGames == 0 {
+		return ""
+	}
+	if tmGames >= oppGames && tmGames > 0 {
+		tmWR := float64(tmWins) / float64(tmGames)
+		if tmGames >= 3 && tmWR >= 0.65 {
+			return "PRIME DUO"
+		}
+		if tmWR >= 0.50 {
+			return "SYNERGY ALLY"
+		}
+		return "COLD DUO"
+	}
+	oppWR := float64(oppWins) / float64(oppGames)
+	if oppGames >= 3 && oppWR >= 0.40 && oppWR <= 0.60 {
+		return "ARCH-RIVAL"
+	}
+	if oppWR < 0.50 {
+		return "NEMESIS"
+	}
+	return "FAVORABLE FOE"
+}
+
+// Resolve1BasedDivision normalizes a division value to 1..4 (where 1=Div I, 4=Div IV, 0=none).
+// PsyNet skill payloads use 0..3 with "Division I..IV" in rankName, whereas Ballchasing uses 1..4 with "Div I..IV".
+// Inspecting rankName first ensures both 0-based PsyNet ranks and 1-based Ballchasing ranks resolve accurately.
+func Resolve1BasedDivision(div int, rankName string) int {
+	trimmed := strings.TrimSpace(rankName)
+	switch {
+	case strings.HasSuffix(trimmed, " Division IV") || strings.HasSuffix(trimmed, " Div IV") || strings.HasSuffix(trimmed, " DIV IV"):
+		return 4
+	case strings.HasSuffix(trimmed, " Division III") || strings.HasSuffix(trimmed, " Div III") || strings.HasSuffix(trimmed, " DIV III"):
+		return 3
+	case strings.HasSuffix(trimmed, " Division II") || strings.HasSuffix(trimmed, " Div II") || strings.HasSuffix(trimmed, " DIV II"):
+		return 2
+	case strings.HasSuffix(trimmed, " Division I") || strings.HasSuffix(trimmed, " Div I") || strings.HasSuffix(trimmed, " DIV I"):
+		return 1
+	}
+	if div >= 1 && div <= 4 {
+		return div
+	}
+	return 0
+}
+
+// ExtractPrimaryRankFromJSON extracts the best/primary (tier, division, mmr) from a player's ranks_json,
+// optionally scoped to playlistIDs (or prioritizing 11 -> 13 -> 10 if playlistIDs is empty).
+func ExtractPrimaryRankFromJSON(ranksJSON string, playlistIDs []int) (tier int, div int, mmr float64) {
+	if ranksJSON == "" || ranksJSON == "{}" {
+		return 0, 0, 0
+	}
+	var parsed map[string]struct {
+		PlaylistID int     `json:"playlist_id"`
+		Tier       int     `json:"tier"`
+		Division   int     `json:"division"`
+		MMR        float64 `json:"mmr"`
+		RankName   string  `json:"rank_name"`
+	}
+	if err := json.Unmarshal([]byte(ranksJSON), &parsed); err != nil || len(parsed) == 0 {
+		return 0, 0, 0
+	}
+	if len(playlistIDs) > 0 {
+		for _, pid := range playlistIDs {
+			if r, ok := parsed[strconv.Itoa(pid)]; ok && (r.MMR > 0 || r.Tier > 0) {
+				return r.Tier, Resolve1BasedDivision(r.Division, r.RankName), r.MMR
+			}
+		}
+	}
+	for _, pid := range []int{11, 13, 10, 12} {
+		if r, ok := parsed[strconv.Itoa(pid)]; ok && (r.MMR > 0 || r.Tier > 0) {
+			return r.Tier, Resolve1BasedDivision(r.Division, r.RankName), r.MMR
+		}
+	}
+	for _, r := range parsed {
+		rDiv := Resolve1BasedDivision(r.Division, r.RankName)
+		if r.MMR > mmr || (r.MMR == mmr && r.Tier > tier) {
+			tier = r.Tier
+			div = rDiv
+			mmr = r.MMR
+		}
+	}
+	return tier, div, mmr
+}
+
+// RoleStatsAccumulator accumulates Core and Ballchasing Mechanics stats into a PlayerRoleStatsSummary.
+type RoleStatsAccumulator struct {
+	Summary     PlayerRoleStatsSummary
+	statGames   int
+	boostGames  int
+	moveGames   int
+	posGames    int
+	sumBPM      float64
+	sumBCPM     float64
+	sumAvgBoost float64
+	sumSuperPct float64
+	sumBoostPct float64
+	sumSlowPct  float64
+	sumGround   float64
+	sumLowAir   float64
+	sumHighAir  float64
+	sumPSCount  float64
+	sumPSDur    float64
+	sumDefThird float64
+	sumNeuThird float64
+	sumOffThird float64
+	sumBehind   float64
+	sumFirstMan float64
+	sumThirdMan float64
+	sumDistBall float64
+}
+
+// AddMatchOutcome records a single game win/loss outcome (from the local player's perspective).
+func (a *RoleStatsAccumulator) AddMatchOutcome(localWon bool, isDraw bool) {
+	a.Summary.Games++
+	if !isDraw {
+		if localWon {
+			a.Summary.Wins++
+		} else {
+			a.Summary.Losses++
+		}
+	}
+}
+
+// AddPlayerBoxAndTelemetry accumulates a player's box score and optional statsJSON (ReplayPlayerStats or PlayerTelemetry).
+func (a *RoleStatsAccumulator) AddPlayerBoxAndTelemetry(score, goals, assists, saves, shots, demos int, statsJSON string) {
+	a.statGames++
+	a.Summary.TotalScore += score
+	a.Summary.TotalGoals += goals
+	a.Summary.TotalAssists += assists
+	a.Summary.TotalSaves += saves
+	a.Summary.TotalShots += shots
+	demosInflicted := demos
+
+	if strings.TrimSpace(statsJSON) != "" && statsJSON != "{}" {
+		var rps ReplayPlayerStats
+		if err := json.Unmarshal([]byte(statsJSON), &rps); err == nil {
+			if rps.Demo != nil {
+				if demosInflicted == 0 && rps.Demo.Inflicted > 0 {
+					demosInflicted = rps.Demo.Inflicted
+				}
+				a.Summary.TotalDemosTaken += rps.Demo.Taken
+			}
+			if rps.Boost != nil {
+				a.boostGames++
+				a.sumBPM += rps.Boost.BPM
+				a.sumBCPM += rps.Boost.BCPM
+				a.sumAvgBoost += rps.Boost.AvgAmount
+				a.Summary.TotalBoostStolen += rps.Boost.AmountStolen
+				a.Summary.TotalBigPads += rps.Boost.CountCollectedBig
+				a.Summary.TotalSmallPads += rps.Boost.CountCollectedSmall
+			}
+			if rps.Movement != nil {
+				a.moveGames++
+				a.sumSuperPct += rps.Movement.PercentSupersonic
+				a.sumBoostPct += rps.Movement.PercentBoostSpeed
+				a.sumSlowPct += rps.Movement.PercentSlowSpeed
+				a.sumGround += rps.Movement.PercentGround
+				a.sumLowAir += rps.Movement.PercentLowAir
+				a.sumHighAir += rps.Movement.PercentHighAir
+				a.sumPSCount += float64(rps.Movement.CountPowerslide)
+				if rps.Movement.TimePowerslide > 0 {
+					a.sumPSDur += rps.Movement.TimePowerslide
+				} else {
+					a.sumPSDur += rps.Movement.AvgPowerslideDuration
+				}
+			}
+			if rps.Positioning != nil {
+				a.posGames++
+				a.sumDefThird += rps.Positioning.PercentDefensiveThird
+				a.sumNeuThird += rps.Positioning.PercentNeutralThird
+				a.sumOffThird += rps.Positioning.PercentOffensiveThird
+				a.sumBehind += rps.Positioning.PercentBehindBall
+				a.sumFirstMan += rps.Positioning.PercentMostForward
+				a.sumThirdMan += rps.Positioning.PercentMostBack
+				a.sumDistBall += rps.Positioning.AvgDistanceToBall
+			}
+		}
+	}
+	a.Summary.TotalDemosInflicted += demosInflicted
+}
+
+// Finalize computes all per-game averages and win rates, applying fallbackWins/fallbackLosses if higher than recorded match rows.
+func (a *RoleStatsAccumulator) Finalize(fallbackWins, fallbackLosses int) *PlayerRoleStatsSummary {
+	if fallbackWins+fallbackLosses > a.Summary.Games {
+		a.Summary.Wins = fallbackWins
+		a.Summary.Losses = fallbackLosses
+		a.Summary.Games = fallbackWins + fallbackLosses
+	}
+	decided := a.Summary.Wins + a.Summary.Losses
+	if decided > 0 {
+		a.Summary.WinRate = math.Round((float64(a.Summary.Wins)/float64(decided))*1000) / 10
+	}
+	if a.statGames > 0 {
+		fg := float64(a.statGames)
+		a.Summary.AvgScore = math.Round((float64(a.Summary.TotalScore)/fg)*10) / 10
+		a.Summary.AvgGoals = math.Round((float64(a.Summary.TotalGoals)/fg)*100) / 100
+		a.Summary.AvgAssists = math.Round((float64(a.Summary.TotalAssists)/fg)*100) / 100
+		a.Summary.AvgSaves = math.Round((float64(a.Summary.TotalSaves)/fg)*100) / 100
+		a.Summary.AvgShots = math.Round((float64(a.Summary.TotalShots)/fg)*100) / 100
+		a.Summary.AvgDemosInflicted = math.Round((float64(a.Summary.TotalDemosInflicted)/fg)*100) / 100
+		a.Summary.AvgDemosTaken = math.Round((float64(a.Summary.TotalDemosTaken)/fg)*100) / 100
+		if a.Summary.TotalShots > 0 {
+			a.Summary.ShootingPct = math.Round((float64(a.Summary.TotalGoals)/float64(a.Summary.TotalShots))*1000) / 10
+		}
+	}
+	if a.boostGames > 0 {
+		bg := float64(a.boostGames)
+		a.Summary.AvgBPM = math.Round((a.sumBPM/bg)*10) / 10
+		a.Summary.AvgBCPM = math.Round((a.sumBCPM/bg)*10) / 10
+		a.Summary.AvgBoost = math.Round((a.sumAvgBoost/bg)*10) / 10
+	}
+	if a.moveGames > 0 {
+		mg := float64(a.moveGames)
+		a.Summary.AvgSupersonicPct = math.Round((a.sumSuperPct/mg)*10) / 10
+		a.Summary.AvgBoostSpeedPct = math.Round((a.sumBoostPct/mg)*10) / 10
+		a.Summary.AvgSlowSpeedPct = math.Round((a.sumSlowPct/mg)*10) / 10
+		a.Summary.AvgGroundPct = math.Round((a.sumGround/mg)*10) / 10
+		a.Summary.AvgLowAirPct = math.Round((a.sumLowAir/mg)*10) / 10
+		a.Summary.AvgHighAirPct = math.Round((a.sumHighAir/mg)*10) / 10
+		a.Summary.AvgPowerslideCount = math.Round((a.sumPSCount/mg)*10) / 10
+		a.Summary.AvgPowerslideDuration = math.Round((a.sumPSDur/mg)*100) / 100
+	}
+	if a.posGames > 0 {
+		pg := float64(a.posGames)
+		a.Summary.AvgDefThirdPct = math.Round((a.sumDefThird/pg)*10) / 10
+		a.Summary.AvgNeutralThirdPct = math.Round((a.sumNeuThird/pg)*10) / 10
+		a.Summary.AvgOffThirdPct = math.Round((a.sumOffThird/pg)*10) / 10
+		a.Summary.AvgBehindBallPct = math.Round((a.sumBehind/pg)*10) / 10
+		a.Summary.AvgFirstManPct = math.Round((a.sumFirstMan/pg)*10) / 10
+		a.Summary.AvgThirdManPct = math.Round((a.sumThirdMan/pg)*10) / 10
+		a.Summary.AvgDistToBall = math.Round((a.sumDistBall/pg)*10) / 10
+	}
+	out := a.Summary
+	return &out
+}
+
+// ExtractPlayerStatsJSONFromReplay returns mpStatsJSON if non-empty, or extracts the matching player's
+// ReplayPlayerStats JSON from replayStatsJSON as a fallback.
+func ExtractPlayerStatsJSONFromReplay(mpStatsJSON, replayStatsJSON, playerID, playerName string, teamNum int) string {
+	if s := strings.TrimSpace(mpStatsJSON); s != "" && s != "{}" {
+		return s
+	}
+	if s := strings.TrimSpace(replayStatsJSON); s != "" && s != "{}" {
+		var st ReplayMatchStats
+		if err := json.Unmarshal([]byte(s), &st); err == nil {
+			lowerID := strings.ToLower(strings.TrimSpace(playerID))
+			lowerName := strings.ToLower(strings.TrimSpace(playerName))
+			for _, p := range st.Players {
+				pID := strings.ToLower(strings.TrimSpace(p.OnlineID))
+				if (pID != "" && pID != "0" && (pID == lowerID || strings.Contains(lowerID, "|"+pID+"|"))) ||
+					(lowerName != "" && strings.EqualFold(strings.TrimSpace(p.Name), lowerName) && (teamNum < 0 || p.Team == teamNum)) {
+					if b, err := json.Marshal(p); err == nil {
+						return string(b)
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// PopulatePlayerSummaryComputedFields sets EncountersCount, TeammateWins/Losses, OpponentWins/Losses,
+// and RelationshipTag on a PlayerSummary.
+func PopulatePlayerSummaryComputedFields(sRec *PlayerSummary) {
+	if sRec == nil {
+		return
+	}
+	sRec.TeammateWins = sRec.TotalWinsAsTeammate
+	sRec.TeammateLosses = sRec.TotalLossesAsTeammate
+	sRec.OpponentWins = sRec.TotalWinsAsOpponent
+	sRec.OpponentLosses = sRec.TotalLossesAsOpponent
+	sRec.EncountersCount = sRec.TotalMatches
+	sRec.RelationshipTag = ComputeRelationshipTag(
+		sRec.TotalWinsAsTeammate,
+		sRec.TotalLossesAsTeammate,
+		sRec.TotalWinsAsOpponent,
+		sRec.TotalLossesAsOpponent,
+	)
+}
+
+// MatchesRoleFilter evaluates whether a PlayerSummary satisfies the role filter in PlayerDirectoryFilter.
+func MatchesRoleFilter(sRec *PlayerSummary, filter PlayerDirectoryFilter) bool {
+	if sRec == nil {
+		return false
+	}
+	role := NormalizeRoleFilter(filter.Role)
+	switch role {
+	case "frequent":
+		minM := filter.MinMatches
+		if minM <= 0 {
+			minM = 3
+		}
+		return sRec.TotalMatches >= minM
+	case "teammate":
+		return (sRec.TotalWinsAsTeammate + sRec.TotalLossesAsTeammate) > 0
+	case "opponent":
+		return (sRec.TotalWinsAsOpponent + sRec.TotalLossesAsOpponent) > 0
+	case "synergy":
+		minGames := filter.MinSynergyGames
+		if minGames <= 0 {
+			minGames = 2
+		}
+		minWR := filter.MinSynergyWR
+		if minWR <= 0 {
+			minWR = 60.0
+		}
+		tmGames := sRec.TotalWinsAsTeammate + sRec.TotalLossesAsTeammate
+		if tmGames < minGames {
+			return false
+		}
+		wrPct := (float64(sRec.TotalWinsAsTeammate) / float64(tmGames)) * 100.0
+		return wrPct+1e-9 >= minWR
+	default:
+		return true
+	}
+}
+
+// SortAndPaginatePlayerSummaries sorts matching PlayerSummary records according to filter.Sort and filter.Order
+// and applies filter.Limit and filter.Offset pagination.
+func SortAndPaginatePlayerSummaries(matching []*PlayerSummary, filter PlayerDirectoryFilter, playlistIDs []int) ([]*PlayerSummary, int) {
+	total := len(matching)
+	if total == 0 || filter.Limit == 0 {
+		return make([]*PlayerSummary, 0), total
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return make([]*PlayerSummary, 0), total
+	}
+
+	cleanSort := strings.ToLower(strings.TrimSpace(filter.Sort))
+	isAsc := strings.ToLower(strings.TrimSpace(filter.Order)) == "asc"
+
+	sort.Slice(matching, func(i, j int) bool {
+		a, b := matching[i], matching[j]
+		switch cleanSort {
+		case "games", "match_count", "matches", "encounters":
+			if a.TotalMatches != b.TotalMatches {
+				if isAsc {
+					return a.TotalMatches < b.TotalMatches
+				}
+				return a.TotalMatches > b.TotalMatches
+			}
+		case "with_wr", "win_rate":
+			tmGamesA := a.TotalWinsAsTeammate + a.TotalLossesAsTeammate
+			tmGamesB := b.TotalWinsAsTeammate + b.TotalLossesAsTeammate
+			rateA := 0.0
+			if tmGamesA > 0 {
+				rateA = float64(a.TotalWinsAsTeammate) / float64(tmGamesA)
+			}
+			rateB := 0.0
+			if tmGamesB > 0 {
+				rateB = float64(b.TotalWinsAsTeammate) / float64(tmGamesB)
+			}
+			if rateA != rateB {
+				if isAsc {
+					return rateA < rateB
+				}
+				return rateA > rateB
+			}
+			if a.TotalMatches != b.TotalMatches {
+				if isAsc {
+					return a.TotalMatches < b.TotalMatches
+				}
+				return a.TotalMatches > b.TotalMatches
+			}
+		case "against_wr":
+			oppGamesA := a.TotalWinsAsOpponent + a.TotalLossesAsOpponent
+			oppGamesB := b.TotalWinsAsOpponent + b.TotalLossesAsOpponent
+			rateA := 0.0
+			if oppGamesA > 0 {
+				rateA = float64(a.TotalWinsAsOpponent) / float64(oppGamesA)
+			}
+			rateB := 0.0
+			if oppGamesB > 0 {
+				rateB = float64(b.TotalWinsAsOpponent) / float64(oppGamesB)
+			}
+			if rateA != rateB {
+				if isAsc {
+					return rateA < rateB
+				}
+				return rateA > rateB
+			}
+			if a.TotalMatches != b.TotalMatches {
+				if isAsc {
+					return a.TotalMatches < b.TotalMatches
+				}
+				return a.TotalMatches > b.TotalMatches
+			}
+		case "with_pts":
+			ptsA := 0.0
+			if a.WithYouStats != nil {
+				ptsA = a.WithYouStats.AvgScore
+			}
+			ptsB := 0.0
+			if b.WithYouStats != nil {
+				ptsB = b.WithYouStats.AvgScore
+			}
+			if ptsA != ptsB {
+				if isAsc {
+					return ptsA < ptsB
+				}
+				return ptsA > ptsB
+			}
+		case "against_pts":
+			ptsA := 0.0
+			if a.AgainstYouStats != nil {
+				ptsA = a.AgainstYouStats.AvgScore
+			}
+			ptsB := 0.0
+			if b.AgainstYouStats != nil {
+				ptsB = b.AgainstYouStats.AvgScore
+			}
+			if ptsA != ptsB {
+				if isAsc {
+					return ptsA < ptsB
+				}
+				return ptsA > ptsB
+			}
+		case "mmr":
+			_, _, mmrA := ExtractPrimaryRankFromJSON(a.RanksJSON, playlistIDs)
+			_, _, mmrB := ExtractPrimaryRankFromJSON(b.RanksJSON, playlistIDs)
+			if mmrA != mmrB {
+				if isAsc {
+					return mmrA < mmrB
+				}
+				return mmrA > mmrB
+			}
+		case "rank":
+			tierA, divA, mmrA := ExtractPrimaryRankFromJSON(a.RanksJSON, playlistIDs)
+			tierB, divB, mmrB := ExtractPrimaryRankFromJSON(b.RanksJSON, playlistIDs)
+			scoreA := tierA*10 + divA
+			scoreB := tierB*10 + divB
+			if scoreA != scoreB {
+				if isAsc {
+					return scoreA < scoreB
+				}
+				return scoreA > scoreB
+			}
+			if mmrA != mmrB {
+				if isAsc {
+					return mmrA < mmrB
+				}
+				return mmrA > mmrB
+			}
+		case "platform":
+			platA := strings.ToLower(a.Platform)
+			platB := strings.ToLower(b.Platform)
+			if platA != platB {
+				if isAsc {
+					return platA < platB
+				}
+				return platA > platB
+			}
+		case "name":
+			nameA := strings.ToLower(a.PlayerName)
+			nameB := strings.ToLower(b.PlayerName)
+			if nameA != nameB {
+				if isAsc {
+					return nameA < nameB
+				}
+				return nameA > nameB
+			}
+		default: // "last_seen"
+			if !a.LastSeenAt.Equal(b.LastSeenAt) {
+				if isAsc {
+					return a.LastSeenAt.Before(b.LastSeenAt)
+				}
+				return a.LastSeenAt.After(b.LastSeenAt)
+			}
+		}
+
+		// Fallback tie-breaker: last_seen_at (respecting isAsc), player_id ASC
+		if !a.LastSeenAt.Equal(b.LastSeenAt) {
+			if isAsc {
+				return a.LastSeenAt.Before(b.LastSeenAt)
+			}
+			return a.LastSeenAt.After(b.LastSeenAt)
+		}
+		return a.PlayerID < b.PlayerID
+	})
+
+	end := total
+	if filter.Limit > 0 {
+		end = offset + filter.Limit
+		if end > total {
+			end = total
+		}
+	}
+
+	results := make([]*PlayerSummary, end-offset)
+	copy(results, matching[offset:end])
+	return results, total
+}
+
+// MatchesPlaylistIDs returns true if playlistIDs is empty or contains playlist.
+func MatchesPlaylistIDs(playlist int, playlistIDs []int) bool {
+	if len(playlistIDs) == 0 {
+		return true
+	}
+	for _, id := range playlistIDs {
+		if id == playlist {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchesStatusFilter evaluates whether a MatchRecord matches the given status filter
+// ("all", "uploaded"/"synced", "local"/"downloaded", "pending", "failed").
+func MatchesStatusFilter(m *MatchRecord, status string) bool {
+	if m == nil {
+		return false
+	}
+	s := strings.ToLower(strings.TrimSpace(status))
+	if s == "" || s == "all" {
+		return true
+	}
+	isUploaded := m.UploadStatus == UploadUploaded || m.UploadStatus == UploadDuplicate || m.StatsSyncStatus == StatsSyncSynced || strings.TrimSpace(m.BallchasingID) != ""
+	isFailed := m.DownloadStatus == DownloadFailed || m.UploadStatus == UploadFailed || m.StatsSyncStatus == StatsSyncFailed
+	isDownloaded := m.DownloadStatus == DownloadDownloaded || strings.TrimSpace(m.LocalFilePath) != ""
+	switch s {
+	case "uploaded", "synced", "ballchasing":
+		return isUploaded
+	case "local":
+		return isDownloaded && !isUploaded
+	case "downloaded":
+		return isDownloaded
+	case "failed", "error":
+		return isFailed
+	case "pending", "syncing", "queued":
+		return !isUploaded && !isFailed
+	default:
+		return true
+	}
+}
+
+// SortHistoricalMatches sorts HistoricalMatchRecord slice by sortBy ("date", "score"/"pts", "goals", "assists", "saves", "shots", "demos", "duration")
+// and sortDir ("asc", "desc"), using localStatsByGUID for local player box score metrics.
+func SortHistoricalMatches(records []*HistoricalMatchRecord, sortBy, sortDir string, localStatsByGUID map[string]*MatchPlayerRecord) {
+	s := strings.ToLower(strings.TrimSpace(sortBy))
+	isAsc := strings.ToLower(strings.TrimSpace(sortDir)) == "asc"
+
+	getMetric := func(r *HistoricalMatchRecord) float64 {
+		if r == nil {
+			return 0
+		}
+		var lp *MatchPlayerRecord
+		if localStatsByGUID != nil {
+			lp = localStatsByGUID[r.MatchGUID]
+		}
+		switch s {
+		case "score", "pts", "points":
+			if lp != nil {
+				return float64(lp.Score)
+			}
+			if r.Stats != nil && len(r.Stats.Players) > 0 {
+				return float64(r.Stats.Players[0].Score)
+			}
+		case "goals":
+			if lp != nil {
+				return float64(lp.Goals)
+			}
+			if r.Stats != nil && len(r.Stats.Players) > 0 {
+				return float64(r.Stats.Players[0].Goals)
+			}
+		case "assists":
+			if lp != nil {
+				return float64(lp.Assists)
+			}
+			if r.Stats != nil && len(r.Stats.Players) > 0 {
+				return float64(r.Stats.Players[0].Assists)
+			}
+		case "saves":
+			if lp != nil {
+				return float64(lp.Saves)
+			}
+			if r.Stats != nil && len(r.Stats.Players) > 0 {
+				return float64(r.Stats.Players[0].Saves)
+			}
+		case "shots":
+			if lp != nil {
+				return float64(lp.Shots)
+			}
+			if r.Stats != nil && len(r.Stats.Players) > 0 {
+				return float64(r.Stats.Players[0].Shots)
+			}
+		case "demos", "demos_inflicted":
+			if lp != nil {
+				return float64(lp.Demos)
+			}
+			if r.Stats != nil && len(r.Stats.Players) > 0 {
+				return float64(r.Stats.Players[0].Demos)
+			}
+		case "duration":
+			if r.Stats != nil {
+				return float64(r.Stats.Duration)
+			}
+		}
+		return float64(r.RecordStartTimestamp)
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		a, b := records[i], records[j]
+		if s == "" || s == "date" || s == "time" || s == "timestamp" {
+			if a.RecordStartTimestamp != b.RecordStartTimestamp {
+				if isAsc {
+					return a.RecordStartTimestamp < b.RecordStartTimestamp
+				}
+				return a.RecordStartTimestamp > b.RecordStartTimestamp
+			}
+			return a.MatchGUID < b.MatchGUID
+		}
+		mA := getMetric(a)
+		mB := getMetric(b)
+		if mA != mB {
+			if isAsc {
+				return mA < mB
+			}
+			return mA > mB
+		}
+		if a.RecordStartTimestamp != b.RecordStartTimestamp {
+			return a.RecordStartTimestamp > b.RecordStartTimestamp
+		}
+		return a.MatchGUID < b.MatchGUID
+	})
+}
+
+// SortPlayerMatchDetails sorts PlayerMatchDetail slice by sortBy ("date", "score"/"pts", "goals", "assists", "saves", "shots", "demos", "duration")
+// and sortDir ("asc", "desc").
+func SortPlayerMatchDetails(details []*PlayerMatchDetail, sortBy, sortDir string) {
+	s := strings.ToLower(strings.TrimSpace(sortBy))
+	isAsc := strings.ToLower(strings.TrimSpace(sortDir)) == "asc"
+
+	getMetric := func(d *PlayerMatchDetail) float64 {
+		if d == nil {
+			return 0
+		}
+		switch s {
+		case "score", "pts", "points":
+			return float64(d.PlayerStats.Score)
+		case "goals":
+			return float64(d.PlayerStats.Goals)
+		case "assists":
+			return float64(d.PlayerStats.Assists)
+		case "saves":
+			return float64(d.PlayerStats.Saves)
+		case "shots":
+			return float64(d.PlayerStats.Shots)
+		case "demos", "demos_inflicted":
+			return float64(d.PlayerStats.Demos)
+		case "duration":
+			if d.Stats != nil {
+				return float64(d.Stats.Duration)
+			}
+		}
+		return float64(d.RecordStartTimestamp)
+	}
+
+	sort.Slice(details, func(i, j int) bool {
+		a, b := details[i], details[j]
+		if s == "" || s == "date" || s == "time" || s == "timestamp" {
+			if a.RecordStartTimestamp != b.RecordStartTimestamp {
+				if isAsc {
+					return a.RecordStartTimestamp < b.RecordStartTimestamp
+				}
+				return a.RecordStartTimestamp > b.RecordStartTimestamp
+			}
+			return a.MatchGUID < b.MatchGUID
+		}
+		mA := getMetric(a)
+		mB := getMetric(b)
+		if mA != mB {
+			if isAsc {
+				return mA < mB
+			}
+			return mA > mB
+		}
+		if a.RecordStartTimestamp != b.RecordStartTimestamp {
+			return a.RecordStartTimestamp > b.RecordStartTimestamp
+		}
+		return a.MatchGUID < b.MatchGUID
+	})
+}

@@ -81,6 +81,65 @@ export interface PlaylistSessionStats {
   mmr_delta: number;
 }
 
+export interface PlayerRoleStatsSummary {
+  games: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_score: number;
+  total_goals: number;
+  total_assists: number;
+  total_saves: number;
+  total_shots: number;
+  total_demos_inflicted: number;
+  total_demos_taken: number;
+  avg_score: number;
+  avg_goals: number;
+  avg_assists: number;
+  avg_saves: number;
+  avg_shots: number;
+  shooting_pct: number;
+  avg_demos_inflicted: number;
+  avg_demos_taken: number;
+  avg_bpm: number;
+  avg_bcpm: number;
+  avg_boost: number;
+  total_boost_stolen: number;
+  total_big_pads: number;
+  total_small_pads: number;
+  avg_supersonic_pct: number;
+  avg_boost_speed_pct: number;
+  avg_slow_speed_pct: number;
+  avg_ground_pct: number;
+  avg_low_air_pct: number;
+  avg_high_air_pct: number;
+  avg_powerslide_count: number;
+  avg_powerslide_duration: number;
+  avg_def_third_pct: number;
+  avg_neutral_third_pct: number;
+  avg_off_third_pct: number;
+  avg_behind_ball_pct: number;
+  avg_first_man_pct: number;
+  avg_third_man_pct: number;
+  avg_dist_to_ball: number;
+  score?: number;
+  goals?: number;
+  assists?: number;
+  saves?: number;
+  demos?: number;
+  shot_pct?: number;
+  avg_demos?: number;
+}
+
+export interface MostPlayedPlaylistSummary {
+  id: number;
+  name: string;
+  net_mmr: number;
+  wins: number;
+  losses: number;
+  matches_count: number;
+}
+
 export interface LobbyPlayer {
   player_id: string;
   platform: string;
@@ -93,6 +152,10 @@ export interface LobbyPlayer {
   current_rank?: PlayerPlaylistRank;
   ranks?: PlayerRanksSnapshot;
   matchup_record?: PlayerMatchup;
+  with_you_stats?: PlayerRoleStatsSummary;
+  against_you_stats?: PlayerRoleStatsSummary;
+  in_wins_stats?: PlayerRoleStatsSummary;
+  in_losses_stats?: PlayerRoleStatsSummary;
   notes?: string;
   tags?: string[];
 }
@@ -133,6 +196,23 @@ export interface SessionResponse {
   continuable_session?: SessionResponse | null;
   continue_window_seconds?: number;
   can_continue?: boolean;
+  most_played_playlist?: MostPlayedPlaylistSummary;
+  for_stats?: PlayerRoleStatsSummary;
+  against_stats?: PlayerRoleStatsSummary;
+  stats_api_ready?: boolean;
+  rank_api_ready?: boolean;
+  mmr_poller_state?: string;
+  game_connected?: boolean;
+  pending_count?: number;
+  trigger_threshold?: number;
+  force_sync_on_trigger?: boolean;
+  enable_toast?: boolean;
+  auto_sync_on_exit?: boolean;
+  max_hosted_replays?: number;
+  replay_count?: number;
+  replay_limit?: number;
+  replay_usage_pct?: number;
+  replay_limit_status?: 'ok' | 'warning' | 'exceeded' | string;
 }
 
 export interface SessionListResponse {
@@ -194,6 +274,14 @@ export interface PlayerSummary {
   total_wins_as_opponent: number;
   total_losses_as_opponent: number;
   total_matches: number;
+  teammate_wins?: number;
+  teammate_losses?: number;
+  opponent_wins?: number;
+  opponent_losses?: number;
+  encounters_count?: number;
+  with_you_stats?: PlayerRoleStatsSummary;
+  against_you_stats?: PlayerRoleStatsSummary;
+  relationship_tag?: string;
 }
 
 export interface PlayerSearchResponse {
@@ -215,6 +303,14 @@ export interface PlayerDetailResponse {
   last_seen_at: string;
   matchups: PlayerMatchup[];
   recent_matches?: PlayerMatchDetail[];
+  teammate_wins?: number;
+  teammate_losses?: number;
+  opponent_wins?: number;
+  opponent_losses?: number;
+  encounters_count?: number;
+  with_you_stats?: PlayerRoleStatsSummary;
+  against_you_stats?: PlayerRoleStatsSummary;
+  relationship_tag?: string;
 }
 
 export interface PlayerPatchPayload {
@@ -265,6 +361,7 @@ export interface PlayerMatchDetail extends HistoricalMatchRecord {
   player_stats: MatchPlayerRecord;
   role: 'teammate' | 'opponent';
   result: 'victory' | 'defeat' | 'draw' | 'unknown' | '';
+  local_result?: 'victory' | 'defeat' | 'draw' | 'unknown' | '';
 }
 
 export interface PlayerMatchesResponse {
@@ -535,6 +632,11 @@ export interface ReplayPlayerStats {
   camera?: CameraSettings;
   steering_sensitivity?: number;
   rank?: { id?: string; tier?: number; division?: number; name?: string; mmr?: number };
+  rank_name?: string;
+  short_rank?: string;
+  mmr?: number;
+  tier?: number;
+  division?: number;
   core?: CoreStats;
   boost?: BoostStats;
   movement?: MovementStats;

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="23.5 22.8 53 53" width="512" height="512">
+  <style>
+    circle { stroke: #0a0b0d; }
+    @media (prefers-color-scheme: dark) {
+      circle { stroke: #ececec; }
+    }
+  </style>
+  <circle cx="50" cy="49.3" r="24.6"
+          fill="none" stroke-width="2.2"/>
+  <circle cx="50" cy="49.3" r="16"
+          fill="none" stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-dasharray="20.19 4.94"
+          stroke-dashoffset="22.66"
+          transform="rotate(45 50 49.3)"/>
+</svg>

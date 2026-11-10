@@ -343,11 +343,12 @@ type PlayerDemos struct {
 
 // PlayerRank represents rank and tier information.
 type PlayerRank struct {
-	ID       string  `json:"id,omitempty"`
-	Tier     int     `json:"tier,omitempty"`
-	Division int     `json:"division,omitempty"`
-	Name     string  `json:"name,omitempty"`
-	MMR      float64 `json:"mmr,omitempty"`
+	ID        string  `json:"id,omitempty"`
+	Tier      int     `json:"tier,omitempty"`
+	Division  int     `json:"division,omitempty"`
+	Name      string  `json:"name,omitempty"`
+	ShortRank string  `json:"short_rank,omitempty"`
+	MMR       float64 `json:"mmr,omitempty"`
 }
 
 // RankInfo aliases PlayerRank for min_rank / max_rank contract compatibility.

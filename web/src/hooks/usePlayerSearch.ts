@@ -1,7 +1,19 @@
 import { useState, useEffect } from 'react';
 import { PlayerSummary, PlayerSearchResponse, GlobalSpotlights } from '../types/api';
+import { useDashboard } from '../context/DashboardContext';
+import { isDemoMode, SAMPLE_PLAYERS } from '../utils/sampleData';
 
-export type PlayerSortField = 'last_seen' | 'total_matches' | 'win_rate' | 'player_name';
+export type PlayerSortField =
+  | 'last_seen'
+  | 'total_matches'
+  | 'win_rate'
+  | 'vs_win_rate'
+  | 'player_name'
+  | 'platform'
+  | 'mmr'
+  | 'against_wr'
+  | 'with_pts'
+  | 'vs_pts';
 export type SortOrder = 'asc' | 'desc';
 export type RoleFilter = 'all' | 'frequent' | 'teammate' | 'opponent' | 'synergy';
 
@@ -13,9 +25,11 @@ export interface UsePlayerSearchOptions {
 }
 
 export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
+  const { dateRangeQueryParams } = useDashboard();
   const [query, setQuery] = useState<string>('');
   const [debouncedQuery, setDebouncedQuery] = useState<string>('');
   const [platform, setPlatform] = useState<string>('all');
+  const [playlist, setPlaylist] = useState<string>('all');
   const [role, setRole] = useState<RoleFilter>(options.initialRole ?? 'all');
   const [sort, setSort] = useState<PlayerSortField>(options.initialSort ?? 'last_seen');
   const [order, setOrder] = useState<SortOrder>(options.initialOrder ?? 'desc');
@@ -37,10 +51,10 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Reset page when platform, role, sort, or order changes
+  // Reset page when platform, playlist, role, sort, order, or date range changes
   useEffect(() => {
     setPage(1);
-  }, [platform, role, sort, order]);
+  }, [platform, playlist, role, sort, order, dateRangeQueryParams.from, dateRangeQueryParams.to]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -50,7 +64,12 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
     let backendSort = 'last_seen';
     if (sort === 'total_matches') backendSort = 'match_count';
     else if (sort === 'player_name') backendSort = 'name';
+    else if (sort === 'platform') backendSort = 'platform';
     else if (sort === 'win_rate') backendSort = 'win_rate';
+    else if (sort === 'mmr') backendSort = 'mmr';
+    else if (sort === 'against_wr' || sort === 'vs_win_rate') backendSort = 'opponent_wr';
+    else if (sort === 'with_pts') backendSort = 'with_pts';
+    else if (sort === 'vs_pts') backendSort = 'vs_pts';
 
     async function executeSearch() {
       setIsLoading(true);
@@ -62,7 +81,10 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
         });
         if (debouncedQuery.trim()) params.set('query', debouncedQuery.trim());
         if (platform !== 'all') params.set('platform', platform);
+        if (playlist !== 'all') params.set('playlist', playlist);
         if (role !== 'all') params.set('role', role);
+        if (dateRangeQueryParams.from) params.set('from', dateRangeQueryParams.from);
+        if (dateRangeQueryParams.to) params.set('to', dateRangeQueryParams.to);
         if (backendSort) params.set('sort', backendSort);
         if (order) params.set('order', order);
 
@@ -74,19 +96,34 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
         const data = await res.json();
         if (Array.isArray(data)) {
           // Backward-compatible fallback if daemon returned raw array
-          setPlayers(data);
-          setTotal(data.length);
+          if (data.length === 0 && isDemoMode() && !debouncedQuery.trim() && platform === 'all') {
+            setPlayers(SAMPLE_PLAYERS);
+            setTotal(SAMPLE_PLAYERS.length);
+          } else {
+            setPlayers(data);
+            setTotal(data.length);
+          }
         } else {
           const resp = data as PlayerSearchResponse;
-          setPlayers(resp.players || []);
-          setTotal(resp.total || 0);
-          if (resp.spotlights) {
-            setSpotlights(resp.spotlights);
+          if ((!resp.players || resp.players.length === 0) && isDemoMode() && !debouncedQuery.trim() && platform === 'all') {
+            setPlayers(SAMPLE_PLAYERS);
+            setTotal(SAMPLE_PLAYERS.length);
+          } else {
+            setPlayers(resp.players || []);
+            setTotal(resp.total || 0);
+            if (resp.spotlights) {
+              setSpotlights(resp.spotlights);
+            }
           }
         }
       } catch (err) {
         if (!abortController.signal.aborted) {
-          setError(err instanceof Error ? err.message : 'Error fetching players');
+          if (isDemoMode()) {
+            setPlayers(SAMPLE_PLAYERS);
+            setTotal(SAMPLE_PLAYERS.length);
+          } else {
+            setError(err instanceof Error ? err.message : 'Error fetching players');
+          }
         }
       } finally {
         if (!abortController.signal.aborted) {
@@ -97,7 +134,18 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
 
     executeSearch();
     return () => abortController.abort();
-  }, [debouncedQuery, platform, role, sort, order, page, limit]);
+  }, [
+    debouncedQuery,
+    platform,
+    playlist,
+    role,
+    sort,
+    order,
+    page,
+    limit,
+    dateRangeQueryParams.from,
+    dateRangeQueryParams.to,
+  ]);
 
   const toggleSort = (field: PlayerSortField) => {
     if (sort === field) {
@@ -113,6 +161,8 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
     setQuery,
     platform,
     setPlatform,
+    playlist,
+    setPlaylist,
     role,
     setRole,
     sort,
@@ -131,3 +181,4 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
     totalPages: Math.max(1, Math.ceil(total / limit)),
   };
 }
+

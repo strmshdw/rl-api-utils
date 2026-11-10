@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -211,6 +212,25 @@ func WithBackoffTTL(d time.Duration) TrackerOption {
 	}
 }
 
+// WithPostMatchPollSchedule configures the delayed post-match MMR reconciliation backoff schedule.
+func WithPostMatchPollSchedule(schedule []time.Duration) TrackerOption {
+	return func(t *Tracker) {
+		if len(schedule) > 0 {
+			cp := make([]time.Duration, len(schedule))
+			copy(cp, schedule)
+			t.postMatchPollSchedule = cp
+		}
+	}
+}
+
+var defaultPostMatchPollSchedule = []time.Duration{
+	2 * time.Second,
+	5 * time.Second,
+	9 * time.Second,
+	15 * time.Second,
+	25 * time.Second,
+}
+
 // Tracker coordinates match lifecycle events, local player resolution, ranks, and outcomes.
 type Tracker struct {
 	mu           sync.RWMutex
@@ -245,6 +265,12 @@ type Tracker struct {
 	matchupCache    map[string]*storage.PlayerMatchup
 	matchupInFlight map[string]time.Time
 
+	// Post-Match MMR Poller State ("idle", "polling", "synced")
+	mmrPollerState        string
+	lastMMRSyncLatencyMs  int64
+	postMatchPollSchedule []time.Duration
+	pollerCancel          context.CancelFunc
+
 	// Lifecycle & Concurrency
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -264,21 +290,23 @@ func NewTracker(store storage.StateStore, rankClient SkillFetcher, cfg config.Pl
 	ctx, cancel := context.WithCancel(context.Background())
 
 	t := &Tracker{
-		store:            store,
-		rankClient:       rankClient,
-		cfg:              cfg,
-		authCfg:          authCfg,
-		logger:           slog.Default().With(slog.String("component", "playertrack")),
-		upsertedProfiles: make(map[string]string),
-		rankCache:        make(map[string]cachedRankEntry),
-		rankCacheTTL:     defaultRankCacheTTL,
-		inFlight:         make(map[string]time.Time),
-		failBackoff:      make(map[string]time.Time),
-		backoffTTL:       defaultBackoffTTL,
-		matchupCache:     make(map[string]*storage.PlayerMatchup),
-		matchupInFlight:  make(map[string]time.Time),
-		ctx:              ctx,
-		cancel:           cancel,
+		store:                 store,
+		rankClient:            rankClient,
+		cfg:                   cfg,
+		authCfg:               authCfg,
+		logger:                slog.Default().With(slog.String("component", "playertrack")),
+		upsertedProfiles:      make(map[string]string),
+		rankCache:             make(map[string]cachedRankEntry),
+		rankCacheTTL:          defaultRankCacheTTL,
+		inFlight:              make(map[string]time.Time),
+		failBackoff:           make(map[string]time.Time),
+		backoffTTL:            defaultBackoffTTL,
+		matchupCache:          make(map[string]*storage.PlayerMatchup),
+		matchupInFlight:       make(map[string]time.Time),
+		mmrPollerState:        "idle",
+		postMatchPollSchedule: append([]time.Duration(nil), defaultPostMatchPollSchedule...),
+		ctx:                   ctx,
+		cancel:                cancel,
 	}
 
 	for _, opt := range opts {
@@ -299,6 +327,9 @@ func (t *Tracker) Close() error {
 		return nil
 	}
 	t.closed = true
+	if t.pollerCancel != nil {
+		t.pollerCancel()
+	}
 	if t.cancel != nil {
 		t.cancel()
 	}
@@ -306,6 +337,35 @@ func (t *Tracker) Close() error {
 
 	t.wg.Wait()
 	return nil
+}
+
+// MMRPollerState returns the current post-match MMR poller state ("idle", "polling", or "synced").
+func (t *Tracker) MMRPollerState() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.mmrPollerState == "" {
+		return "idle"
+	}
+	return t.mmrPollerState
+}
+
+// LastMMRSyncLatencyMs returns the latency in milliseconds of the most recent post-match MMR sync.
+func (t *Tracker) LastMMRSyncLatencyMs() int64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lastMMRSyncLatencyMs
+}
+
+// IsRankAPIReady reports whether the underlying RankClient is enabled and ready for queries.
+func (t *Tracker) IsRankAPIReady() bool {
+	t.mu.RLock()
+	rc := t.rankClient
+	closed := t.closed
+	t.mu.RUnlock()
+	if closed || rc == nil {
+		return false
+	}
+	return rc.IsEnabled()
 }
 
 // GetCurrentMatch returns a thread-safe deep clone of the current match snapshot.
@@ -332,20 +392,54 @@ func (t *Tracker) GetCurrentMatch() *CurrentMatchResponse {
 }
 
 // InvalidateRankCache purges cached rank, in-flight, and failure backoff states.
-// If playerID is empty, all cached rank entries are flushed.
-func (t *Tracker) InvalidateRankCache(playerID string) {
+// If keys is empty or contains a single empty string, all cached rank entries are flushed.
+func (t *Tracker) InvalidateRankCache(keys ...string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	pid := strings.TrimSpace(playerID)
-	if pid == "" {
+	if len(keys) == 0 || (len(keys) == 1 && strings.TrimSpace(keys[0]) == "") {
 		t.rankCache = make(map[string]cachedRankEntry)
 		t.inFlight = make(map[string]time.Time)
 		t.failBackoff = make(map[string]time.Time)
 		return
 	}
-	delete(t.rankCache, pid)
-	delete(t.inFlight, pid)
-	delete(t.failBackoff, pid)
+	for _, k := range keys {
+		pid := strings.TrimSpace(k)
+		if pid == "" {
+			continue
+		}
+		delete(t.rankCache, pid)
+		delete(t.inFlight, pid)
+		delete(t.failBackoff, pid)
+	}
+}
+
+// FetchPlayerRanksUncached queries PsyNet directly for the given player IDs, bypassing the in-memory rankCache.
+func (t *Tracker) FetchPlayerRanksUncached(ctx context.Context, playerIDs []rlapi.PlayerID) (map[string]PlayerRanksSnapshot, error) {
+	if len(playerIDs) == 0 {
+		return make(map[string]PlayerRanksSnapshot), nil
+	}
+	t.mu.RLock()
+	rc := t.rankClient
+	closed := t.closed
+	t.mu.RUnlock()
+	if closed || rc == nil || !rc.IsEnabled() {
+		return nil, ErrRankClientClosed
+	}
+
+	skillsList, err := rc.GetPlayersSkills(ctx, playerIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]PlayerRanksSnapshot, len(skillsList))
+	for _, entry := range skillsList {
+		pid := strings.TrimSpace(string(entry.PlayerID))
+		if pid == "" {
+			continue
+		}
+		out[pid] = BuildRanksSnapshot(entry.Skills)
+	}
+	return out, nil
 }
 
 func (t *Tracker) boundRankCacheLocked() {
@@ -891,33 +985,95 @@ func (t *Tracker) OnMatchEnded(ctx context.Context, matchGUID string, winnerTeam
 		matchState.Result = "defeat"
 	}
 
-	// SPEC-03: Invalidate local player's rank cache and fetch fresh rank telemetry immediately
-	// so concludedSnapshot captures updated post-match MMR and ConcludeMatch computes an accurate non-zero delta.
+	// SPEC-03 & Post-Match MMR Reconciliation:
+	// Capture pre-match MMR and MatchesPlayed before invalidating rank cache.
+	// Query PsyNet immediately; if PsyNet has not yet committed the post-match MMR update,
+	// do not cache the stale pre-match MMR for 15m—instead spawn the tracked background retry poller.
+	var (
+		localPID             string
+		preMatchMMR          float64
+		preMatchesPlayed     int
+		needBackgroundPoller bool
+		immediateNewRank     *PlayerPlaylistRank
+		immediateSkills      []rlapi.Skill
+		matchEndStartedAt    = time.Now().UTC()
+		participantIDs       []rlapi.PlayerID
+	)
+
 	if localPlayer != nil {
-		pid := strings.TrimSpace(localPlayer.PlayerID)
-		delete(t.rankCache, pid)
-		delete(t.inFlight, pid)
-		delete(t.failBackoff, pid)
+		localPID = strings.TrimSpace(localPlayer.PlayerID)
+		if localPlayer.CurrentRank != nil && localPlayer.CurrentRank.PlaylistID == playlistID {
+			preMatchMMR = localPlayer.CurrentRank.MMR
+			preMatchesPlayed = localPlayer.CurrentRank.MatchesPlayed
+		} else if cached, ok := t.rankCache[localPID]; ok {
+			if r, ok := cached.snapshot.GetRank(playlistID); ok {
+				preMatchMMR = r.MMR
+				preMatchesPlayed = r.MatchesPlayed
+			}
+		}
+
+		if localPID != "" {
+			participantIDs = append(participantIDs, rlapi.PlayerID(localPID))
+		}
+		seenPart := map[string]bool{localPID: true}
+		for _, p := range matchState.Teammates {
+			pID := strings.TrimSpace(p.PlayerID)
+			if !p.IsBot && pID != "" && !seenPart[pID] {
+				seenPart[pID] = true
+				participantIDs = append(participantIDs, rlapi.PlayerID(pID))
+			}
+		}
+		for _, p := range matchState.Opponents {
+			pID := strings.TrimSpace(p.PlayerID)
+			if !p.IsBot && pID != "" && !seenPart[pID] {
+				seenPart[pID] = true
+				participantIDs = append(participantIDs, rlapi.PlayerID(pID))
+			}
+		}
+
+		delete(t.rankCache, localPID)
+		delete(t.inFlight, localPID)
+		delete(t.failBackoff, localPID)
 
 		if t.cfg.AutoFetchRanks && t.rankClient != nil && t.rankClient.IsEnabled() {
 			t.mu.Unlock()
 			fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			skills, err := t.rankClient.GetPlayersSkills(fetchCtx, []rlapi.PlayerID{rlapi.PlayerID(pid)})
+			skills, err := t.rankClient.GetPlayersSkills(fetchCtx, []rlapi.PlayerID{rlapi.PlayerID(localPID)})
 			cancel()
 			t.mu.Lock()
 			if err == nil && len(skills) > 0 {
-				snapshot := BuildRanksSnapshot(skills[0].Skills)
-				t.rankCache[pid] = cachedRankEntry{
-					snapshot:  snapshot,
-					fetchedAt: time.Now().UTC(),
-				}
-				t.boundRankCacheLocked()
+				immediateSkills = skills[0].Skills
+				snapshot := BuildRanksSnapshot(immediateSkills)
+				var immediateUpdated bool
 				if r, ok := snapshot.GetRank(playlistID); ok {
 					if matchState.LocalPlayer != nil {
-						matchState.LocalPlayer.CurrentRank = &r
+						rCopy := r
+						matchState.LocalPlayer.CurrentRank = &rCopy
 						matchState.LocalPlayer.Ranks = snapshot
 					}
+					if (preMatchMMR > 0 && r.MMR != preMatchMMR) ||
+						(preMatchesPlayed > 0 && r.MatchesPlayed > preMatchesPlayed) ||
+						(preMatchMMR == 0 && preMatchesPlayed == 0 && r.MMR > 0) {
+						immediateUpdated = true
+						rCopy := r
+						immediateNewRank = &rCopy
+					}
 				}
+				if immediateUpdated {
+					t.rankCache[localPID] = cachedRankEntry{
+						snapshot:  snapshot,
+						fetchedAt: time.Now().UTC(),
+					}
+					t.boundRankCacheLocked()
+					t.mmrPollerState = "synced"
+					t.lastMMRSyncLatencyMs = time.Since(matchEndStartedAt).Milliseconds()
+				} else {
+					t.mmrPollerState = "polling"
+					needBackgroundPoller = true
+				}
+			} else {
+				t.mmrPollerState = "polling"
+				needBackgroundPoller = true
 			}
 		}
 	}
@@ -975,6 +1131,27 @@ func (t *Tracker) OnMatchEnded(ctx context.Context, matchGUID string, winnerTeam
 		return err
 	}
 
+	if immediateNewRank != nil && playlistID > 0 && immediateNewRank.MMR > 0 {
+		if localPID != "" && len(immediateSkills) > 0 {
+			if ranksJSON, sErr := SerializeRanksJSON(immediateSkills); sErr == nil {
+				_ = t.store.UpdatePlayerRanks(ctx, localPID, ranksJSON)
+			}
+		}
+		mmrDelta := 0.0
+		if preMatchMMR > 0 {
+			mmrDelta = math.Round((immediateNewRank.MMR-preMatchMMR)*100) / 100
+		}
+		_ = t.store.RecordMMR(ctx, &storage.MMRHistoryRecord{
+			MatchGUID:  trimmedGUID,
+			PlaylistID: playlistID,
+			MMR:        int(math.Round(immediateNewRank.MMR)),
+			MMRChange:  int(math.Round(mmrDelta)),
+			Tier:       immediateNewRank.Tier,
+			Division:   immediateNewRank.Division,
+			RecordedAt: time.Now().UTC(),
+		})
+	}
+
 	// Invalidate matchup cache for players whose records were updated
 	t.mu.Lock()
 	for _, o := range outcomes {
@@ -994,7 +1171,165 @@ func (t *Tracker) OnMatchEnded(ctx context.Context, matchGUID string, winnerTeam
 		listener.OnMatchConcluded(concludedSnapshot)
 	}
 
+	if needBackgroundPoller && localPID != "" {
+		t.spawnPostMatchMMRPoller(trimmedGUID, playlistID, localPID, preMatchMMR, preMatchesPlayed, participantIDs, matchEndStartedAt)
+	}
+
 	return nil
+}
+
+// spawnPostMatchMMRPoller launches a tracked background goroutine that polls PsyNet with stepped backoff
+// (+2s, +5s, +9s, +15s, +25s) until post-match MMR or MatchesPlayed updates.
+func (t *Tracker) spawnPostMatchMMRPoller(
+	matchGUID string,
+	playlistID int,
+	localPID string,
+	preMatchMMR float64,
+	preMatchesPlayed int,
+	participantIDs []rlapi.PlayerID,
+	startedAt time.Time,
+) {
+	t.mu.Lock()
+	if t.closed || t.rankClient == nil || !t.rankClient.IsEnabled() {
+		t.mmrPollerState = "idle"
+		t.mu.Unlock()
+		return
+	}
+	if t.pollerCancel != nil {
+		t.pollerCancel()
+	}
+	pollerCtx, pollerCancel := context.WithCancel(t.ctx)
+	t.pollerCancel = pollerCancel
+	schedule := append([]time.Duration(nil), t.postMatchPollSchedule...)
+	if len(schedule) == 0 {
+		schedule = append([]time.Duration(nil), defaultPostMatchPollSchedule...)
+	}
+	t.mmrPollerState = "polling"
+	t.wg.Add(1)
+	t.mu.Unlock()
+
+	go func() {
+		defer t.wg.Done()
+		defer pollerCancel()
+
+		var prevOffset time.Duration
+		for idx, targetOffset := range schedule {
+			waitDur := targetOffset - prevOffset
+			if waitDur <= 0 {
+				waitDur = targetOffset
+			}
+			prevOffset = targetOffset
+
+			timer := time.NewTimer(waitDur)
+			select {
+			case <-pollerCtx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+
+			fetchCtx, cancel := context.WithTimeout(pollerCtx, 4*time.Second)
+			skillsList, err := t.rankClient.GetPlayersSkills(fetchCtx, participantIDs)
+			cancel()
+			if err != nil || len(skillsList) == 0 {
+				continue
+			}
+
+			var (
+				localSnapshot PlayerRanksSnapshot
+				localRank     *PlayerPlaylistRank
+				localSkills   []rlapi.Skill
+			)
+
+			now := time.Now().UTC()
+			for _, entry := range skillsList {
+				pid := strings.TrimSpace(string(entry.PlayerID))
+				if pid == "" {
+					continue
+				}
+				snap := BuildRanksSnapshot(entry.Skills)
+				if strings.EqualFold(pid, localPID) {
+					localSnapshot = snap
+					localSkills = entry.Skills
+					if r, ok := snap.GetRank(playlistID); ok {
+						rCopy := r
+						localRank = &rCopy
+					}
+				} else {
+					t.mu.Lock()
+					t.rankCache[pid] = cachedRankEntry{
+						snapshot:  snap,
+						fetchedAt: now,
+					}
+					t.boundRankCacheLocked()
+					t.mu.Unlock()
+					if ranksJSON, sErr := SerializeRanksJSON(entry.Skills); sErr == nil {
+						_ = t.store.UpdatePlayerRanks(pollerCtx, pid, ranksJSON)
+					}
+				}
+			}
+
+			if localRank == nil {
+				continue
+			}
+
+			updated := (localRank.MMR > 0 && localRank.MMR != preMatchMMR) ||
+				(localRank.MatchesPlayed > preMatchesPlayed)
+			isFinal := (idx == len(schedule)-1)
+
+			if updated || isFinal {
+				t.mu.Lock()
+				t.rankCache[localPID] = cachedRankEntry{
+					snapshot:  localSnapshot,
+					fetchedAt: now,
+				}
+				t.boundRankCacheLocked()
+				if t.currentMatch != nil && t.currentMatch.MatchGUID == matchGUID && t.currentMatch.LocalPlayer != nil {
+					rCopy := *localRank
+					t.currentMatch.LocalPlayer.CurrentRank = &rCopy
+					t.currentMatch.LocalPlayer.Ranks = localSnapshot
+				}
+				listener := t.listener
+				t.mu.Unlock()
+
+				if ranksJSON, sErr := SerializeRanksJSON(localSkills); sErr == nil {
+					_ = t.store.UpdatePlayerRanks(pollerCtx, localPID, ranksJSON)
+				}
+
+				if playlistID > 0 && localRank.MMR > 0 {
+					mmrDelta := 0.0
+					if preMatchMMR > 0 {
+						mmrDelta = math.Round((localRank.MMR-preMatchMMR)*100) / 100
+					}
+					newMMRInt := int(math.Round(localRank.MMR))
+					_ = t.store.RecordMMR(pollerCtx, &storage.MMRHistoryRecord{
+						MatchGUID:  matchGUID,
+						PlaylistID: playlistID,
+						MMR:        newMMRInt,
+						MMRChange:  int(math.Round(mmrDelta)),
+						Tier:       localRank.Tier,
+						Division:   localRank.Division,
+						RecordedAt: now,
+					})
+					if reconciler, ok := listener.(PostMatchMMRReconciler); ok {
+						reconciler.UpdateLatestMatchMMR(playlistID, newMMRInt, mmrDelta)
+					}
+				}
+
+				t.mu.Lock()
+				t.mmrPollerState = "synced"
+				t.lastMMRSyncLatencyMs = time.Since(startedAt).Milliseconds()
+				t.mu.Unlock()
+				return
+			}
+		}
+
+		t.mu.Lock()
+		if t.mmrPollerState == "polling" {
+			t.mmrPollerState = "idle"
+		}
+		t.mu.Unlock()
+	}()
 }
 
 // ResolveLocalPlayer runs the 4-tier local player resolution hierarchy.

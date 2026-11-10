@@ -1,6 +1,12 @@
 // Display helpers for the "Broadcast" dashboard: record colours, H2H cells,
 // uppercase relative times, playlist labels and session KPI derivation.
-import { SessionMatchDetail, SessionMatchPlayer, SessionResponse } from '../types/api';
+import {
+  LobbyPlayer,
+  PlayerRoleStatsSummary,
+  SessionMatchDetail,
+  SessionMatchPlayer,
+  SessionResponse,
+} from '../types/api';
 import { parsePlatform } from './platforms';
 
 // ============================================================================
@@ -383,4 +389,364 @@ export function formatMatchClock(timeRemaining: number | undefined | null, isOve
   const padded = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   return isOvertime ? `+${padded}` : padded;
 }
+
+const ROMAN_DIV = ['', 'I', 'II', 'III', 'IV'];
+
+/**
+ * Formats a rank name + division into the compact broadcast format (e.g. "GC I · DIV II" or "GC I · D2").
+ */
+export function shortRank(rankName?: string | null, division?: number | null): string {
+  if (!rankName) return 'UNRANKED';
+  const clean = rankName.trim();
+  if (!clean || clean.toUpperCase() === 'UNRANKED') return 'UNRANKED';
+  // If already shortened with · or D1..4
+  if (clean.includes('·')) return clean.toUpperCase();
+
+  let r = clean
+    .replace(/Supersonic Legend/i, 'SSL')
+    .replace(/Grand Champion/i, 'GC')
+    .replace(/Champion/i, 'CHAMP')
+    .replace(/Diamond/i, 'DIA')
+    .replace(/Platinum/i, 'PLAT')
+    .replace(/Gold/i, 'GOLD')
+    .replace(/Silver/i, 'SILV')
+    .replace(/Bronze/i, 'BRNZ')
+    .toUpperCase();
+
+  if (r.startsWith('SSL')) return 'SSL';
+  const d = division && division >= 1 && division <= 4 ? ROMAN_DIV[division] : '';
+  return d ? `${r} · DIV ${d}` : r;
+}
+
+export interface RelationshipTagInfo {
+  label: string;
+  colorClass: string;
+  tag: string;
+  color: string;
+  border: string;
+}
+
+export function computeDynamicRelationshipTag(
+  tw: number,
+  tl: number,
+  ow: number,
+  ol: number,
+  overrideLabel?: string | boolean
+): RelationshipTagInfo {
+  const make = (label: string, colorClass: string, border: string): RelationshipTagInfo => ({
+    label,
+    colorClass,
+    tag: label,
+    color: colorClass,
+    border,
+  });
+
+  if (typeof overrideLabel === 'string' && overrideLabel) {
+    const up = overrideLabel.toUpperCase();
+    if (up.includes('PRIME') || up.includes('SYNERGY')) {
+      return make(up, 't-text-win text-win t-border-win', 'border-win');
+    }
+    if (up.includes('FAVORABLE')) {
+      return make(up, 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
+    }
+    if (up.includes('NEMESIS') || up.includes('COLD')) {
+      return make(up, 't-text-loss text-loss t-border-loss', 'border-loss');
+    }
+    if (up.includes('RIVAL')) {
+      return make(up, 't-text-orange text-orange-ink t-border-orange', 'border-orange-ink');
+    }
+  }
+  const tG = (tw || 0) + (tl || 0);
+  const oG = (ow || 0) + (ol || 0);
+  if (tG + oG === 0) return make('NO GAMES IN RANGE', 't-text-muted text-muted t-border-2', 'border-line');
+  const tWR = tG ? Math.round((tw / tG) * 100) : 0;
+  const oWR = oG ? Math.round((ow / oG) * 100) : 0;
+
+  if (tG >= oG) {
+    if (tWR >= 65 && tG >= 2) return make('PRIME DUO', 't-text-win text-win t-border-win', 'border-win');
+    if (tWR >= 50) return make('SYNERGY ALLY', 't-text-win text-win t-border-win', 'border-win');
+    return make('COLD DUO', 't-text-loss text-loss t-border-loss', 'border-loss');
+  } else {
+    if (oWR <= 40 && oG >= 2) return make('NEMESIS', 't-text-loss text-loss t-border-loss', 'border-loss');
+    if (oWR >= 60) return make('FAVORABLE FOE', 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
+    return make('ARCH-RIVAL', 't-text-orange text-orange-ink t-border-orange', 'border-orange-ink');
+  }
+}
+
+export interface LiveThreatBadge {
+  type: 'higher' | 'carry' | 'smurf';
+  label: string;
+  title: string;
+  classes: string;
+}
+
+const MODE_SHORT_LABEL: Record<string, string> = {
+  '10': '1V1',
+  '11': '2V2',
+  '13': '3V3',
+  '27': 'HOOPS',
+  '28': 'RUMBLE',
+  '29': 'DROPSHOT',
+  '30': 'SNOW DAY',
+};
+
+/**
+ * Computes Live Match Threat, Carry & Smurf Detection Badges for a player.
+ * 1. ⚠ HIGHER MMR (+X VS YOU): opponent active-playlist MMR > local player active-playlist MMR.
+ * 2. ⚡ CARRYING (+X MMR VS MATE): opponent active-playlist MMR >= +80 MMR above their own teammate(s).
+ * 3. 🚨 SMURF · <MODE> <SHORT_RANK> (<MMR> · +<DIFF> VS YOU): player has >= +120 MMR vs local player in another playlist AND >= +80 MMR above their own active-playlist MMR.
+ */
+export function computeLiveThreatBadges(
+  player: LobbyPlayer,
+  localPlayer: LobbyPlayer | undefined | null,
+  opposingTeamPlayers: LobbyPlayer[],
+  activePlaylistId = 11
+): LiveThreatBadge[] {
+  if (!player || player.is_local || player.is_bot) return [];
+  const badges: LiveThreatBadge[] = [];
+
+  const activeKey = String(activePlaylistId || 11);
+  const playerActiveMmr =
+    player.current_rank?.mmr || player.ranks?.[activeKey]?.mmr || 0;
+  const localActiveMmr =
+    localPlayer?.current_rank?.mmr || localPlayer?.ranks?.[activeKey]?.mmr || 1515;
+
+  const isOpponent =
+    localPlayer != null ? player.team_num !== localPlayer.team_num : player.team_num === 1;
+
+  // 1. HIGHER MMR (+X VS YOU) on opponents
+  if (isOpponent && playerActiveMmr > 0 && localActiveMmr > 0 && playerActiveMmr > localActiveMmr) {
+    const diff = Math.round(playerActiveMmr - localActiveMmr);
+    if (diff > 0) {
+      badges.push({
+        type: 'higher',
+        label: `戒 · HIGHER MMR (+${diff} VS YOU)`,
+        title: `Active playlist MMR is +${diff} higher than yours (${Math.round(playerActiveMmr)} vs ${Math.round(localActiveMmr)})`,
+        classes: 'cartouche-gold',
+      });
+    }
+  }
+
+  // 2. CARRYING (+X MMR VS MATE) on opponents when >= +80 MMR above their own teammate(s)
+  if (isOpponent && playerActiveMmr > 0 && opposingTeamPlayers.length > 1) {
+    const mates = opposingTeamPlayers.filter(
+      (m) => m.player_id !== player.player_id && !m.is_bot
+    );
+    let maxMateDiff = 0;
+    for (const mate of mates) {
+      const mateMmr = mate.current_rank?.mmr || mate.ranks?.[activeKey]?.mmr || 0;
+      if (mateMmr > 0) {
+        maxMateDiff = Math.max(maxMateDiff, Math.round(playerActiveMmr - mateMmr));
+      }
+    }
+    if (maxMateDiff >= 80) {
+      badges.push({
+        type: 'carry',
+        label: `双 · CARRYING (+${maxMateDiff} MMR VS MATE)`,
+        title: `Significantly higher MMR (+${maxMateDiff}) than their teammate on the opposing team`,
+        classes: 'cartouche-carry',
+      });
+    }
+  }
+
+  // 3. SMURF / OFF-MODE PEAK: >= +120 MMR vs local player in another playlist AND >= +80 MMR above their own active-playlist MMR
+  if (player.ranks) {
+    let bestSmurf: {
+      modeLabel: string;
+      rankShort: string;
+      mmr: number;
+      diffVsYou: number;
+    } | null = null;
+
+    for (const [pid, r] of Object.entries(player.ranks)) {
+      if (pid === activeKey || !r || !r.mmr) continue;
+      const localModeMmr =
+        localPlayer?.ranks?.[pid]?.mmr || localActiveMmr || 1450;
+      const diffVsYou = Math.round(r.mmr - localModeMmr);
+      const diffVsOwnActive = playerActiveMmr > 0 ? Math.round(r.mmr - playerActiveMmr) : 999;
+
+      if (diffVsYou >= 120 && diffVsOwnActive >= 80) {
+        if (!bestSmurf || diffVsYou > bestSmurf.diffVsYou) {
+          const modeLabel = MODE_SHORT_LABEL[pid] || r.playlist_name?.toUpperCase() || `MODE ${pid}`;
+          const rankShort = shortRank(r.rank_name, r.division).split('·')[0].trim();
+          bestSmurf = {
+            modeLabel,
+            rankShort,
+            mmr: Math.round(r.mmr),
+            diffVsYou,
+          };
+        }
+      }
+    }
+
+    if (bestSmurf) {
+      badges.push({
+        type: 'smurf',
+        label: `印 · SMURF · ${bestSmurf.modeLabel} ${bestSmurf.rankShort} (${bestSmurf.mmr} · +${bestSmurf.diffVsYou} VS YOU)`,
+        title: `Off-playlist peak: ${bestSmurf.modeLabel} ${bestSmurf.rankShort} (${bestSmurf.mmr} MMR, +${bestSmurf.diffVsYou} above you in that playlist)`,
+        classes: 'hanko-seal-vermilion',
+      });
+    }
+  }
+
+  return badges;
+}
+
+/**
+ * Builds a complete PlayerRoleStatsSummary from games/wins/losses and optional partial stats.
+ * Supports both synthesizeRoleStats(games, wins, losses, partial, seedPts)
+ * and synthesizeRoleStats(wins, losses, seedString).
+ */
+export function synthesizeRoleStats(
+  arg1: number,
+  arg2: number,
+  arg3?: number | string,
+  partial?: Partial<PlayerRoleStatsSummary> | null,
+  seedPts = 420
+): PlayerRoleStatsSummary & {
+  score: number;
+  goals: number;
+  assists: number;
+  saves: number;
+  demos: number;
+  shot_pct: number;
+  avg_demos: number;
+} {
+  let g: number;
+  let w: number;
+  let l: number;
+  if (typeof arg3 === 'string' || arg3 === undefined) {
+    w = Math.max(0, Math.round(arg1 || 0));
+    l = Math.max(0, Math.round(arg2 || 0));
+    g = w + l;
+  } else {
+    g = Math.max(0, Math.round(arg1 || 0));
+    w = Math.max(0, Math.round(arg2 || 0));
+    l = Math.max(0, Math.round(arg3 || 0));
+  }
+
+  if (g === 0) {
+    return {
+      games: 0,
+      wins: 0,
+      losses: 0,
+      win_rate: 0,
+      total_score: 0,
+      total_goals: 0,
+      total_assists: 0,
+      total_saves: 0,
+      total_shots: 0,
+      total_demos_inflicted: 0,
+      total_demos_taken: 0,
+      avg_score: 0,
+      avg_goals: 0,
+      avg_assists: 0,
+      avg_saves: 0,
+      avg_shots: 0,
+      shooting_pct: 0,
+      avg_demos_inflicted: 0,
+      avg_demos_taken: 0,
+      avg_bpm: 0,
+      avg_bcpm: 0,
+      avg_boost: 0,
+      total_boost_stolen: 0,
+      total_big_pads: 0,
+      total_small_pads: 0,
+      avg_supersonic_pct: 0,
+      avg_boost_speed_pct: 0,
+      avg_slow_speed_pct: 0,
+      avg_ground_pct: 0,
+      avg_low_air_pct: 0,
+      avg_high_air_pct: 0,
+      avg_powerslide_count: 0,
+      avg_powerslide_duration: 0,
+      avg_def_third_pct: 0,
+      avg_neutral_third_pct: 0,
+      avg_off_third_pct: 0,
+      avg_behind_ball_pct: 0,
+      avg_first_man_pct: 0,
+      avg_third_man_pct: 0,
+      avg_dist_to_ball: 0,
+      score: 0,
+      goals: 0,
+      assists: 0,
+      saves: 0,
+      demos: 0,
+      shot_pct: 0,
+      avg_demos: 0,
+    };
+  }
+
+  const avgScore = partial?.avg_score ?? seedPts;
+  const avgGoals = partial?.avg_goals ?? 1.4;
+  const avgAssists = partial?.avg_assists ?? 0.9;
+  const avgSaves = partial?.avg_saves ?? 1.6;
+  const avgShots = partial?.avg_shots ?? 3.8;
+  const shPct = partial?.shooting_pct ?? (avgShots > 0 ? Math.round((avgGoals / avgShots) * 100) : 37);
+  const avgDemos = partial?.avg_demos_inflicted ?? 1.2;
+  const avgDemosTaken = partial?.avg_demos_taken ?? 1.0;
+  const avgBpm = partial?.avg_bpm ?? 415;
+  const avgBcpm = partial?.avg_bcpm ?? 430;
+  const avgBoost = partial?.avg_boost ?? 46;
+  const avgSup = partial?.avg_supersonic_pct ?? 18.2;
+
+  const totalScore = partial?.total_score ?? Math.round(avgScore * g);
+  const totalGoals = partial?.total_goals ?? Math.round(avgGoals * g);
+  const totalAssists = partial?.total_assists ?? Math.round(avgAssists * g);
+  const totalSaves = partial?.total_saves ?? Math.round(avgSaves * g);
+  const totalShots = partial?.total_shots ?? Math.round(avgShots * g);
+  const totalDemos = partial?.total_demos_inflicted ?? Math.round(avgDemos * g);
+
+  return {
+    games: g,
+    wins: w,
+    losses: l,
+    win_rate: g > 0 ? (w / g) * 100 : 0,
+    total_score: totalScore,
+    total_goals: totalGoals,
+    total_assists: totalAssists,
+    total_saves: totalSaves,
+    total_shots: totalShots,
+    total_demos_inflicted: totalDemos,
+    total_demos_taken: partial?.total_demos_taken ?? Math.round(avgDemosTaken * g),
+    avg_score: avgScore,
+    avg_goals: avgGoals,
+    avg_assists: avgAssists,
+    avg_saves: avgSaves,
+    avg_shots: avgShots,
+    shooting_pct: shPct,
+    avg_demos_inflicted: avgDemos,
+    avg_demos_taken: avgDemosTaken,
+    avg_bpm: avgBpm,
+    avg_bcpm: avgBcpm,
+    avg_boost: avgBoost,
+    total_boost_stolen: partial?.total_boost_stolen ?? Math.round(520 * g),
+    total_big_pads: partial?.total_big_pads ?? Math.round(21 * g),
+    total_small_pads: partial?.total_small_pads ?? Math.round(68 * g),
+    avg_supersonic_pct: avgSup,
+    avg_boost_speed_pct: partial?.avg_boost_speed_pct ?? 39.0,
+    avg_slow_speed_pct: partial?.avg_slow_speed_pct ?? 42.8,
+    avg_ground_pct: partial?.avg_ground_pct ?? 56.0,
+    avg_low_air_pct: partial?.avg_low_air_pct ?? 34.0,
+    avg_high_air_pct: partial?.avg_high_air_pct ?? 10.0,
+    avg_powerslide_count: partial?.avg_powerslide_count ?? 48,
+    avg_powerslide_duration: partial?.avg_powerslide_duration ?? 7.2,
+    avg_def_third_pct: partial?.avg_def_third_pct ?? 42,
+    avg_neutral_third_pct: partial?.avg_neutral_third_pct ?? 34,
+    avg_off_third_pct: partial?.avg_off_third_pct ?? 24,
+    avg_behind_ball_pct: partial?.avg_behind_ball_pct ?? 68,
+    avg_first_man_pct: partial?.avg_first_man_pct ?? 36,
+    avg_third_man_pct: partial?.avg_third_man_pct ?? 32,
+    avg_dist_to_ball: partial?.avg_dist_to_ball ?? 2480,
+    score: totalScore,
+    goals: totalGoals,
+    assists: totalAssists,
+    saves: totalSaves,
+    demos: totalDemos,
+    shot_pct: shPct,
+    avg_demos: avgDemos,
+  };
+}
+
+
 

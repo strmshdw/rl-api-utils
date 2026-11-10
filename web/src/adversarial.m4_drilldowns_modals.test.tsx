@@ -456,29 +456,36 @@ describe('M4 ADVERSARIAL CHALLENGER SUITE 1: DRILL-DOWNS, MODALS & VIEWS', () =>
       );
       await flush(10);
 
-      // Tab 1: Overview renders comparison bars without NaN
-      expect(container.textContent).toContain('TEAM COMPARISON');
-      expect(container.textContent).toContain('BOX SCORE');
+      // Tab 1: 1. CORE & MECHANICS renders without NaN
+      expect(container.textContent).toContain('1. CORE & MECHANICS');
+      expect(container.textContent).toContain('BLUE TEAM TOTALS / AVG');
+      expect(container.textContent).toContain('PlayerZero1');
       expect(container.textContent).not.toContain('NaN');
 
-      // Tab 2: Boost & Movement - must show the warning banner
-      await clickText(container, 'BOOST & MOVEMENT');
+      // Tab 2: 2. BOOST ECONOMY & PADS - must show the warning banner and dashes
+      await clickText(container, '2. BOOST ECONOMY & PADS');
       expect(container.textContent).toContain('TELEMETRY PENDING');
-      expect(container.textContent).toContain('BOOST TELEMETRY');
-      // Should show dashes '—' instead of throwing or displaying undefined
+      expect(container.textContent).toContain('AVG BST');
       expect(container.textContent).toContain('—');
 
-      // Tab 3: Positioning - must show warning banner and safe defaults
-      await clickText(container, 'POSITIONING');
+      // Tab 3: 3. SPEED & MOVEMENT - must show warning banner and safe defaults
+      await clickText(container, '3. SPEED & MOVEMENT');
       expect(container.textContent).toContain('TELEMETRY PENDING');
-      expect(container.textContent).toContain('FIELD THIRDS & SPACING');
+      expect(container.textContent).toContain('SUPERSONIC');
+      expect(container.textContent).toContain('—');
 
-      // Tab 4: Demolitions & Combat
-      await clickText(container, 'DEMOLITIONS & COMBAT');
-      expect(container.textContent).toContain('COMBAT & DEMOLITIONS');
-      expect(container.textContent).toContain('PlayerZero1');
+      // Tab 4: 4. POSITIONING & ROTATION - must show warning banner and safe defaults
+      await clickText(container, '4. POSITIONING & ROTATION');
+      expect(container.textContent).toContain('TELEMETRY PENDING');
+      expect(container.textContent).toContain('BEHIND BALL');
 
-      // Tab 5: Raw JSON
+      // Tab 5: 5. TEAM HEAD-TO-HEAD
+      await clickText(container, '5. TEAM HEAD-TO-HEAD');
+      expect(container.textContent).toContain('TEAM SCORE (PTS)');
+      expect(container.textContent).toContain('DEMOLITIONS INFLICTED');
+      expect(container.textContent).not.toContain('NaN');
+
+      // Tab 6: RAW JSON
       await clickText(container, 'RAW JSON');
       expect(container.textContent).toContain('RAW TELEMETRY JSON');
       expect(container.textContent).toContain('null-telemetry-guid');
@@ -526,9 +533,16 @@ describe('M4 ADVERSARIAL CHALLENGER SUITE 1: DRILL-DOWNS, MODALS & VIEWS', () =>
       );
       await flush(10);
 
-      const tabLabels = ['OVERVIEW', 'BOOST & MOVEMENT', 'POSITIONING', 'DEMOLITIONS & COMBAT', 'RAW JSON'];
+      const tabLabels = [
+        '1. CORE & MECHANICS',
+        '2. BOOST ECONOMY & PADS',
+        '3. SPEED & MOVEMENT',
+        '4. POSITIONING & ROTATION',
+        '5. TEAM HEAD-TO-HEAD',
+        'RAW JSON',
+      ];
 
-      // Cycle 4 full loops across all 5 tabs rapidly
+      // Cycle 4 full loops across all tabs rapidly
       for (let loop = 0; loop < 4; loop++) {
         for (const tab of tabLabels) {
           await clickText(container, tab);

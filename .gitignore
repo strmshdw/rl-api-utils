@@ -11,5 +11,7 @@ replays
 *.exe
 *.exe~
 rl-sync
-dist/
+/dist/
 web/dist/
+!internal/web/dist/
+!internal/web/dist/**

@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SessionResponse, SessionMatchDetail, SessionListResponse } from '../types/api';
 import { sharedSSEManager } from '../context/SSEContext';
+import { useDashboard } from '../context/DashboardContext';
 
 export function useSession() {
+  const { dateRangeQueryParams } = useDashboard();
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [pastSessions, setPastSessions] = useState<SessionResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -24,7 +26,11 @@ export function useSession() {
 
   const fetchSession = useCallback(async () => {
     try {
-      const res = await fetch('/api/session');
+      const params = new URLSearchParams();
+      if (dateRangeQueryParams.from) params.set('from', dateRangeQueryParams.from);
+      if (dateRangeQueryParams.to) params.set('to', dateRangeQueryParams.to);
+      const qs = params.toString();
+      const res = await fetch(qs ? `/api/session?${qs}` : '/api/session');
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       const data: SessionResponse = await res.json();
       setSession(data);
@@ -35,7 +41,7 @@ export function useSession() {
     } finally {
       setIsLoading(false);
     }
-  }, [fetchPastSessions]);
+  }, [fetchPastSessions, dateRangeQueryParams.from, dateRangeQueryParams.to]);
 
   const resetSession = useCallback(async () => {
     try {
