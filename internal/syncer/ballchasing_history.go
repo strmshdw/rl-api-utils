@@ -189,10 +189,17 @@ func (b *BallchasingHistorySyncer) Sync(ctx context.Context) (*BallchasingHistor
 					existingMatch = ex
 				}
 			}
+			hasCompleteTelemetry := false
+			if existingMatch != nil {
+				hasCompleteTelemetry = strings.Contains(existingMatch.ReplayStatsJSON, `"boost":`) ||
+					(existingMatch.StatsSyncStatus == storage.StatsSyncSynced &&
+						existingMatch.SyncedAt != nil &&
+						len(listItem.Blue.Players) == 0 && len(listItem.Orange.Players) == 0)
+			}
 			if existingMatch != nil &&
 				existingMatch.BallchasingID != "" &&
 				(existingMatch.BlueScore > 0 || existingMatch.OrangeScore > 0 || existingMatch.StatsSyncStatus == storage.StatsSyncSynced) &&
-				strings.Contains(existingMatch.ReplayStatsJSON, `"boost":`) {
+				hasCompleteTelemetry {
 				syncedMatches++
 				b.mu.Lock()
 				b.progress.TotalReplays = totalReplays

@@ -2752,6 +2752,14 @@ func (s *SQLiteStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchSta
 		playersCopy := make([]ReplayPlayerStats, len(stats.Players))
 		copy(playersCopy, stats.Players)
 		st.Players = playersCopy
+	} else {
+		var existingJSON string
+		if err := s.db.QueryRowContext(ctx, "SELECT replay_stats_json FROM matches WHERE match_guid = ?;", guid).Scan(&existingJSON); err == nil && existingJSON != "" {
+			var existingSt ReplayMatchStats
+			if json.Unmarshal([]byte(existingJSON), &existingSt) == nil && len(existingSt.Players) > 0 {
+				st.Players = existingSt.Players
+			}
+		}
 	}
 
 	// Fallback score calculation from player goals if top-level team scores are 0-0
@@ -5007,10 +5015,13 @@ func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) er
 	`)
 	_, _ = s.db.ExecContext(ctx, `
 		UPDATE matches
-		SET stats_sync_status = 'PENDING', stats_retry_count = 0
+		SET stats_sync_status = 'SYNCED', stats_retry_count = 0
 		WHERE ballchasing_id != ''
-		  AND stats_sync_status = 'SYNCED'
-		  AND replay_stats_json NOT LIKE '%"boost":%';
+		  AND stats_sync_status = 'PENDING'
+		  AND synced_at IS NOT NULL
+		  AND synced_at > 0
+		  AND replay_stats_json LIKE '%"ballchasing_id":%'
+		  AND (replay_stats_json LIKE '%"players":null%' OR replay_stats_json LIKE '%"players":[]%' OR replay_stats_json LIKE '%"boost":%');
 	`)
 
 	// 2. Find matches with 0-0 scores and non-empty replay_stats_json
@@ -5053,8 +5064,55 @@ func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) er
 
 	for _, c := range candidates {
 		var st ReplayMatchStats
-		if err := json.Unmarshal([]byte(c.statsJSON), &st); err != nil || len(st.Players) == 0 {
+		if err := json.Unmarshal([]byte(c.statsJSON), &st); err != nil {
 			continue
+		}
+		if len(st.Players) == 0 {
+			mpRows, mpErr := s.db.QueryContext(ctx, `
+				SELECT mp.player_id, mp.team_num, mp.is_local, mp.score, mp.goals, mp.assists, mp.saves, mp.shots, mp.demos, mp.car_name, COALESCE(p.player_name, ''), COALESCE(p.platform, '')
+				FROM match_players mp
+				LEFT JOIN players p ON mp.player_id = p.player_id
+				WHERE mp.match_guid = ?
+				ORDER BY mp.team_num ASC, mp.score DESC;
+			`, c.guid)
+			if mpErr == nil {
+				for mpRows.Next() {
+					var (
+						pid, carName, pName, plat string
+						team, isLoc, sc, g, a, sv, sh, dm int
+					)
+					if mpRows.Scan(&pid, &team, &isLoc, &sc, &g, &a, &sv, &sh, &dm, &carName, &pName, &plat) == nil {
+						onlineID := pid
+						if parts := strings.Split(pid, "|"); len(parts) >= 2 {
+							if plat == "" && parts[0] != "" {
+								plat = parts[0]
+							}
+							onlineID = parts[1]
+						}
+						if pName == "" {
+							pName = onlineID
+						}
+						st.Players = append(st.Players, ReplayPlayerStats{
+							Name:     pName,
+							Platform: plat,
+							OnlineID: onlineID,
+							Team:     team,
+							IsLocal:  isLoc == 1,
+							Score:    sc,
+							Goals:    g,
+							Assists:  a,
+							Saves:    sv,
+							Shots:    sh,
+							Demos:    dm,
+							CarName:  carName,
+						})
+					}
+				}
+				mpRows.Close()
+			}
+			if len(st.Players) == 0 {
+				continue
+			}
 		}
 		bGoals, oGoals := 0, 0
 		for _, p := range st.Players {
@@ -5489,12 +5547,13 @@ func (s *SQLiteStore) repairHistoricalMatchesAndOutcomes(ctx context.Context) er
 			}
 		}
 
-		// 4d. Mark Ballchasing matches whose replay_stats_json lacks full boost telemetry as PENDING
+		// 4d. Mark Ballchasing matches whose replay_stats_json has players lacking full boost telemetry as PENDING
 		_, _ = s.db.ExecContext(ctx, `
 			UPDATE matches
 			SET stats_sync_status = 'PENDING', stats_retry_count = 0
 			WHERE ballchasing_id != ''
 			  AND stats_sync_status = 'SYNCED'
+			  AND replay_stats_json LIKE '%"players":[{%'
 			  AND replay_stats_json NOT LIKE '%"boost":%';
 		`)
 
