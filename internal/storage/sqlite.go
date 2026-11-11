@@ -118,6 +118,8 @@ CREATE TABLE IF NOT EXISTS match_players (
 
 CREATE INDEX IF NOT EXISTS idx_match_players_player ON match_players(player_id);
 CREATE INDEX IF NOT EXISTS idx_match_players_player_won ON match_players(player_id, won);
+CREATE INDEX IF NOT EXISTS idx_match_players_local_team ON match_players(match_guid, is_local, team_num);
+CREATE INDEX IF NOT EXISTS idx_match_players_local_player ON match_players(is_local, player_id);
 
 CREATE TABLE IF NOT EXISTS mmr_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2006,20 +2008,16 @@ func (s *SQLiteStore) ListPlayerSummaries(ctx context.Context, limit, offset int
 	}
 	rows.Close()
 
+	if err := s.populateCandidateSplitStatsBulk(ctx, summaries, nil, 0, 0); err != nil {
+		return nil, err
+	}
 	for _, sRec := range summaries {
-		withSt, againstSt := s.ComputePlayerSplitStats(
-			ctx, sRec.PlayerID, sRec.PlayerName, nil, 0, 0,
-			sRec.TotalWinsAsTeammate, sRec.TotalLossesAsTeammate,
-			sRec.TotalWinsAsOpponent, sRec.TotalLossesAsOpponent,
-		)
-		sRec.WithYouStats = withSt
-		sRec.AgainstYouStats = againstSt
-		if withSt.Games+againstSt.Games > sRec.TotalMatches {
-			sRec.TotalWinsAsTeammate = withSt.Wins
-			sRec.TotalLossesAsTeammate = withSt.Losses
-			sRec.TotalWinsAsOpponent = againstSt.Wins
-			sRec.TotalLossesAsOpponent = againstSt.Losses
-			sRec.TotalMatches = withSt.Games + againstSt.Games
+		if sRec.WithYouStats.Games+sRec.AgainstYouStats.Games > sRec.TotalMatches {
+			sRec.TotalWinsAsTeammate = sRec.WithYouStats.Wins
+			sRec.TotalLossesAsTeammate = sRec.WithYouStats.Losses
+			sRec.TotalWinsAsOpponent = sRec.AgainstYouStats.Wins
+			sRec.TotalLossesAsOpponent = sRec.AgainstYouStats.Losses
+			sRec.TotalMatches = sRec.WithYouStats.Games + sRec.AgainstYouStats.Games
 		}
 		PopulatePlayerSummaryComputedFields(sRec)
 	}
@@ -2041,172 +2039,6 @@ func escapeLike(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// FilterPlayerSummaries searches, filters, and sorts players across the entire dataset.
-func (s *SQLiteStore) FilterPlayerSummaries(ctx context.Context, filter PlayerDirectoryFilter) ([]*PlayerSummary, int, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, 0, wrapContextErr(err)
-	}
-
-	cleanQuery := strings.TrimSpace(filter.Query)
-	cleanPlatform := strings.TrimSpace(strings.ToLower(filter.Platform))
-	playlistIDs := ParsePlaylistFilter(filter.Playlist)
-	hasScopeFilter := len(playlistIDs) > 0 || filter.FromUnix > 0 || filter.ToUnix > 0
-
-	var pWhereClauses []string
-	var pWhereArgs []interface{}
-	pWhereClauses = append(pWhereClauses, "NOT EXISTS (SELECT 1 FROM match_players mp_loc WHERE mp_loc.player_id = p.player_id AND mp_loc.is_local = 1)")
-
-	if cleanPlatform != "" && cleanPlatform != "all" {
-		switch cleanPlatform {
-		case "playstation", "ps4", "psn", "psynet":
-			pWhereClauses = append(pWhereClauses, "LOWER(p.platform) IN ('playstation', 'ps4', 'psn', 'psynet')")
-		case "xbox", "xboxone":
-			pWhereClauses = append(pWhereClauses, "LOWER(p.platform) IN ('xbox', 'xboxone')")
-		case "switch", "nintendo":
-			pWhereClauses = append(pWhereClauses, "LOWER(p.platform) IN ('switch', 'nintendo')")
-		default:
-			pWhereClauses = append(pWhereClauses, "LOWER(p.platform) = ?")
-			pWhereArgs = append(pWhereArgs, cleanPlatform)
-		}
-	}
-
-	if cleanQuery != "" {
-		lowerQuery := strings.ToLower(cleanQuery)
-		if strings.ContainsRune(lowerQuery, '\x00') {
-			pWhereClauses = append(pWhereClauses, "(INSTR(p.player_name_lower, ?) > 0 OR INSTR(LOWER(p.player_id), ?) > 0)")
-			pWhereArgs = append(pWhereArgs, lowerQuery, lowerQuery)
-		} else {
-			pWhereClauses = append(pWhereClauses, "(p.player_name_lower LIKE ? ESCAPE '\\' OR LOWER(p.player_id) LIKE ? ESCAPE '\\')")
-			escaped := "%" + escapeLike(lowerQuery) + "%"
-			pWhereArgs = append(pWhereArgs, escaped, escaped)
-		}
-	}
-
-	pWhereSQL := ""
-	if len(pWhereClauses) > 0 {
-		pWhereSQL = " WHERE " + strings.Join(pWhereClauses, " AND ")
-	}
-
-	var mJoinClauses []string
-	var mJoinArgs []interface{}
-	mJoinClauses = append(mJoinClauses, "p.player_id = m.player_id")
-	if len(playlistIDs) > 0 {
-		placeholders := make([]string, len(playlistIDs))
-		for i, pid := range playlistIDs {
-			placeholders[i] = "?"
-			mJoinArgs = append(mJoinArgs, pid)
-		}
-		mJoinClauses = append(mJoinClauses, fmt.Sprintf("m.playlist_id IN (%s)", strings.Join(placeholders, ",")))
-	}
-	if filter.FromUnix > 0 {
-		mJoinClauses = append(mJoinClauses, "m.last_played_at >= ?")
-		mJoinArgs = append(mJoinArgs, filter.FromUnix)
-	}
-	if filter.ToUnix > 0 {
-		mJoinClauses = append(mJoinClauses, "m.last_played_at <= ?")
-		mJoinArgs = append(mJoinArgs, filter.ToUnix)
-	}
-
-	baseSQL := fmt.Sprintf(`
-	SELECT p.player_id, p.platform, p.player_name, p.ranks_json, p.notes, p.tags, p.first_seen_at, p.last_seen_at,
-	       COALESCE(SUM(m.wins_as_teammate), 0) AS total_wins_teammate,
-	       COALESCE(SUM(m.losses_as_teammate), 0) AS total_losses_teammate,
-	       COALESCE(SUM(m.wins_as_opponent), 0) AS total_wins_opponent,
-	       COALESCE(SUM(m.losses_as_opponent), 0) AS total_losses_opponent,
-	       COALESCE(SUM(m.total_matches), 0) AS total_matches
-	FROM players p
-	LEFT JOIN player_matchups m ON %s
-	%s
-	GROUP BY p.player_id;
-	`, strings.Join(mJoinClauses, " AND "), pWhereSQL)
-
-	allArgs := append(mJoinArgs, pWhereArgs...)
-	rows, err := s.db.QueryContext(ctx, baseSQL, allArgs...)
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, 0, wrapContextErr(ctxErr)
-		}
-		return nil, 0, fmt.Errorf("failed to query player summaries: %w", err)
-	}
-	defer rows.Close()
-
-	candidates := make([]*PlayerSummary, 0)
-	for rows.Next() {
-		var (
-			sRec      PlayerSummary
-			notes     sql.NullString
-			tagsStr   sql.NullString
-			firstSeen int64
-			lastSeen  int64
-		)
-		if err := rows.Scan(
-			&sRec.PlayerID,
-			&sRec.Platform,
-			&sRec.PlayerName,
-			&sRec.RanksJSON,
-			&notes,
-			&tagsStr,
-			&firstSeen,
-			&lastSeen,
-			&sRec.TotalWinsAsTeammate,
-			&sRec.TotalLossesAsTeammate,
-			&sRec.TotalWinsAsOpponent,
-			&sRec.TotalLossesAsOpponent,
-			&sRec.TotalMatches,
-		); err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, 0, wrapContextErr(ctxErr)
-			}
-			return nil, 0, fmt.Errorf("failed to scan player summary row: %w", err)
-		}
-		sRec.Notes = notes.String
-		sRec.Tags = parseTags(tagsStr.String)
-		sRec.FirstSeenAt = time.Unix(firstSeen, 0).UTC()
-		sRec.LastSeenAt = time.Unix(lastSeen, 0).UTC()
-		candidates = append(candidates, &sRec)
-	}
-	if err := rows.Err(); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, 0, wrapContextErr(ctxErr)
-		}
-		return nil, 0, fmt.Errorf("rows iteration error in filter player summaries: %w", err)
-	}
-	rows.Close()
-
-	matching := make([]*PlayerSummary, 0, len(candidates))
-	for _, sRec := range candidates {
-		withSt, againstSt := s.ComputePlayerSplitStats(
-			ctx, sRec.PlayerID, sRec.PlayerName, playlistIDs, filter.FromUnix, filter.ToUnix,
-			sRec.TotalWinsAsTeammate, sRec.TotalLossesAsTeammate,
-			sRec.TotalWinsAsOpponent, sRec.TotalLossesAsOpponent,
-		)
-		sRec.WithYouStats = withSt
-		sRec.AgainstYouStats = againstSt
-		if hasScopeFilter || withSt.Games+againstSt.Games > sRec.TotalMatches {
-			sRec.TotalWinsAsTeammate = withSt.Wins
-			sRec.TotalLossesAsTeammate = withSt.Losses
-			sRec.TotalWinsAsOpponent = againstSt.Wins
-			sRec.TotalLossesAsOpponent = againstSt.Losses
-			if withSt.Games+againstSt.Games > 0 || filter.FromUnix > 0 || filter.ToUnix > 0 || withSt.Games+againstSt.Games > sRec.TotalMatches {
-				sRec.TotalMatches = withSt.Games + againstSt.Games
-			}
-		}
-
-		if hasScopeFilter && sRec.TotalMatches <= 0 {
-			continue
-		}
-		if !MatchesRoleFilter(sRec, filter) {
-			continue
-		}
-		PopulatePlayerSummaryComputedFields(sRec)
-		matching = append(matching, sRec)
-	}
-
-	results, total := SortAndPaginatePlayerSummaries(matching, filter, playlistIDs)
-
-	return results, total, nil
 }
 
 // SearchPlayerSummaries searches players matching a query string across player_name and player_id

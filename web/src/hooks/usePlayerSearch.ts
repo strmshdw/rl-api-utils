@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, type SetStateAction } from 'react';
 import { PlayerSummary, PlayerSearchResponse, GlobalSpotlights } from '../types/api';
 import { useDashboard } from '../context/DashboardContext';
 import { isDemoMode, SAMPLE_PLAYERS } from '../utils/sampleData';
@@ -33,8 +33,38 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
   const [role, setRole] = useState<RoleFilter>(options.initialRole ?? 'all');
   const [sort, setSort] = useState<PlayerSortField>(options.initialSort ?? 'last_seen');
   const [order, setOrder] = useState<SortOrder>(options.initialOrder ?? 'desc');
-  const [page, setPage] = useState<number>(1);
   const [limit] = useState<number>(options.limit ?? 24);
+
+  const filterKey = [
+    debouncedQuery,
+    platform,
+    playlist,
+    role,
+    sort,
+    order,
+    dateRangeQueryParams.from ?? '',
+    dateRangeQueryParams.to ?? '',
+  ].join('\x1f');
+
+  const [pagination, setPagination] = useState<{ filterKey: string; page: number }>({
+    filterKey,
+    page: 1,
+  });
+  if (pagination.filterKey !== filterKey) {
+    setPagination({ filterKey, page: 1 });
+  }
+  const page = pagination.filterKey === filterKey ? pagination.page : 1;
+
+  const setPage = useCallback(
+    (value: SetStateAction<number>) => {
+      setPagination((prev) => {
+        const currentPage = prev.filterKey === filterKey ? prev.page : 1;
+        const nextPage = typeof value === 'function' ? value(currentPage) : value;
+        return { filterKey, page: nextPage };
+      });
+    },
+    [filterKey],
+  );
 
   const [players, setPlayers] = useState<PlayerSummary[]>([]);
   const [total, setTotal] = useState<number>(0);
@@ -44,17 +74,14 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
 
   // 300ms Debounce effect
   useEffect(() => {
+    if (query === debouncedQuery) {
+      return;
+    }
     const timer = setTimeout(() => {
       setDebouncedQuery(query);
-      setPage(1); // Reset to page 1 on new search term
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
-
-  // Reset page when platform, playlist, role, sort, order, or date range changes
-  useEffect(() => {
-    setPage(1);
-  }, [platform, playlist, role, sort, order, dateRangeQueryParams.from, dateRangeQueryParams.to]);
+  }, [query, debouncedQuery]);
 
   useEffect(() => {
     const abortController = new AbortController();

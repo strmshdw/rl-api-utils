@@ -68,10 +68,7 @@ func (d *Daemon) handleGetSession(w http.ResponseWriter, r *http.Request) {
 
 	summary := session.FilterSessionSummary(d.sessionTracker.GetSessionSummary(), playlist, fromUnix, toUnix, d.stateStore)
 	summary = d.enrichSessionTelemetry(r.Context(), summary)
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(summary); err != nil {
-		d.logger.Warn("error encoding session summary", "error", err)
-	}
+	d.writeJSONResponse(w, r, http.StatusOK, summary, "error encoding session summary")
 }
 
 // handleResetSession handles POST /api/session/reset, resetting active session counters
@@ -150,10 +147,7 @@ func (d *Daemon) handleContinueSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	summary = d.enrichSessionTelemetry(r.Context(), summary)
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(summary); err != nil {
-		d.logger.Warn("error encoding continued session summary", "error", err)
-	}
+	d.writeJSONResponse(w, r, http.StatusOK, summary, "error encoding continued session summary")
 }
 
 // handleDismissContinueSession handles POST /api/session/dismiss, dismissing the continuation

@@ -74,10 +74,7 @@ func (d *Daemon) handleCurrentMatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		d.logger.Warn("error encoding current-match response", slog.Any("error", err))
-	}
+	d.writeJSONResponse(w, r, http.StatusOK, resp, "error encoding current-match response")
 }
 
 // handleListPlayers handles GET /players and GET /api/players.
@@ -185,6 +182,10 @@ func (d *Daemon) handleListPlayers(w http.ResponseWriter, r *http.Request) {
 
 	summaries, total, err := d.stateStore.FilterPlayerSummaries(r.Context(), filter)
 	if err != nil {
+		if isClientDisconnect(r.Context(), err) {
+			d.logger.Debug("player search canceled by client", slog.Any("error", err))
+			return
+		}
 		d.logger.Error("failed to query player summaries", slog.Any("error", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query players"})
@@ -195,28 +196,32 @@ func (d *Daemon) handleListPlayers(w http.ResponseWriter, r *http.Request) {
 		summaries = make([]*storage.PlayerSummary, 0)
 	}
 
+	if isClientDisconnect(r.Context(), nil) {
+		return
+	}
+
 	var spotlights *storage.GlobalSpotlights
 	if isAPIRoute {
-		if sp, spErr := d.stateStore.GetPlayerSpotlights(r.Context()); spErr == nil {
+		sp, spErr := d.stateStore.GetPlayerSpotlights(r.Context())
+		if spErr != nil && isClientDisconnect(r.Context(), spErr) {
+			d.logger.Debug("player spotlights canceled by client", slog.Any("error", spErr))
+			return
+		}
+		if spErr == nil {
 			spotlights = sp
 		}
 	}
 
-	w.WriteHeader(http.StatusOK)
 	if isAPIRoute {
-		if err := json.NewEncoder(w).Encode(PlayerSearchResponse{
+		d.writeJSONResponse(w, r, http.StatusOK, PlayerSearchResponse{
 			Players:    summaries,
 			Total:      total,
 			Limit:      limit,
 			Offset:     offset,
 			Spotlights: spotlights,
-		}); err != nil {
-			d.logger.Warn("error encoding player search response", slog.Any("error", err))
-		}
+		}, "error encoding player search response")
 	} else {
-		if err := json.NewEncoder(w).Encode(summaries); err != nil {
-			d.logger.Warn("error encoding player summaries response", slog.Any("error", err))
-		}
+		d.writeJSONResponse(w, r, http.StatusOK, summaries, "error encoding player summaries response")
 	}
 }
 
@@ -290,6 +295,10 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		} else {
+			if isClientDisconnect(r.Context(), err) {
+				d.logger.Debug("player detail query canceled by client", slog.String("player_id", playerID), slog.Any("error", err))
+				return
+			}
 			d.logger.Error("failed to query player", slog.String("player_id", playerID), slog.Any("error", err))
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query player"})
@@ -452,10 +461,7 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		RecentMatches:   recentMatches,
 	}
 
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		d.logger.Warn("error encoding player detail response", slog.Any("error", err))
-	}
+	d.writeJSONResponse(w, r, http.StatusOK, resp, "error encoding player detail response")
 }
 
 // handleGetPlayerMatches handles GET /players/{id}/matches and GET /api/players/{id}/matches.
@@ -575,6 +581,10 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 
 	matches, total, err := d.stateStore.ListPlayerMatches(r.Context(), playerID, filter)
 	if err != nil {
+		if isClientDisconnect(r.Context(), err) {
+			d.logger.Debug("player matches query canceled by client", slog.String("player_id", playerID), slog.Any("error", err))
+			return
+		}
 		d.logger.Error("failed to query player matches", slog.String("player_id", playerID), slog.Any("error", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query player matches"})
@@ -585,15 +595,12 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 		matches = make([]*storage.PlayerMatchDetail, 0)
 	}
 
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(PlayerMatchesResponse{
+	d.writeJSONResponse(w, r, http.StatusOK, PlayerMatchesResponse{
 		Matches: matches,
 		Total:   total,
 		Limit:   limit,
 		Offset:  offset,
-	}); err != nil {
-		d.logger.Warn("error encoding player matches response", slog.Any("error", err))
-	}
+	}, "error encoding player matches response")
 }
 
 // handlePatchPlayer handles PATCH /players/{id...} and PATCH /api/players/{id...}.
@@ -696,11 +703,8 @@ func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
 		updated.Tags = newTags
 	}
 
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	d.writeJSONResponse(w, r, http.StatusOK, map[string]interface{}{
 		"status": "ok",
 		"player": updated,
-	}); err != nil {
-		d.logger.Warn("error encoding patch player response", slog.Any("error", err))
-	}
+	}, "error encoding patch player response")
 }
