@@ -249,6 +249,11 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
 		return
 	}
+	if d.cfg != nil && strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID) != "" {
+		if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
+			playerID = strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID)
+		}
+	}
 
 	if d.stateStore == nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -313,6 +318,20 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
+		}
+	}
+	if isLocalPlayer && d.cfg != nil {
+		if cfgID := strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID); cfgID != "" {
+			player.PlayerID = cfgID
+			playerID = cfgID
+			if strings.Contains(cfgID, "|") {
+				if parts := strings.Split(cfgID, "|"); strings.TrimSpace(parts[0]) != "" {
+					player.Platform = strings.TrimSpace(parts[0])
+				}
+			}
+		}
+		if cfgName := strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerName); cfgName != "" && (player.PlayerName == "" || strings.EqualFold(player.PlayerName, "You")) {
+			player.PlayerName = cfgName
 		}
 	}
 
@@ -467,6 +486,11 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
 		return
 	}
+	if d.cfg != nil && strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID) != "" {
+		if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
+			playerID = strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID)
+		}
+	}
 
 	q := r.URL.Query()
 	limit := 50
@@ -604,6 +628,11 @@ func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
 		return
+	}
+	if d.cfg != nil && strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID) != "" {
+		if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
+			playerID = strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID)
+		}
 	}
 
 	if d.stateStore == nil {

@@ -1156,23 +1156,8 @@ func (s *SQLiteStore) resolveCanonicalPlayerID(ctx context.Context, playerID str
 	}
 	// Fallback: resolve local player aliases ("me", "you", raw OnlineID, or local display name) against match_players and auth_state.
 	if strings.EqualFold(trimmed, "me") || strings.EqualFold(trimmed, "you") {
-		if err := s.db.QueryRowContext(ctx, `
-			SELECT player_id
-			FROM match_players
-			WHERE is_local = 1 AND player_id != '' AND player_id != '0'
-			GROUP BY player_id
-			ORDER BY COUNT(*) DESC, player_id ASC
-			LIMIT 1;
-		`).Scan(&resolved); err == nil && resolved != "" {
-			return resolved
-		}
-		if err := s.db.QueryRowContext(ctx, `
-			SELECT account_id
-			FROM auth_state
-			WHERE account_id != ''
-			LIMIT 1;
-		`).Scan(&resolved); err == nil && resolved != "" {
-			return resolved
+		if pid := s.primaryLocalPlayerID(ctx); pid != "" {
+			return pid
 		}
 	}
 	if err := s.db.QueryRowContext(ctx, `
@@ -1190,23 +1175,42 @@ func (s *SQLiteStore) resolveCanonicalPlayerID(ctx context.Context, playerID str
 		if err := s.db.QueryRowContext(ctx, `
 			SELECT account_id
 			FROM auth_state
-			WHERE LOWER(display_name) = ? AND account_id != ''
+			WHERE LOWER(display_name) = ? AND account_id != '' AND LOWER(provider) NOT LIKE '%_polling'
 			LIMIT 1;
 		`, strings.ToLower(trimmed)).Scan(&authAcc); err == nil && authAcc != "" {
-			if err := s.db.QueryRowContext(ctx, `
-				SELECT player_id
-				FROM match_players
-				WHERE is_local = 1 AND player_id != '' AND player_id != '0'
-				GROUP BY player_id
-				ORDER BY COUNT(*) DESC, player_id ASC
-				LIMIT 1;
-			`).Scan(&resolved); err == nil && resolved != "" {
-				return resolved
+			if pid := s.primaryLocalPlayerID(ctx); pid != "" {
+				return pid
 			}
 			return authAcc
 		}
 	}
 	return playerID
+}
+
+// primaryLocalPlayerID returns the canonical primary account PlayerID for the local player,
+// prioritizing match_players (is_local = 1) and falling back only to non-polling primary auth_state.
+func (s *SQLiteStore) primaryLocalPlayerID(ctx context.Context) string {
+	var pid string
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT player_id
+		FROM match_players
+		WHERE is_local = 1 AND player_id != '' AND player_id != '0'
+		GROUP BY player_id
+		ORDER BY COUNT(*) DESC, player_id ASC
+		LIMIT 1;
+	`).Scan(&pid); err == nil && strings.TrimSpace(pid) != "" {
+		return strings.TrimSpace(pid)
+	}
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT account_id
+		FROM auth_state
+		WHERE account_id != '' AND LOWER(provider) NOT LIKE '%_polling'
+		ORDER BY updated_at DESC
+		LIMIT 1;
+	`).Scan(&pid); err == nil && strings.TrimSpace(pid) != "" {
+		return strings.TrimSpace(pid)
+	}
+	return ""
 }
 
 // resolvePlayerIDForMatch resolves an incoming player identifier to an existing canonical PlayerID
@@ -1436,25 +1440,10 @@ func (s *SQLiteStore) GetLocalPlayerProfile(ctx context.Context, playerID string
 		return nil, nil, ErrPlayerNotFound
 	}
 
-	canonicalID := resolvedID
-	if strings.EqualFold(canonicalID, "me") || strings.EqualFold(canonicalID, "you") || canonicalID == "" {
-		var mpID string
-		if err := s.db.QueryRowContext(ctx, `
-			SELECT player_id
-			FROM match_players
-			WHERE is_local = 1 AND player_id != '' AND player_id != '0'
-			GROUP BY player_id
-			ORDER BY COUNT(*) DESC, player_id ASC
-			LIMIT 1;
-		`).Scan(&mpID); err == nil && mpID != "" {
-			canonicalID = mpID
-		} else if err := s.db.QueryRowContext(ctx, `
-			SELECT account_id
-			FROM auth_state
-			WHERE account_id != ''
-			LIMIT 1;
-		`).Scan(&mpID); err == nil && mpID != "" {
-			canonicalID = mpID
+	canonicalID := s.primaryLocalPlayerID(ctx)
+	if canonicalID == "" {
+		if !strings.EqualFold(resolvedID, "me") && !strings.EqualFold(resolvedID, "you") && resolvedID != "" {
+			canonicalID = resolvedID
 		} else {
 			return nil, nil, ErrPlayerNotFound
 		}
@@ -1468,74 +1457,79 @@ func (s *SQLiteStore) GetLocalPlayerProfile(ctx context.Context, playerID string
 		}
 	}
 
-	var displayName, provider string
-	_ = s.db.QueryRowContext(ctx, `
-		SELECT COALESCE(display_name, ''), COALESCE(provider, '')
-		FROM auth_state
-		WHERE display_name != '' OR account_id != ''
-		ORDER BY updated_at DESC
-		LIMIT 1;
-	`).Scan(&displayName, &provider)
-	displayName = strings.TrimSpace(displayName)
-	if platform == "Unknown" && provider != "" {
-		if strings.EqualFold(provider, "epic") {
-			platform = "Epic"
-		} else if strings.EqualFold(provider, "steam") {
-			platform = "Steam"
-		}
-	}
-
-	if displayName == "" {
-		// Look for local player's display name in recent match_players.stats_json or matches.replay_stats_json
-		nameRows, err := s.db.QueryContext(ctx, `
-			SELECT mp.stats_json, m.replay_stats_json
-			FROM match_players mp
-			JOIN matches m ON mp.match_guid = m.match_guid
-			WHERE mp.is_local = 1 OR mp.player_id = ?
-			ORDER BY m.record_start_timestamp DESC
-			LIMIT 25;
-		`, canonicalID)
-		if err == nil {
-			for nameRows.Next() {
-				var stJSON, repJSON string
-				if err := nameRows.Scan(&stJSON, &repJSON); err != nil {
-					continue
-				}
-				if stJSON != "" {
-					var rps ReplayPlayerStats
-					if json.Unmarshal([]byte(stJSON), &rps) == nil {
-						cand := strings.TrimSpace(rps.Name)
-						if cand != "" && !strings.EqualFold(cand, "You") {
-							displayName = cand
-							if platform == "Unknown" && strings.TrimSpace(rps.Platform) != "" {
-								platform = strings.TrimSpace(rps.Platform)
-							}
-							break
+	var displayName string
+	// 1. Prefer the primary playing account's display name from recent match_players.stats_json or matches.replay_stats_json
+	nameRows, err := s.db.QueryContext(ctx, `
+		SELECT mp.stats_json, m.replay_stats_json
+		FROM match_players mp
+		JOIN matches m ON mp.match_guid = m.match_guid
+		WHERE mp.player_id = ? OR mp.is_local = 1
+		ORDER BY (CASE WHEN mp.player_id = ? THEN 1 ELSE 0 END) DESC, m.record_start_timestamp DESC
+		LIMIT 25;
+	`, canonicalID, canonicalID)
+	if err == nil {
+		for nameRows.Next() {
+			var stJSON, repJSON string
+			if err := nameRows.Scan(&stJSON, &repJSON); err != nil {
+				continue
+			}
+			if stJSON != "" {
+				var rps ReplayPlayerStats
+				if json.Unmarshal([]byte(stJSON), &rps) == nil {
+					cand := strings.TrimSpace(rps.Name)
+					if cand != "" && !strings.EqualFold(cand, "You") {
+						displayName = cand
+						if platform == "Unknown" && strings.TrimSpace(rps.Platform) != "" {
+							platform = strings.TrimSpace(rps.Platform)
 						}
-					}
-				}
-				if repJSON != "" {
-					var rms ReplayMatchStats
-					if json.Unmarshal([]byte(repJSON), &rms) == nil {
-						for _, p := range rms.Players {
-							if p.IsLocal || strings.EqualFold(p.OnlineID, canonicalID) || (strings.Contains(canonicalID, "|") && strings.EqualFold(p.OnlineID, strings.Split(canonicalID, "|")[1])) {
-								cand := strings.TrimSpace(p.Name)
-								if cand != "" && !strings.EqualFold(cand, "You") {
-									displayName = cand
-									if platform == "Unknown" && strings.TrimSpace(p.Platform) != "" {
-										platform = strings.TrimSpace(p.Platform)
-									}
-									break
-								}
-							}
-						}
-						if displayName != "" {
-							break
-						}
+						break
 					}
 				}
 			}
-			nameRows.Close()
+			if repJSON != "" {
+				var rms ReplayMatchStats
+				if json.Unmarshal([]byte(repJSON), &rms) == nil {
+					for _, p := range rms.Players {
+						if p.IsLocal || strings.EqualFold(p.OnlineID, canonicalID) || (strings.Contains(canonicalID, "|") && strings.EqualFold(p.OnlineID, strings.Split(canonicalID, "|")[1])) {
+							cand := strings.TrimSpace(p.Name)
+							if cand != "" && !strings.EqualFold(cand, "You") {
+								displayName = cand
+								if platform == "Unknown" && strings.TrimSpace(p.Platform) != "" {
+									platform = strings.TrimSpace(p.Platform)
+								}
+								break
+							}
+						}
+					}
+					if displayName != "" {
+						break
+					}
+				}
+			}
+		}
+		nameRows.Close()
+	}
+
+	// 2. Fallback to non-polling primary auth_state only if no replay display name was found
+	if displayName == "" || platform == "Unknown" {
+		var authName, provider string
+		_ = s.db.QueryRowContext(ctx, `
+			SELECT COALESCE(display_name, ''), COALESCE(provider, '')
+			FROM auth_state
+			WHERE (display_name != '' OR account_id != '') AND LOWER(provider) NOT LIKE '%_polling'
+			ORDER BY updated_at DESC
+			LIMIT 1;
+		`).Scan(&authName, &provider)
+		authName = strings.TrimSpace(authName)
+		if displayName == "" && authName != "" {
+			displayName = authName
+		}
+		if platform == "Unknown" && provider != "" {
+			if strings.EqualFold(provider, "epic") {
+				platform = "Epic"
+			} else if strings.EqualFold(provider, "steam") {
+				platform = "Steam"
+			}
 		}
 	}
 	if displayName == "" {
@@ -1814,6 +1808,12 @@ func (s *SQLiteStore) ComputePlayerSplitStats(
 	if resolvedID == "" {
 		resolvedID = strings.TrimSpace(playerID)
 	}
+	isLocalTarget := s.isLocalPlayerID(ctx, resolvedID)
+	if isLocalTarget {
+		if primaryID := s.primaryLocalPlayerID(ctx); primaryID != "" {
+			resolvedID = primaryID
+		}
+	}
 
 	if fromUnix > 0 || toUnix > 0 {
 		var hasAnyMatchPlayer int
@@ -1824,7 +1824,7 @@ func (s *SQLiteStore) ComputePlayerSplitStats(
 
 	var whereClauses []string
 	var args []interface{}
-	if s.isLocalPlayerID(ctx, resolvedID) {
+	if isLocalTarget {
 		whereClauses = append(whereClauses, "(mp.player_id = ? OR mp.is_local = 1)")
 		args = append(args, resolvedID)
 	} else {
@@ -1850,7 +1850,7 @@ func (s *SQLiteStore) ComputePlayerSplitStats(
 	}
 
 	querySQL := fmt.Sprintf(`
-	SELECT mp.team_num, mp.is_local, mp.won, mp.score, mp.goals, mp.assists, mp.saves, mp.shots, mp.demos, mp.stats_json,
+	SELECT mp.player_id, mp.team_num, mp.is_local, mp.won, mp.score, mp.goals, mp.assists, mp.saves, mp.shots, mp.demos, mp.stats_json,
 	       m.blue_score, m.orange_score, m.winner_team, m.replay_stats_json,
 	       COALESCE((SELECT lp.team_num FROM match_players lp WHERE lp.match_guid = m.match_guid AND lp.is_local = 1 LIMIT 1), -1) AS local_team
 	FROM match_players mp
@@ -1865,6 +1865,7 @@ func (s *SQLiteStore) ComputePlayerSplitStats(
 		defer rows.Close()
 		for rows.Next() {
 			var (
+				mpPlayerID  string
 				teamNum     int
 				isLocal     int
 				wonVal      sql.NullInt64
@@ -1882,7 +1883,7 @@ func (s *SQLiteStore) ComputePlayerSplitStats(
 				localTeam   int
 			)
 			if scanErr := rows.Scan(
-				&teamNum, &isLocal, &wonVal, &score, &goals, &assists, &saves, &shots, &demos, &statsJSON,
+				&mpPlayerID, &teamNum, &isLocal, &wonVal, &score, &goals, &assists, &saves, &shots, &demos, &statsJSON,
 				&blueScore, &orangeScore, &winnerTeam, &replayStats, &localTeam,
 			); scanErr != nil {
 				continue
@@ -1913,7 +1914,11 @@ func (s *SQLiteStore) ComputePlayerSplitStats(
 				isDraw = true
 			}
 
-			resolvedStatsJSON := ExtractPlayerStatsJSONFromReplay(statsJSON, replayStats.String, resolvedID, playerName, teamNum)
+			lookupID := resolvedID
+			if strings.TrimSpace(mpPlayerID) != "" {
+				lookupID = strings.TrimSpace(mpPlayerID)
+			}
+			resolvedStatsJSON := ExtractPlayerStatsJSONFromReplay(statsJSON, replayStats.String, lookupID, playerName, teamNum)
 			if isTeammate {
 				withAcc.AddMatchOutcome(localWon, isDraw)
 				withAcc.AddPlayerBoxAndTelemetry(score, goals, assists, saves, shots, demos, resolvedStatsJSON)
@@ -2293,43 +2298,57 @@ func (s *SQLiteStore) GetPlayerSpotlights(ctx context.Context) (*GlobalSpotlight
 	return ComputeGlobalSpotlights(candidates), nil
 }
 
-// GetLocalPlayerIDs returns all known local player account and platform IDs from auth and match records.
+// GetLocalPlayerIDs returns all known local player account and platform IDs from match records and primary auth.
 func (s *SQLiteStore) GetLocalPlayerIDs(ctx context.Context) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, wrapContextErr(err)
 	}
 
-	idMap := make(map[string]bool)
-
-	// 1. From auth_state
-	authRows, err := s.db.QueryContext(ctx, "SELECT account_id FROM auth_state WHERE account_id != '';")
-	if err == nil {
-		defer authRows.Close()
-		for authRows.Next() {
-			var acc string
-			if err := authRows.Scan(&acc); err == nil && strings.TrimSpace(acc) != "" {
-				idMap[strings.TrimSpace(acc)] = true
-			}
+	seen := make(map[string]bool)
+	var ids []string
+	addID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id != "" && id != "0" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
 		}
 	}
 
-	// 2. From match_players
-	mpRows, err := s.db.QueryContext(ctx, "SELECT DISTINCT player_id FROM match_players WHERE is_local = 1;")
+	// 1. From match_players ordered by match count DESC so the primary account is always first
+	mpRows, err := s.db.QueryContext(ctx, `
+		SELECT player_id
+		FROM match_players
+		WHERE is_local = 1 AND player_id != '' AND player_id != '0'
+		GROUP BY player_id
+		ORDER BY COUNT(*) DESC, player_id ASC;
+	`)
 	if err == nil {
 		defer mpRows.Close()
 		for mpRows.Next() {
 			var pid string
-			if err := mpRows.Scan(&pid); err == nil && strings.TrimSpace(pid) != "" {
-				idMap[strings.TrimSpace(pid)] = true
+			if err := mpRows.Scan(&pid); err == nil {
+				addID(pid)
 			}
 		}
 	}
 
-	ids := make([]string, 0, len(idMap))
-	for id := range idMap {
-		ids = append(ids, id)
+	// 2. From non-polling primary auth_state
+	authRows, err := s.db.QueryContext(ctx, `
+		SELECT account_id
+		FROM auth_state
+		WHERE account_id != '' AND LOWER(provider) NOT LIKE '%_polling'
+		ORDER BY updated_at DESC;
+	`)
+	if err == nil {
+		defer authRows.Close()
+		for authRows.Next() {
+			var acc string
+			if err := authRows.Scan(&acc); err == nil {
+				addID(acc)
+			}
+		}
 	}
-	sort.Strings(ids)
+
 	return ids, nil
 }
 
@@ -3551,7 +3570,7 @@ func (s *SQLiteStore) getLocalAccountIDs(ctx context.Context) map[string]bool {
 		}
 	}
 
-	if rows, err := s.db.QueryContext(ctx, "SELECT account_id FROM auth_state WHERE account_id != '';"); err == nil {
+	if rows, err := s.db.QueryContext(ctx, "SELECT account_id FROM auth_state WHERE account_id != '' AND LOWER(provider) NOT LIKE '%_polling';"); err == nil {
 		for rows.Next() {
 			var acc string
 			if err := rows.Scan(&acc); err == nil {
@@ -4041,6 +4060,9 @@ func (s *SQLiteStore) ListPlayerMatches(ctx context.Context, playerID string, fi
 	isLocalTarget := 0
 	if s.isLocalPlayerID(ctx, playerID) {
 		isLocalTarget = 1
+		if primaryID := s.primaryLocalPlayerID(ctx); primaryID != "" {
+			playerID = primaryID
+		}
 	}
 
 	const querySQL = `
