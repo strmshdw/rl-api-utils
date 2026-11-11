@@ -175,10 +175,25 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
 
   useEffect(() => {
     if (playerId) {
-      setHistoryStack([{ id: playerId, name: playerName }]);
+      const initialStack = [{ id: playerId, name: playerName }];
+      setHistoryStack(initialStack);
     } else {
       setHistoryStack([]);
     }
+  }, [playerId, playerName]);
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const dialogStack = (event.state as { rlsyncDialogStack?: Array<{ id: string; name?: string }> } | null)
+        ?.rlsyncDialogStack;
+      if (Array.isArray(dialogStack) && dialogStack.length > 0) {
+        setHistoryStack(dialogStack);
+      } else if (playerId) {
+        setHistoryStack([{ id: playerId, name: playerName }]);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, [playerId, playerName]);
 
   const [profile, setProfile] = useState<PlayerDetailResponse | null>(null);
@@ -317,6 +332,18 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
     [playlistFilter, profile?.against_you_stats, totals.vs.wins, totals.vs.losses, id],
   );
 
+  const isOwnProfile = useMemo(() => {
+    const lowerId = (id || '').toLowerCase();
+    return (
+      profile?.relationship_tag === 'YOU' ||
+      lowerId === 'me' ||
+      lowerId === 'you' ||
+      localPlayerIds.has(id) ||
+      localPlayerIds.has(lowerId) ||
+      (id.includes('|') && localPlayerIds.has(id.split('|')[1]))
+    );
+  }, [profile?.relationship_tag, id, localPlayerIds]);
+
   const relTag = useMemo(
     () =>
       computeDynamicRelationshipTag(
@@ -324,9 +351,9 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
         totals.mate.losses,
         totals.vs.wins,
         totals.vs.losses,
-        false,
+        isOwnProfile ? 'YOU' : false,
       ),
-    [totals],
+    [totals, isOwnProfile],
   );
 
   const resolveLocalOutcome = (m: PlayerMatchDetail): 'victory' | 'defeat' | 'draw' | '' => {
@@ -375,7 +402,19 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
 
   const handlePlayerClick = (nextPlayerId: string, nextPlayerName?: string) => {
     if (!nextPlayerId || nextPlayerId === id) return;
-    setHistoryStack((prev) => [...prev, { id: nextPlayerId, name: nextPlayerName }]);
+    setHistoryStack((prev) => {
+      const nextStack = [...prev, { id: nextPlayerId, name: nextPlayerName }];
+      try {
+        const curState =
+          window.history.state && typeof window.history.state === 'object' ? window.history.state : {};
+        window.history.pushState(
+          { ...curState, rlsyncDialogStack: nextStack },
+          '',
+          window.location.pathname + window.location.search,
+        );
+      } catch {}
+      return nextStack;
+    });
   };
 
   const handleBack = () => {
@@ -472,8 +511,8 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
             {/* Compact Non-Wrapping WITH YOU & AGAINST YOU Role Split Cards */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 px-8 pt-5">
               <CompactRoleSplitCard
-                label="WITH YOU"
-                roleTitle="WITH YOU (TEAMMATE)"
+                label={isOwnProfile ? 'YOUR STATS' : 'WITH YOU'}
+                roleTitle={isOwnProfile ? 'ALL MATCHES (YOU)' : 'WITH YOU (TEAMMATE)'}
                 wins={totals.mate.wins}
                 losses={totals.mate.losses}
                 teammate

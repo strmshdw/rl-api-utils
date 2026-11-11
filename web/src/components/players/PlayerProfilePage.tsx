@@ -40,6 +40,7 @@ interface PlayerProfilePageProps {
   playerName?: string;
   onBack: () => void;
   localPlayerIds?: Set<string>;
+  onOpenFullProfile?: (playerId: string, playerName?: string) => void;
 }
 
 const PLAYLIST_GRID = 'minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 70px 120px';
@@ -69,6 +70,7 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
   playerName,
   onBack,
   localPlayerIds = NO_IDS,
+  onOpenFullProfile,
 }) => {
   const { statMode, dateRangeQueryParams, pinnedPlayerIds, togglePinPlayer } = useDashboard();
   const isAvg = statMode === 'avg';
@@ -285,6 +287,18 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
     [profile?.against_you_stats, totals.vs.wins, totals.vs.losses, id, statPlaylist],
   );
 
+  const isOwnProfile = useMemo(() => {
+    const lowerId = (id || '').toLowerCase();
+    return (
+      profile?.relationship_tag === 'YOU' ||
+      lowerId === 'me' ||
+      lowerId === 'you' ||
+      localPlayerIds.has(id) ||
+      localPlayerIds.has(lowerId) ||
+      (id.includes('|') && localPlayerIds.has(id.split('|')[1]))
+    );
+  }, [profile?.relationship_tag, id, localPlayerIds]);
+
   const relTag = useMemo(
     () =>
       computeDynamicRelationshipTag(
@@ -292,9 +306,9 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
         totals.mate.losses,
         totals.vs.wins,
         totals.vs.losses,
-        false,
+        isOwnProfile ? 'YOU' : false,
       ),
-    [totals],
+    [totals, isOwnProfile],
   );
 
   const resolveLocalOutcome = (m: PlayerMatchDetail): 'victory' | 'defeat' | 'draw' | '' => {
@@ -451,8 +465,8 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
           {/* Compact Non-Wrapping WITH YOU & AGAINST YOU Role Split Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
             <CompactRoleSplitCard
-              label="WITH YOU"
-              roleTitle="WITH YOU (TEAMMATE)"
+              label={isOwnProfile ? 'YOUR STATS' : 'WITH YOU'}
+              roleTitle={isOwnProfile ? 'ALL MATCHES (YOU)' : 'WITH YOU (TEAMMATE)'}
               wins={totals.mate.wins}
               losses={totals.mate.losses}
               teammate
@@ -818,6 +832,7 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
           playerName={quickModalPlayer.name}
           onClose={() => setQuickModalPlayer(null)}
           localPlayerIds={localPlayerIds}
+          onOpenFullProfile={onOpenFullProfile}
         />
       )}
 

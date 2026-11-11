@@ -931,33 +931,45 @@ export const SAMPLE_PLAYERS: PlayerSummary[] = [
 ];
 
 export function getSamplePlayerProfile(playerId: string, playerName?: string): PlayerDetailResponse {
+  const lowerId = (playerId || '').toLowerCase();
+  const lowerName = (playerName || '').toLowerCase();
+  const isLocalDemo =
+    lowerId === 'me' ||
+    lowerId === 'you' ||
+    lowerId.includes('demo_local_player') ||
+    lowerName === 'you' ||
+    lowerName === 'you (demo)';
+
   const found =
     SAMPLE_PLAYERS.find(
       (p) =>
         p.player_id === playerId ||
-        p.player_name.toLowerCase() === (playerName || '').toLowerCase() ||
-        playerId.toLowerCase().includes(p.player_name.toLowerCase()),
+        p.player_name.toLowerCase() === lowerName ||
+        lowerId.includes(p.player_name.toLowerCase()),
     ) || SAMPLE_PLAYERS[0];
 
   return {
     player_id: playerId || found.player_id,
-    platform: found.platform,
-    player_name: playerName || found.player_name,
+    platform: isLocalDemo ? 'Epic' : found.platform,
+    player_name: isLocalDemo ? 'You' : playerName || found.player_name,
     ranks_json: found.ranks_json,
-    notes: 'High-tempo rotational player; strong backboard defense and fast 50/50 challenges.',
-    tags: ['FAST ROTATOR', 'BACKBOARD', 'HIGH BPM'],
+    notes: isLocalDemo
+      ? 'Local player profile.'
+      : 'High-tempo rotational player; strong backboard defense and fast 50/50 challenges.',
+    tags: isLocalDemo ? ['LOCAL PLAYER'] : ['FAST ROTATOR', 'BACKBOARD', 'HIGH BPM'],
+    relationship_tag: isLocalDemo ? 'YOU' : undefined,
     first_seen_at: found.first_seen_at,
     last_seen_at: found.last_seen_at,
     with_you_stats: found.with_you_stats,
-    against_you_stats: found.against_you_stats,
+    against_you_stats: isLocalDemo ? synthesizeRoleStats(0, 0, 0) : found.against_you_stats,
     matchups: [
       {
         player_id: playerId || found.player_id,
         playlist_id: 11,
         wins_as_teammate: found.total_wins_as_teammate,
         losses_as_teammate: found.total_losses_as_teammate,
-        wins_as_opponent: found.total_wins_as_opponent,
-        losses_as_opponent: found.total_losses_as_opponent,
+        wins_as_opponent: isLocalDemo ? 0 : found.total_wins_as_opponent,
+        losses_as_opponent: isLocalDemo ? 0 : found.total_losses_as_opponent,
         total_matches: found.total_matches,
         last_played_at: found.last_seen_at,
       },
@@ -966,9 +978,9 @@ export function getSamplePlayerProfile(playerId: string, playerName?: string): P
         playlist_id: 13,
         wins_as_teammate: 1,
         losses_as_teammate: 0,
-        wins_as_opponent: 1,
+        wins_as_opponent: isLocalDemo ? 0 : 1,
         losses_as_opponent: 0,
-        total_matches: 2,
+        total_matches: isLocalDemo ? 1 : 2,
         last_played_at: found.last_seen_at,
       },
     ],

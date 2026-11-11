@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSession } from './hooks/useSession';
 import { useLiveMatch } from './hooks/useLiveMatch';
 import { TopBar, DashboardTab } from './components/layout/TopBar';
@@ -14,13 +14,158 @@ import { PlayerProfileDialog } from './components/players/PlayerProfileDialog';
 import { HistoricalMatchDetailModal } from './components/historical/HistoricalMatchDetailModal';
 import { sessionMatchToHistoricalRecord } from './components/historical/historyData';
 import { SessionMatchDetail } from './types/api';
+import {
+  BrowserNavState,
+  PlayerNavTarget,
+  buildLocationUrl,
+  formatDocumentTitle,
+  parseLocationState,
+} from './utils/navigation';
 
 const DashboardShell: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<DashboardTab>('live');
+  const initialNav = useMemo(() => parseLocationState(window.location, window.history.state), []);
+  const [activeTab, setActiveTab] = useState<DashboardTab>(initialNav.tab);
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [quickModalPlayer, setQuickModalPlayer] = useState<{ id: string; name?: string } | null>(null);
+  const [quickModalPlayer, setQuickModalPlayer] = useState<PlayerNavTarget | null>(initialNav.modalPlayer ?? null);
   const [telemetryMatch, setTelemetryMatch] = useState<SessionMatchDetail | null>(null);
-  const [fullPagePlayer, setFullPagePlayer] = useState<{ id: string; name?: string } | null>(null);
+  const [fullPagePlayer, setFullPagePlayer] = useState<PlayerNavTarget | null>(initialNav.player);
+
+  const entriesByDepthRef = useRef<Map<number, BrowserNavState>>(new Map([[initialNav.depth, initialNav]]));
+  const currentDepthRef = useRef<number>(initialNav.depth);
+
+  const applyNavState = useCallback((navState: BrowserNavState) => {
+    currentDepthRef.current = navState.depth;
+    entriesByDepthRef.current.set(navState.depth, navState);
+    setActiveTab(navState.tab);
+    setFullPagePlayer(navState.tab === 'players' ? navState.player : null);
+    setQuickModalPlayer(navState.modalPlayer ?? null);
+    if (!navState.modalPlayer) {
+      setTelemetryMatch(null);
+    }
+    document.title = formatDocumentTitle(
+      navState.tab,
+      navState.tab === 'players' ? navState.player : null,
+      navState.modalPlayer,
+    );
+  }, []);
+
+  const pushNavigation = useCallback(
+    (
+      nextTab: DashboardTab,
+      nextPlayer: PlayerNavTarget | null = null,
+      nextModalPlayer: PlayerNavTarget | null = null,
+    ) => {
+      const normalizedPlayer = nextTab === 'players' ? nextPlayer : null;
+      const cur = entriesByDepthRef.current.get(currentDepthRef.current);
+      if (
+        cur &&
+        cur.tab === nextTab &&
+        (cur.player?.id ?? null) === (normalizedPlayer?.id ?? null) &&
+        (cur.modalPlayer?.id ?? null) === (nextModalPlayer?.id ?? null)
+      ) {
+        return;
+      }
+
+      const newDepth = currentDepthRef.current + 1;
+      for (const d of Array.from(entriesByDepthRef.current.keys())) {
+        if (d >= newDepth) {
+          entriesByDepthRef.current.delete(d);
+        }
+      }
+
+      const nextState: BrowserNavState = {
+        rlsyncNav: true,
+        depth: newDepth,
+        tab: nextTab,
+        player: normalizedPlayer,
+        modalPlayer: nextModalPlayer,
+      };
+      const nextUrl = buildLocationUrl(nextState.tab, nextState.player, window.location.search);
+      window.history.pushState(nextState, '', nextUrl);
+      applyNavState(nextState);
+    },
+    [applyNavState],
+  );
+
+  useEffect(() => {
+    const startUrl = buildLocationUrl(initialNav.tab, initialNav.player, window.location.search);
+    window.history.replaceState(initialNav, '', startUrl);
+    document.title = formatDocumentTitle(initialNav.tab, initialNav.player, initialNav.modalPlayer);
+
+    const handlePopState = (event: PopStateEvent) => {
+      let resolved: BrowserNavState;
+      if (
+        event.state &&
+        typeof event.state === 'object' &&
+        (event.state as Partial<BrowserNavState>).rlsyncNav === true
+      ) {
+        resolved = parseLocationState(window.location, event.state);
+      } else if (
+        event.state &&
+        typeof event.state === 'object' &&
+        typeof (event.state as { depth?: unknown }).depth === 'number' &&
+        entriesByDepthRef.current.has((event.state as { depth: number }).depth)
+      ) {
+        resolved = entriesByDepthRef.current.get((event.state as { depth: number }).depth)!;
+      } else {
+        resolved = parseLocationState(window.location, event.state);
+      }
+      applyNavState(resolved);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      try {
+        window.history.replaceState(null, '', '/');
+      } catch {
+        // ignore in restricted environments
+      }
+    };
+  }, [initialNav, applyNavState]);
+
+  const handleTabChange = useCallback(
+    (nextTab: DashboardTab) => {
+      pushNavigation(nextTab, null, null);
+    },
+    [pushNavigation],
+  );
+
+  const handleInspectQuickPlayer = useCallback(
+    (id: string, name?: string) => {
+      pushNavigation(activeTab, fullPagePlayer, { id, name });
+    },
+    [activeTab, fullPagePlayer, pushNavigation],
+  );
+
+  const handleCloseQuickPlayer = useCallback(() => {
+    setQuickModalPlayer(null);
+    const cur = entriesByDepthRef.current.get(currentDepthRef.current);
+    if (cur && cur.modalPlayer) {
+      const updated: BrowserNavState = { ...cur, modalPlayer: null };
+      entriesByDepthRef.current.set(updated.depth, updated);
+      const url = buildLocationUrl(updated.tab, updated.player, window.location.search);
+      window.history.replaceState(updated, '', url);
+      document.title = formatDocumentTitle(updated.tab, updated.player, null);
+    }
+  }, []);
+
+  const handleBackFromFullProfile = useCallback(() => {
+    const atDeepLinkRoot = currentDepthRef.current === 0 && fullPagePlayer !== null;
+    if (atDeepLinkRoot) {
+      // Synthesize a Players directory entry when the user landed directly on a deep-linked player URL
+      pushNavigation('players', null, null);
+      return;
+    }
+    const prevDepth = currentDepthRef.current - 1;
+    const prevEntry = entriesByDepthRef.current.get(prevDepth);
+    window.history.back();
+    if (prevEntry && window.history.state?.depth !== prevDepth) {
+      const url = buildLocationUrl(prevEntry.tab, prevEntry.player, window.location.search);
+      window.history.replaceState(prevEntry, '', url);
+      applyNavState(prevEntry);
+    }
+  }, [fullPagePlayer, pushNavigation, applyNavState]);
 
   const { liveModeOverride, isDevBuild, previewMode } = useDashboard();
 
@@ -70,18 +215,19 @@ const DashboardShell: React.FC = () => {
   const lastMatch = chronological(session?.matches).pop();
   const headerPlaylistId = inMatch ? match?.playlist_id ?? 11 : lastMatch?.playlist_id;
 
-  const handleOpenFullProfile = (playerId: string, playerName?: string) => {
-    setQuickModalPlayer(null);
-    setTelemetryMatch(null);
-    setFullPagePlayer({ id: playerId, name: playerName });
-    setActiveTab('players');
-  };
+  const handleOpenFullProfile = useCallback(
+    (playerId: string, playerName?: string) => {
+      setTelemetryMatch(null);
+      pushNavigation('players', { id: playerId, name: playerName }, null);
+    },
+    [pushNavigation],
+  );
 
   return (
     <div className="min-h-screen t-bg-page bg-page text-ink flex flex-col font-display broadcast-app">
       <TopBar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         inMatch={inMatch}
         session={session}
         playlistId={headerPlaylistId}
@@ -109,10 +255,10 @@ const DashboardShell: React.FC = () => {
                 connection={status}
                 columnsOpen={columnsOpen}
                 onCloseColumns={() => setColumnsOpen(false)}
-                onShowSession={() => setActiveTab('session')}
+                onShowSession={() => handleTabChange('session')}
                 onContinueSession={continueSession}
                 onDismissContinueSession={dismissContinueSession}
-                onInspectPlayer={(id, name) => setQuickModalPlayer({ id, name })}
+                onInspectPlayer={handleInspectQuickPlayer}
                 onOpenMatchTelemetry={(m) => setTelemetryMatch(m)}
               />
             )}
@@ -126,7 +272,7 @@ const DashboardShell: React.FC = () => {
                 onRefreshSession={refreshSession}
                 onContinueSession={continueSession}
                 onDismissContinueSession={dismissContinueSession}
-                onInspectPlayer={(id, name) => setQuickModalPlayer({ id, name })}
+                onInspectPlayer={handleInspectQuickPlayer}
               />
             )}
             {activeTab === 'history' && (
@@ -139,7 +285,14 @@ const DashboardShell: React.FC = () => {
               <PlayersView
                 localPlayerIds={localPlayerIds}
                 initialInspectedPlayer={fullPagePlayer}
-                onClearInitialPlayer={() => setFullPagePlayer(null)}
+                inspectedPlayer={fullPagePlayer}
+                onInspectPlayerChange={(player) => {
+                  if (player) {
+                    pushNavigation('players', player, null);
+                  } else {
+                    handleBackFromFullProfile();
+                  }
+                }}
               />
             )}
           </div>
@@ -150,7 +303,7 @@ const DashboardShell: React.FC = () => {
         <PlayerProfileDialog
           playerId={quickModalPlayer.id}
           playerName={quickModalPlayer.name}
-          onClose={() => setQuickModalPlayer(null)}
+          onClose={handleCloseQuickPlayer}
           localPlayerIds={localPlayerIds}
           onOpenFullProfile={handleOpenFullProfile}
         />
@@ -161,7 +314,7 @@ const DashboardShell: React.FC = () => {
           match={sessionMatchToHistoricalRecord(telemetryMatch)}
           onClose={() => setTelemetryMatch(null)}
           localPlayerIds={localPlayerIds}
-          onPlayerClick={(id, name) => setQuickModalPlayer({ id, name })}
+          onPlayerClick={handleInspectQuickPlayer}
         />
       )}
     </div>

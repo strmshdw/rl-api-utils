@@ -1154,6 +1154,58 @@ func (s *SQLiteStore) resolveCanonicalPlayerID(ctx context.Context, playerID str
 			return resolved
 		}
 	}
+	// Fallback: resolve local player aliases ("me", "you", raw OnlineID, or local display name) against match_players and auth_state.
+	if strings.EqualFold(trimmed, "me") || strings.EqualFold(trimmed, "you") {
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT player_id
+			FROM match_players
+			WHERE is_local = 1 AND player_id != '' AND player_id != '0'
+			GROUP BY player_id
+			ORDER BY COUNT(*) DESC, player_id ASC
+			LIMIT 1;
+		`).Scan(&resolved); err == nil && resolved != "" {
+			return resolved
+		}
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT account_id
+			FROM auth_state
+			WHERE account_id != ''
+			LIMIT 1;
+		`).Scan(&resolved); err == nil && resolved != "" {
+			return resolved
+		}
+	}
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT player_id
+		FROM match_players
+		WHERE LOWER(player_id) = ? OR LOWER(player_id) LIKE ? ESCAPE '\'
+		GROUP BY player_id
+		ORDER BY MAX(is_local) DESC, COUNT(*) DESC, player_id ASC
+		LIMIT 1;
+	`, strings.ToLower(trimmed), likePattern).Scan(&resolved); err == nil && resolved != "" {
+		return resolved
+	}
+	if !strings.Contains(trimmed, "|") {
+		var authAcc string
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT account_id
+			FROM auth_state
+			WHERE LOWER(display_name) = ? AND account_id != ''
+			LIMIT 1;
+		`, strings.ToLower(trimmed)).Scan(&authAcc); err == nil && authAcc != "" {
+			if err := s.db.QueryRowContext(ctx, `
+				SELECT player_id
+				FROM match_players
+				WHERE is_local = 1 AND player_id != '' AND player_id != '0'
+				GROUP BY player_id
+				ORDER BY COUNT(*) DESC, player_id ASC
+				LIMIT 1;
+			`).Scan(&resolved); err == nil && resolved != "" {
+				return resolved
+			}
+			return authAcc
+		}
+	}
 	return playerID
 }
 
@@ -1347,6 +1399,349 @@ func (s *SQLiteStore) GetPlayer(ctx context.Context, playerID string) (*PlayerRe
 	return &p, nil
 }
 
+// isLocalPlayerID checks whether playerID belongs to the local player (via match_players.is_local or auth_state).
+func (s *SQLiteStore) isLocalPlayerID(ctx context.Context, playerID string) bool {
+	trimmed := strings.TrimSpace(playerID)
+	if trimmed == "" {
+		return false
+	}
+	if strings.EqualFold(trimmed, "me") || strings.EqualFold(trimmed, "you") {
+		return true
+	}
+	localAccounts := s.getLocalAccountIDs(ctx)
+	lower := strings.ToLower(trimmed)
+	if localAccounts[lower] {
+		return true
+	}
+	if strings.Contains(lower, "|") {
+		parts := strings.Split(lower, "|")
+		if len(parts) >= 2 && strings.TrimSpace(parts[1]) != "" && localAccounts[strings.TrimSpace(parts[1])] {
+			return true
+		}
+	}
+	var isLocCount int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM match_players WHERE is_local = 1 AND LOWER(player_id) = ? LIMIT 1;`, lower).Scan(&isLocCount)
+	return isLocCount > 0
+}
+
+// GetLocalPlayerProfile synthesizes a PlayerRecord and per-playlist PlayerMatchup slice for the local player
+// from match_players, matches, mmr_history, and auth_state without adding the local player to the players directory table.
+func (s *SQLiteStore) GetLocalPlayerProfile(ctx context.Context, playerID string) (*PlayerRecord, []*PlayerMatchup, error) {
+	trimmed := strings.TrimSpace(playerID)
+	if trimmed == "" {
+		return nil, nil, ErrPlayerNotFound
+	}
+	resolvedID := s.resolveCanonicalPlayerID(ctx, trimmed)
+	if !s.isLocalPlayerID(ctx, trimmed) && !s.isLocalPlayerID(ctx, resolvedID) {
+		return nil, nil, ErrPlayerNotFound
+	}
+
+	canonicalID := resolvedID
+	if strings.EqualFold(canonicalID, "me") || strings.EqualFold(canonicalID, "you") || canonicalID == "" {
+		var mpID string
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT player_id
+			FROM match_players
+			WHERE is_local = 1 AND player_id != '' AND player_id != '0'
+			GROUP BY player_id
+			ORDER BY COUNT(*) DESC, player_id ASC
+			LIMIT 1;
+		`).Scan(&mpID); err == nil && mpID != "" {
+			canonicalID = mpID
+		} else if err := s.db.QueryRowContext(ctx, `
+			SELECT account_id
+			FROM auth_state
+			WHERE account_id != ''
+			LIMIT 1;
+		`).Scan(&mpID); err == nil && mpID != "" {
+			canonicalID = mpID
+		} else {
+			return nil, nil, ErrPlayerNotFound
+		}
+	}
+
+	platform := "Unknown"
+	if strings.Contains(canonicalID, "|") {
+		parts := strings.Split(canonicalID, "|")
+		if strings.TrimSpace(parts[0]) != "" {
+			platform = strings.TrimSpace(parts[0])
+		}
+	}
+
+	var displayName, provider string
+	_ = s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(display_name, ''), COALESCE(provider, '')
+		FROM auth_state
+		WHERE display_name != '' OR account_id != ''
+		ORDER BY updated_at DESC
+		LIMIT 1;
+	`).Scan(&displayName, &provider)
+	displayName = strings.TrimSpace(displayName)
+	if platform == "Unknown" && provider != "" {
+		if strings.EqualFold(provider, "epic") {
+			platform = "Epic"
+		} else if strings.EqualFold(provider, "steam") {
+			platform = "Steam"
+		}
+	}
+
+	if displayName == "" {
+		// Look for local player's display name in recent match_players.stats_json or matches.replay_stats_json
+		nameRows, err := s.db.QueryContext(ctx, `
+			SELECT mp.stats_json, m.replay_stats_json
+			FROM match_players mp
+			JOIN matches m ON mp.match_guid = m.match_guid
+			WHERE mp.is_local = 1 OR mp.player_id = ?
+			ORDER BY m.record_start_timestamp DESC
+			LIMIT 25;
+		`, canonicalID)
+		if err == nil {
+			for nameRows.Next() {
+				var stJSON, repJSON string
+				if err := nameRows.Scan(&stJSON, &repJSON); err != nil {
+					continue
+				}
+				if stJSON != "" {
+					var rps ReplayPlayerStats
+					if json.Unmarshal([]byte(stJSON), &rps) == nil {
+						cand := strings.TrimSpace(rps.Name)
+						if cand != "" && !strings.EqualFold(cand, "You") {
+							displayName = cand
+							if platform == "Unknown" && strings.TrimSpace(rps.Platform) != "" {
+								platform = strings.TrimSpace(rps.Platform)
+							}
+							break
+						}
+					}
+				}
+				if repJSON != "" {
+					var rms ReplayMatchStats
+					if json.Unmarshal([]byte(repJSON), &rms) == nil {
+						for _, p := range rms.Players {
+							if p.IsLocal || strings.EqualFold(p.OnlineID, canonicalID) || (strings.Contains(canonicalID, "|") && strings.EqualFold(p.OnlineID, strings.Split(canonicalID, "|")[1])) {
+								cand := strings.TrimSpace(p.Name)
+								if cand != "" && !strings.EqualFold(cand, "You") {
+									displayName = cand
+									if platform == "Unknown" && strings.TrimSpace(p.Platform) != "" {
+										platform = strings.TrimSpace(p.Platform)
+									}
+									break
+								}
+							}
+						}
+						if displayName != "" {
+							break
+						}
+					}
+				}
+			}
+			nameRows.Close()
+		}
+	}
+	if displayName == "" {
+		displayName = "You"
+	}
+
+	var firstSeenUnix, lastSeenUnix int64
+	_ = s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(MIN(m.record_start_timestamp), 0), COALESCE(MAX(m.record_start_timestamp), 0)
+		FROM match_players mp
+		JOIN matches m ON mp.match_guid = m.match_guid
+		WHERE (mp.is_local = 1 OR mp.player_id = ?) AND m.record_start_timestamp > 0;
+	`, canonicalID).Scan(&firstSeenUnix, &lastSeenUnix)
+	now := time.Now().UTC()
+	firstSeen := now
+	lastSeen := now
+	if firstSeenUnix > 0 {
+		firstSeen = time.Unix(firstSeenUnix, 0).UTC()
+	}
+	if lastSeenUnix > 0 {
+		lastSeen = time.Unix(lastSeenUnix, 0).UTC()
+	}
+
+	// Aggregate per-playlist matchups and fallback ranks from match_players + matches
+	type plAgg struct {
+		wins       int
+		losses     int
+		total      int
+		lastPlayed int64
+		tier       int
+		division   int
+		rankName   string
+	}
+	byPlaylist := make(map[int]*plAgg)
+
+	mRows, err := s.db.QueryContext(ctx, `
+		SELECT m.playlist, m.record_start_timestamp, m.blue_score, m.orange_score, m.winner_team,
+		       mp.team_num, mp.won, mp.stats_json
+		FROM match_players mp
+		JOIN matches m ON mp.match_guid = m.match_guid
+		WHERE mp.is_local = 1 OR mp.player_id = ?
+		ORDER BY m.record_start_timestamp DESC;
+	`, canonicalID)
+	if err == nil {
+		for mRows.Next() {
+			var (
+				playlist   int
+				startTS    int64
+				blueScore  sql.NullInt64
+				orangeSc   sql.NullInt64
+				winnerTeam sql.NullInt64
+				teamNum    int
+				wonVal     sql.NullInt64
+				statsJSON  string
+			)
+			if err := mRows.Scan(&playlist, &startTS, &blueScore, &orangeSc, &winnerTeam, &teamNum, &wonVal, &statsJSON); err != nil {
+				continue
+			}
+			if playlist <= 0 {
+				continue
+			}
+			agg, ok := byPlaylist[playlist]
+			if !ok {
+				agg = &plAgg{}
+				byPlaylist[playlist] = agg
+			}
+			if startTS > agg.lastPlayed {
+				agg.lastPlayed = startTS
+			}
+			var won, lost bool
+			if wonVal.Valid {
+				if wonVal.Int64 == 1 {
+					won = true
+				} else {
+					lost = true
+				}
+			} else if winnerTeam.Valid && winnerTeam.Int64 >= 0 {
+				if int(winnerTeam.Int64) == teamNum {
+					won = true
+				} else {
+					lost = true
+				}
+			} else if blueScore.Int64 != orangeSc.Int64 {
+				if (teamNum == 0 && blueScore.Int64 > orangeSc.Int64) || (teamNum == 1 && orangeSc.Int64 > blueScore.Int64) {
+					won = true
+				} else {
+					lost = true
+				}
+			}
+			if won {
+				agg.wins++
+				agg.total++
+			} else if lost {
+				agg.losses++
+				agg.total++
+			}
+			if agg.tier == 0 && statsJSON != "" {
+				var rps ReplayPlayerStats
+				if json.Unmarshal([]byte(statsJSON), &rps) == nil && rps.Rank != nil && rps.Rank.Tier > 0 {
+					agg.tier = rps.Rank.Tier
+					agg.division = rps.Rank.Division
+					agg.rankName = rps.Rank.Name
+				}
+			}
+		}
+		mRows.Close()
+	}
+
+	matchups := make([]*PlayerMatchup, 0, len(byPlaylist))
+	for pid, agg := range byPlaylist {
+		if agg.total <= 0 {
+			continue
+		}
+		lp := lastSeen
+		if agg.lastPlayed > 0 {
+			lp = time.Unix(agg.lastPlayed, 0).UTC()
+		}
+		matchups = append(matchups, &PlayerMatchup{
+			PlayerID:         canonicalID,
+			PlaylistID:       pid,
+			WinsAsTeammate:   agg.wins,
+			LossesAsTeammate: agg.losses,
+			WinsAsOpponent:   0,
+			LossesAsOpponent: 0,
+			TotalMatches:     agg.total,
+			LastPlayedAt:     lp,
+		})
+	}
+	sort.Slice(matchups, func(i, j int) bool {
+		if matchups[i].TotalMatches != matchups[j].TotalMatches {
+			return matchups[i].TotalMatches > matchups[j].TotalMatches
+		}
+		return matchups[i].PlaylistID < matchups[j].PlaylistID
+	})
+
+	// Build RanksJSON from mmr_history + per-playlist fallback ranks
+	ranksMap := make(map[string]map[string]interface{})
+	mmrRows, err := s.db.QueryContext(ctx, `
+		SELECT playlist_id, mmr, tier, division
+		FROM mmr_history
+		WHERE id IN (
+			SELECT MAX(id) FROM mmr_history GROUP BY playlist_id
+		);
+	`)
+	if err == nil {
+		for mmrRows.Next() {
+			var pid, mmr, tier, div int
+			if err := mmrRows.Scan(&pid, &mmr, &tier, &div); err == nil && pid > 0 {
+				effDiv := Resolve1BasedDivision(div, "")
+				games := 0
+				if agg, ok := byPlaylist[pid]; ok {
+					games = agg.total
+					if tier == 0 && agg.tier > 0 {
+						tier = agg.tier
+						effDiv = Resolve1BasedDivision(agg.division, agg.rankName)
+					}
+				}
+				ranksMap[strconv.Itoa(pid)] = map[string]interface{}{
+					"playlist_id":    pid,
+					"playlist_name":  FormatPlaylistName(pid),
+					"mmr":            mmr,
+					"tier":           tier,
+					"division":       effDiv,
+					"rank_name":      FormatRankName(tier, effDiv),
+					"short_rank":     FormatShortRankName(tier, effDiv),
+					"matches_played": games,
+				}
+			}
+		}
+		mmrRows.Close()
+	}
+	for pid, agg := range byPlaylist {
+		pKey := strconv.Itoa(pid)
+		if _, exists := ranksMap[pKey]; !exists && agg.tier > 0 {
+			effDiv := Resolve1BasedDivision(agg.division, agg.rankName)
+			ranksMap[pKey] = map[string]interface{}{
+				"playlist_id":    pid,
+				"playlist_name":  FormatPlaylistName(pid),
+				"tier":           agg.tier,
+				"division":       effDiv,
+				"rank_name":      FormatRankName(agg.tier, effDiv),
+				"short_rank":     FormatShortRankName(agg.tier, effDiv),
+				"matches_played": agg.total,
+			}
+		}
+	}
+	ranksJSON := "{}"
+	if len(ranksMap) > 0 {
+		if b, err := json.Marshal(ranksMap); err == nil {
+			ranksJSON = string(b)
+		}
+	}
+
+	rec := &PlayerRecord{
+		PlayerID:    canonicalID,
+		Platform:    platform,
+		PlayerName:  displayName,
+		RanksJSON:   ranksJSON,
+		Notes:       "",
+		Tags:        []string{},
+		FirstSeenAt: firstSeen,
+		LastSeenAt:  lastSeen,
+	}
+	return rec, matchups, nil
+}
+
 // ListPlayers returns paginated players ordered by last_seen_at DESC, player_id ASC.
 func (s *SQLiteStore) ListPlayers(ctx context.Context, limit, offset int) ([]*PlayerRecord, error) {
 	if limit == 0 {
@@ -1429,8 +1824,13 @@ func (s *SQLiteStore) ComputePlayerSplitStats(
 
 	var whereClauses []string
 	var args []interface{}
-	whereClauses = append(whereClauses, "mp.player_id = ?")
-	args = append(args, resolvedID)
+	if s.isLocalPlayerID(ctx, resolvedID) {
+		whereClauses = append(whereClauses, "(mp.player_id = ? OR mp.is_local = 1)")
+		args = append(args, resolvedID)
+	} else {
+		whereClauses = append(whereClauses, "mp.player_id = ?")
+		args = append(args, resolvedID)
+	}
 
 	if len(playlistIDs) > 0 {
 		placeholders := make([]string, len(playlistIDs))
@@ -1489,7 +1889,7 @@ func (s *SQLiteStore) ComputePlayerSplitStats(
 			}
 
 			if isLocal == 1 {
-				continue
+				localTeam = teamNum
 			}
 			if localTeam < 0 {
 				localTeam = 0
@@ -1651,6 +2051,7 @@ func (s *SQLiteStore) FilterPlayerSummaries(ctx context.Context, filter PlayerDi
 
 	var pWhereClauses []string
 	var pWhereArgs []interface{}
+	pWhereClauses = append(pWhereClauses, "NOT EXISTS (SELECT 1 FROM match_players mp_loc WHERE mp_loc.player_id = p.player_id AND mp_loc.is_local = 1)")
 
 	if cleanPlatform != "" && cleanPlatform != "all" {
 		switch cleanPlatform {
@@ -2336,6 +2737,9 @@ func (s *SQLiteStore) GetPlayerMatchups(ctx context.Context, playerID string) ([
 // SyncReplayStats enriches or upserts a match record with end-of-game replay statistics,
 // keyed by MatchGUID, and populates player records and match_players.
 func (s *SQLiteStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats) error {
+	if err := ctx.Err(); err != nil {
+		return wrapContextErr(err)
+	}
 	if stats == nil || strings.TrimSpace(stats.MatchGUID) == "" {
 		return ErrInvalidGUID
 	}
@@ -3421,6 +3825,9 @@ func (s *SQLiteStore) hydrateRanksFromStats(ctx context.Context, stats *ReplayMa
 
 // SaveMatchPlayers bulk upserts player match participation records for a match.
 func (s *SQLiteStore) SaveMatchPlayers(ctx context.Context, matchGUID string, players []*MatchPlayerRecord) error {
+	if err := ctx.Err(); err != nil {
+		return wrapContextErr(err)
+	}
 	if strings.TrimSpace(matchGUID) == "" {
 		return ErrInvalidGUID
 	}
@@ -3623,6 +4030,11 @@ func (s *SQLiteStore) ListPlayerMatches(ctx context.Context, playerID string, fi
 		offset = 0
 	}
 
+	isLocalTarget := 0
+	if s.isLocalPlayerID(ctx, playerID) {
+		isLocalTarget = 1
+	}
+
 	const querySQL = `
 	SELECT m.match_guid, m.record_start_timestamp, m.map_name, m.playlist, m.replay_url,
 	       m.download_status, m.local_file_path, m.downloaded_at, m.upload_status,
@@ -3634,11 +4046,11 @@ func (s *SQLiteStore) ListPlayerMatches(ctx context.Context, playerID string, fi
 	       COALESCE((SELECT lp.team_num FROM match_players lp WHERE lp.match_guid = m.match_guid AND lp.is_local = 1 LIMIT 1), -1) AS local_team
 	FROM match_players mp
 	JOIN matches m ON mp.match_guid = m.match_guid
-	WHERE mp.player_id = ?
+	WHERE (mp.player_id = ? OR (? = 1 AND mp.is_local = 1))
 	ORDER BY m.record_start_timestamp DESC, m.match_guid ASC;
 	`
 
-	rows, err := s.db.QueryContext(ctx, querySQL, playerID)
+	rows, err := s.db.QueryContext(ctx, querySQL, playerID, isLocalTarget)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query player matches: %w", err)
 	}

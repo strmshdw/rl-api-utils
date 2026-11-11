@@ -539,6 +539,9 @@ func (s *Syncer) PollAndSyncPendingStats(ctx context.Context) error {
 
 		case "ok", "":
 			if err := s.syncBallchasingReplayDetail(ctx, rec.MatchGUID, item); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				s.logger.Error("failed to sync ballchasing replay detail",
 					slog.String("guid", rec.MatchGUID),
 					slog.String("ballchasing_id", bcID),

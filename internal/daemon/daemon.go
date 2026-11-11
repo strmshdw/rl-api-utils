@@ -365,6 +365,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 		httpSrv := &http.Server{
 			Addr:              httpAddr,
 			Handler:           handler,
+			BaseContext:       func(_ net.Listener) context.Context { return ctx },
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       10 * time.Second,
 			WriteTimeout:      0, // Disabled: required for persistent SSE connections
@@ -400,13 +401,19 @@ func (d *Daemon) Start(ctx context.Context) error {
 		go func() {
 			defer d.wg.Done()
 			<-ctx.Done()
+			if d.statsListener != nil {
+				d.statsListener.Stop()
+			}
 			if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
 				d.sessionTracker.Broadcaster().Close()
 			}
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			if err := httpSrv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
-				d.logger.Warn("HTTP server shutdown encountered error", slog.Any("error", err))
+			if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					d.logger.Warn("HTTP server shutdown encountered error", slog.Any("error", err))
+				}
+				_ = httpSrv.Close()
 			}
 		}()
 	}
@@ -419,21 +426,37 @@ func (d *Daemon) Start(ctx context.Context) error {
 	defer statusTicker.Stop()
 	statsPollTicks := 0
 
+	drainAndStop := func() error {
+		d.logger.Info("shutdown signal received; awaiting in-flight drain",
+			slog.Any("reason", ctx.Err()),
+		)
+		if d.statsListener != nil {
+			d.statsListener.Stop()
+		}
+		if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
+			d.sessionTracker.Broadcaster().Close()
+		}
+		d.wg.Wait()
+		d.logger.Info("graceful drain complete; daemon stopped")
+		return nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
-			d.logger.Info("shutdown signal received; awaiting in-flight drain",
-				slog.Any("reason", ctx.Err()),
-			)
-			d.wg.Wait()
-			d.logger.Info("graceful drain complete; daemon stopped")
-			return nil
+			return drainAndStop()
+		default:
+		}
+
+		select {
+		case <-ctx.Done():
+			return drainAndStop()
 
 		case reason := <-d.manualTrigger:
 			d.logger.Info("executing on-demand sync cycle", slog.String("trigger_reason", reason))
 			if err := d.executeCycle(ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return nil
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+					return drainAndStop()
 				}
 				d.logger.Error("on-demand sync cycle failed", slog.Any("error", err))
 			}
@@ -467,7 +490,11 @@ func (d *Daemon) Start(ctx context.Context) error {
 			if statsPollTicks >= 5 {
 				statsPollTicks = 0
 				if poller, ok := d.syncer.(StatsPoller); ok {
-					_ = d.executeStatsPoll(ctx, poller)
+					if err := d.executeStatsPoll(ctx, poller); err != nil {
+						if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+							return drainAndStop()
+						}
+					}
 				}
 			}
 
@@ -480,9 +507,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 			}
 
 			if err := d.executeCycle(ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 					d.logger.Info("daemon stopped during scheduled cycle", slog.Any("reason", err))
-					return nil
+					return drainAndStop()
 				}
 				d.logger.Error("scheduled sync cycle failed", slog.Any("error", err))
 			}

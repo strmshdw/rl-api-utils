@@ -332,9 +332,18 @@ func (d *Daemon) handleTriggerBallchasingSync(w http.ResponseWriter, r *http.Req
 		if poller, ok := d.syncer.(StatsPoller); ok && poller != nil {
 			_ = poller.PollAndSyncPendingStats(syncCtx)
 		}
+		if syncCtx.Err() != nil {
+			return
+		}
 		res, err := d.historySyncer.Sync(syncCtx)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || syncCtx.Err() != nil {
+				return
+			}
 			d.logger.Error("background ballchasing historical sync failed", slog.Any("error", err))
+		}
+		if syncCtx.Err() != nil {
+			return
 		}
 		if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
 			statusStr := "completed"

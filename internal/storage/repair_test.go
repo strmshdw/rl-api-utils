@@ -688,6 +688,32 @@ func TestSQLiteStore_SyncReplayStats_ResolvesExistingMatchAndCanonicalPlayers(t 
 	if !containsSubstr(extracted, `"bpm":360`) {
 		t.Errorf("expected ExtractPlayerStatsJSONFromReplay to extract ConsoleHero bpm:360, got %q", extracted)
 	}
+
+	// Verify GetLocalPlayerProfile, ComputePlayerSplitStats, and ListPlayerMatches work for the local player
+	// via canonical ID, raw OnlineID, and "me" without adding the local player to the players directory table.
+	for _, queryID := range []string{"Steam|76561198816594023|0", "76561198816594023", "me"} {
+		localRec, localMatchups, err := store.GetLocalPlayerProfile(ctx, queryID)
+		if err != nil {
+			t.Fatalf("GetLocalPlayerProfile(%q): %v", queryID, err)
+		}
+		if localRec.PlayerID != "Steam|76561198816594023|0" {
+			t.Errorf("GetLocalPlayerProfile(%q) PlayerID = %q; want Steam|76561198816594023|0", queryID, localRec.PlayerID)
+		}
+		if localRec.PlayerName != "LocalPilot" {
+			t.Errorf("GetLocalPlayerProfile(%q) PlayerName = %q; want LocalPilot", queryID, localRec.PlayerName)
+		}
+		if len(localMatchups) != 1 || localMatchups[0].WinsAsTeammate != 1 {
+			t.Errorf("GetLocalPlayerProfile(%q) matchups = %+v; want 1 win", queryID, localMatchups)
+		}
+		pMatches, pTotal, err := store.ListPlayerMatches(ctx, queryID, PlayerMatchFilter{Limit: 10})
+		if err != nil || pTotal != 1 || len(pMatches) != 1 {
+			t.Errorf("ListPlayerMatches(%q): total=%d len=%d err=%v; want 1", queryID, pTotal, len(pMatches), err)
+		}
+	}
+	withSt, _ := store.ComputePlayerSplitStats(ctx, "Steam|76561198816594023|0", "LocalPilot", nil, 0, 0, 0, 0, 0, 0)
+	if withSt.Games != 1 || withSt.Wins != 1 || withSt.AvgBPM != 425 {
+		t.Errorf("ComputePlayerSplitStats for local player = %+v; want Games=1 Wins=1 AvgBPM=425", withSt)
+	}
 }
 
 

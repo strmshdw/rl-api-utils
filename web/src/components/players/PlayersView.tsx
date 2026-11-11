@@ -327,12 +327,16 @@ const DirectoryRow: React.FC<{
 interface PlayersViewProps {
   localPlayerIds?: Set<string>;
   initialInspectedPlayer?: { id: string; name?: string } | null;
+  inspectedPlayer?: { id: string; name?: string } | null;
+  onInspectPlayerChange?: (player: { id: string; name?: string } | null) => void;
   onClearInitialPlayer?: () => void;
 }
 
 export const PlayersView: React.FC<PlayersViewProps> = ({
   localPlayerIds,
   initialInspectedPlayer,
+  inspectedPlayer,
+  onInspectPlayerChange,
   onClearInitialPlayer,
 }) => {
   const { statMode, pinnedPlayerIds, togglePinPlayer } = useDashboard();
@@ -360,16 +364,25 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
   } = usePlayerSearch();
 
   const [selectedFullPagePlayer, setSelectedFullPagePlayer] = useState<{ id: string; name?: string } | null>(
-    initialInspectedPlayer ?? null,
+    inspectedPlayer ?? initialInspectedPlayer ?? null,
   );
   const [playlistModeFilter, setPlaylistModeFilter] = useState<'all' | '1v1' | '2v2' | '3v3'>('all');
 
   useEffect(() => {
+    if (inspectedPlayer !== undefined) {
+      setSelectedFullPagePlayer(inspectedPlayer);
+      return;
+    }
     if (initialInspectedPlayer) {
       setSelectedFullPagePlayer(initialInspectedPlayer);
       onClearInitialPlayer?.();
     }
-  }, [initialInspectedPlayer, onClearInitialPlayer]);
+  }, [inspectedPlayer, initialInspectedPlayer, onClearInitialPlayer]);
+
+  const handleSelectPlayer = (player: { id: string; name?: string } | null) => {
+    setSelectedFullPagePlayer(player);
+    onInspectPlayerChange?.(player);
+  };
 
   const playlistIdNum = playlist === 'all' ? 0 : Number(playlist) || 0;
 
@@ -533,8 +546,9 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
         <PlayerProfilePage
           playerId={selectedFullPagePlayer.id}
           playerName={selectedFullPagePlayer.name}
-          onBack={() => setSelectedFullPagePlayer(null)}
+          onBack={() => handleSelectPlayer(null)}
           localPlayerIds={localPlayerIds}
+          onOpenFullProfile={(id, name) => handleSelectPlayer({ id, name })}
         />
       </div>
     );
@@ -542,7 +556,23 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
 
   return (
     <div data-testid="players-view" className="font-display">
-      <PageHeader kicker="EVERYONE YOU'VE PLAYED WITH OR AGAINST" title="PLAYERS" />
+      <PageHeader
+        kicker="EVERYONE YOU'VE PLAYED WITH OR AGAINST"
+        title="PLAYERS"
+        right={
+          <button
+            type="button"
+            data-testid="view-own-profile-btn"
+            onClick={() => {
+              const firstLocal = localPlayerIds && localPlayerIds.size > 0 ? Array.from(localPlayerIds)[0] : 'me';
+              handleSelectPlayer({ id: firstLocal, name: 'You' });
+            }}
+            className="px-4 py-2 t-bg-blue-slab bg-blue-slab text-white font-display font-extrabold text-sm uppercase tracking-wider hover:opacity-90 t-radius cursor-pointer"
+          >
+            VIEW MY PROFILE →
+          </button>
+        }
+      />
 
       {/* Up to 3 Pinned / Spotlight Player Cards */}
       <div className="mb-2 flex items-center justify-between">
@@ -560,7 +590,7 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
             isPinned={s.isPinned}
             isAvg={isAvg}
             onTogglePin={togglePinPlayer}
-            onOpen={(p) => setSelectedFullPagePlayer({ id: p.player_id, name: p.player_name })}
+            onOpen={(p) => handleSelectPlayer({ id: p.player_id, name: p.player_name })}
           />
         ))}
       </div>
@@ -681,7 +711,7 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
                 isAvg={isAvg}
                 playlistScopeId={playlistIdNum}
                 onTogglePin={togglePinPlayer}
-                onOpen={() => setSelectedFullPagePlayer({ id: p.player_id, name: p.player_name })}
+                onOpen={() => handleSelectPlayer({ id: p.player_id, name: p.player_name })}
               />
             ))}
           </div>

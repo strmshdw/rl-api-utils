@@ -1519,6 +1519,35 @@ func TestDaemon_HTTP_Phase2_PlayersMatchesSessionAndPrune(t *testing.T) {
 		t.Fatalf("expected 1 defeat match (guid-2v2-loss-2) from local perspective, got %+v", oppMatchesResp.Matches)
 	}
 
+	// 3b. Verify GET /api/players/{localID} and GET /api/players/me return HTTP 200 for the local player's own profile
+	for _, selfEndpoint := range []string{"/api/players/Epic%7Cmy_epic_acc_001%7C0", "/api/players/me"} {
+		recSelf := executeTestRequest(d, http.MethodGet, selfEndpoint, nil)
+		if recSelf.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d: %s", selfEndpoint, recSelf.Code, recSelf.Body.String())
+		}
+		var selfDetail daemon.PlayerDetailResponse
+		if err := json.Unmarshal(recSelf.Body.Bytes(), &selfDetail); err != nil {
+			t.Fatalf("unmarshal %s failed: %v", selfEndpoint, err)
+		}
+		if selfDetail.RelationshipTag != "YOU" {
+			t.Errorf("%s RelationshipTag = %q; want YOU", selfEndpoint, selfDetail.RelationshipTag)
+		}
+		if selfDetail.WithYouStats == nil || selfDetail.WithYouStats.Games != 2 || selfDetail.WithYouStats.Wins != 1 || selfDetail.WithYouStats.Losses != 1 {
+			t.Errorf("%s WithYouStats = %+v; want Games=2 Wins=1 Losses=1", selfEndpoint, selfDetail.WithYouStats)
+		}
+	}
+	recSelfMatches := executeTestRequest(d, http.MethodGet, "/api/players/me/matches", nil)
+	if recSelfMatches.Code != http.StatusOK {
+		t.Fatalf("GET /api/players/me/matches returned %d: %s", recSelfMatches.Code, recSelfMatches.Body.String())
+	}
+	var selfMatchesResp daemon.PlayerMatchesResponse
+	if err := json.Unmarshal(recSelfMatches.Body.Bytes(), &selfMatchesResp); err != nil {
+		t.Fatalf("unmarshal /api/players/me/matches failed: %v", err)
+	}
+	if len(selfMatchesResp.Matches) != 2 {
+		t.Errorf("expected 2 matches for local player, got %d", len(selfMatchesResp.Matches))
+	}
+
 	// 4. Verify GET /api/matches/{guid} returns enriched player rank & Ballchasing telemetry
 	recMatchDetail := executeTestRequest(d, http.MethodGet, "/api/matches/guid-2v2-win-1", nil)
 	if recMatchDetail.Code != http.StatusOK {
@@ -1686,5 +1715,111 @@ func TestDaemon_ShutdownWithActiveSSEClient(t *testing.T) {
 		t.Errorf("expected zero HTTP server shutdown errors, got logs:\n%s", logBuf.String())
 	}
 }
+
+func TestDaemon_StatsListenerConnectedIdle_DrainsImmediatelyOnShutdown(t *testing.T) {
+	// Start an idle TCP listener simulating Rocket League Stats API connected with zero games played
+	statsLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start mock stats TCP server: %v", err)
+	}
+	defer statsLn.Close()
+
+	acceptedCh := make(chan net.Conn, 1)
+	go func() {
+		conn, acceptErr := statsLn.Accept()
+		if acceptErr == nil {
+			acceptedCh <- conn
+		}
+	}()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free HTTP port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	cfg := makeTestConfig(10*time.Second, false)
+	cfg.Web.Enabled = true
+	cfg.Web.Host = "127.0.0.1"
+	cfg.Web.Port = port
+	cfg.StatsAPI.Enabled = true
+	cfg.StatsAPI.Address = statsLn.Addr().String()
+	cfg.StatsAPI.Protocol = "tcp"
+
+	var logBuf syncLogBuffer
+	logger := daemon.NewLogger(config.LoggingConfig{Level: "info", Format: "text"}, &logBuf)
+
+	store, err := storage.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	tracker, err := statsapi.NewTracker(store, statsapi.TrackerConfig{TriggerThreshold: 15}, statsapi.WithLogger(logger))
+	if err != nil {
+		t.Fatalf("failed to create stats tracker: %v", err)
+	}
+	listener, err := statsapi.NewListener(statsapi.ListenerConfig{
+		Address:  cfg.StatsAPI.Address,
+		Protocol: "tcp",
+	}, tracker, logger)
+	if err != nil {
+		t.Fatalf("failed to create stats listener: %v", err)
+	}
+
+	d, err := daemon.New(
+		newMockSyncer(),
+		cfg,
+		daemon.WithLogger(logger),
+		daemon.WithStateStore(store),
+		daemon.WithStatsTracker(tracker),
+		daemon.WithStatsListener(listener),
+	)
+	if err != nil {
+		t.Fatalf("failed to create daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- d.Start(ctx)
+	}()
+
+	// Wait for Stats API listener to connect and enter blocking read with zero messages sent
+	var serverConn net.Conn
+	select {
+	case serverConn = <-acceptedCh:
+		defer serverConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for statsListener to connect to idle Stats API server")
+	}
+
+	// Wait for listener.IsConnected() to be true
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) && !listener.IsConnected() {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Cancel context (simulating Ctrl+C while connected with no games played)
+	shutdownStart := time.Now()
+	cancel()
+
+	select {
+	case err := <-doneCh:
+		if err != nil {
+			t.Fatalf("daemon.Start returned error on shutdown: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("daemon hung on awaiting in-flight drain when Stats API listener was idle")
+	}
+
+	if elapsed := time.Since(shutdownStart); elapsed >= 1*time.Second {
+		t.Errorf("expected immediate drain (<1s), took %v", elapsed)
+	}
+}
+
 
 
