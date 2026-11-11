@@ -528,13 +528,15 @@ func (t *Tracker) getLocalPlayerIDsLocked() []string {
 	if t.currentMatch != nil && t.currentMatch.LocalPlayer != nil {
 		add(t.currentMatch.LocalPlayer.PlayerID)
 	}
-	if t.authCfg.Epic.AccountID != "" {
-		add(fmt.Sprintf("Epic|%s|0", t.authCfg.Epic.AccountID))
-		add(t.authCfg.Epic.AccountID)
-	}
-	if t.authCfg.Steam.SteamID64 != "" {
-		add(fmt.Sprintf("Steam|%s|0", t.authCfg.Steam.SteamID64))
-		add(t.authCfg.Steam.SteamID64)
+	if t.cfg.LocalPlayerID == "" {
+		if t.authCfg.Epic.AccountID != "" {
+			add(fmt.Sprintf("Epic|%s|0", t.authCfg.Epic.AccountID))
+			add(t.authCfg.Epic.AccountID)
+		}
+		if t.authCfg.Steam.SteamID64 != "" {
+			add(fmt.Sprintf("Steam|%s|0", t.authCfg.Steam.SteamID64))
+			add(t.authCfg.Steam.SteamID64)
+		}
 	}
 	return ids
 }

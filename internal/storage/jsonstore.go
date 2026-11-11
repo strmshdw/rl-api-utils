@@ -1092,17 +1092,8 @@ func (s *JSONStore) resolveCanonicalPlayerIDLocked(playerID string) string {
 		}
 	}
 	if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
-		for _, mps := range s.matchPlayers {
-			for _, mp := range mps {
-				if mp != nil && mp.IsLocal && mp.PlayerID != "" && mp.PlayerID != "0" {
-					return mp.PlayerID
-				}
-			}
-		}
-		for _, a := range s.auth {
-			if a.AccountID != "" {
-				return a.AccountID
-			}
+		if pid := s.primaryLocalPlayerIDLocked(); pid != "" {
+			return pid
 		}
 	}
 	for _, mps := range s.matchPlayers {
@@ -1119,6 +1110,44 @@ func (s *JSONStore) resolveCanonicalPlayerIDLocked(playerID string) string {
 	return playerID
 }
 
+func isPollingProvider(provider string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(provider)), "_polling")
+}
+
+func (s *JSONStore) primaryLocalPlayerIDLocked() string {
+	counts := make(map[string]int)
+	for _, mps := range s.matchPlayers {
+		for _, mp := range mps {
+			if mp != nil && mp.IsLocal {
+				pid := strings.TrimSpace(mp.PlayerID)
+				if pid != "" && pid != "0" {
+					counts[pid]++
+				}
+			}
+		}
+	}
+	var bestPID string
+	var bestCount int
+	for pid, c := range counts {
+		if c > bestCount || (c == bestCount && (bestPID == "" || pid < bestPID)) {
+			bestPID = pid
+			bestCount = c
+		}
+	}
+	if bestPID != "" {
+		return bestPID
+	}
+	for provider, a := range s.auth {
+		if isPollingProvider(provider) || isPollingProvider(a.Provider) {
+			continue
+		}
+		if acc := strings.TrimSpace(a.AccountID); acc != "" {
+			return acc
+		}
+	}
+	return ""
+}
+
 func (s *JSONStore) isLocalPlayerIDLocked(playerID string) bool {
 	trimmed := strings.TrimSpace(playerID)
 	if trimmed == "" {
@@ -1128,9 +1157,22 @@ func (s *JSONStore) isLocalPlayerIDLocked(playerID string) bool {
 		return true
 	}
 	lower := strings.ToLower(trimmed)
-	for _, a := range s.auth {
-		if a.AccountID != "" && strings.EqualFold(a.AccountID, trimmed) {
+	for provider, a := range s.auth {
+		if isPollingProvider(provider) || isPollingProvider(a.Provider) {
+			continue
+		}
+		acc := strings.TrimSpace(a.AccountID)
+		if acc == "" {
+			continue
+		}
+		if strings.EqualFold(acc, trimmed) {
 			return true
+		}
+		if strings.Contains(lower, "|") {
+			parts := strings.Split(lower, "|")
+			if len(parts) >= 2 && strings.EqualFold(strings.TrimSpace(parts[1]), acc) {
+				return true
+			}
 		}
 	}
 	for _, mps := range s.matchPlayers {
@@ -1163,7 +1205,10 @@ func (s *JSONStore) GetLocalPlayerProfile(ctx context.Context, playerID string) 
 		return nil, nil, ErrPlayerNotFound
 	}
 
-	canonicalID := resolvedID
+	canonicalID := s.primaryLocalPlayerIDLocked()
+	if canonicalID == "" {
+		canonicalID = resolvedID
+	}
 	if strings.EqualFold(canonicalID, "me") || strings.EqualFold(canonicalID, "you") || canonicalID == "" {
 		return nil, nil, ErrPlayerNotFound
 	}
@@ -1175,12 +1220,57 @@ func (s *JSONStore) GetLocalPlayerProfile(ctx context.Context, playerID string) 
 			platform = strings.TrimSpace(parts[0])
 		}
 	}
-	displayName := "You"
-	for _, a := range s.auth {
-		if strings.TrimSpace(a.DisplayName) != "" {
-			displayName = strings.TrimSpace(a.DisplayName)
+	displayName := ""
+	for guid, mps := range s.matchPlayers {
+		for _, mp := range mps {
+			if mp == nil || (!mp.IsLocal && !strings.EqualFold(mp.PlayerID, canonicalID)) {
+				continue
+			}
+			if mp.PlayerName != "" && !strings.EqualFold(mp.PlayerName, "You") {
+				displayName = strings.TrimSpace(mp.PlayerName)
+				break
+			}
+			if mp.StatsJSON != "" {
+				var rps ReplayPlayerStats
+				if json.Unmarshal([]byte(mp.StatsJSON), &rps) == nil && strings.TrimSpace(rps.Name) != "" && !strings.EqualFold(strings.TrimSpace(rps.Name), "You") {
+					displayName = strings.TrimSpace(rps.Name)
+					break
+				}
+			}
+			if m := s.matches[guid]; m != nil && m.ReplayStatsJSON != "" {
+				var rms ReplayMatchStats
+				if json.Unmarshal([]byte(m.ReplayStatsJSON), &rms) == nil {
+					for _, p := range rms.Players {
+						if p.IsLocal || strings.EqualFold(p.OnlineID, canonicalID) || (strings.Contains(canonicalID, "|") && strings.EqualFold(p.OnlineID, strings.Split(canonicalID, "|")[1])) {
+							if strings.TrimSpace(p.Name) != "" && !strings.EqualFold(strings.TrimSpace(p.Name), "You") {
+								displayName = strings.TrimSpace(p.Name)
+								break
+							}
+						}
+					}
+				}
+			}
+			if displayName != "" {
+				break
+			}
+		}
+		if displayName != "" {
 			break
 		}
+	}
+	if displayName == "" {
+		for provider, a := range s.auth {
+			if isPollingProvider(provider) || isPollingProvider(a.Provider) {
+				continue
+			}
+			if strings.TrimSpace(a.DisplayName) != "" {
+				displayName = strings.TrimSpace(a.DisplayName)
+				break
+			}
+		}
+	}
+	if displayName == "" {
+		displayName = "You"
 	}
 
 	var firstSeen, lastSeen time.Time
@@ -1461,6 +1551,11 @@ func (s *JSONStore) computePlayerSplitStatsLocked(
 	if resolvedID == "" {
 		resolvedID = strings.TrimSpace(playerID)
 	}
+	if s.isLocalPlayerIDLocked(resolvedID) {
+		if primaryID := s.primaryLocalPlayerIDLocked(); primaryID != "" {
+			resolvedID = primaryID
+		}
+	}
 
 	if fromUnix > 0 || toUnix > 0 {
 		hasAnyMatchPlayer := false
@@ -1539,7 +1634,11 @@ func (s *JSONStore) computePlayerSplitStatsLocked(
 			isDraw = true
 		}
 
-		resolvedStatsJSON := ExtractPlayerStatsJSONFromReplay(targetMP.StatsJSON, m.ReplayStatsJSON, resolvedID, playerName, targetMP.TeamNum)
+		lookupID := resolvedID
+		if strings.TrimSpace(targetMP.PlayerID) != "" {
+			lookupID = strings.TrimSpace(targetMP.PlayerID)
+		}
+		resolvedStatsJSON := ExtractPlayerStatsJSONFromReplay(targetMP.StatsJSON, m.ReplayStatsJSON, lookupID, playerName, targetMP.TeamNum)
 		if isTeammate {
 			withAcc.AddMatchOutcome(localWon, isDraw)
 			withAcc.AddPlayerBoxAndTelemetry(targetMP.Score, targetMP.Goals, targetMP.Assists, targetMP.Saves, targetMP.Shots, targetMP.Demos, resolvedStatsJSON)
@@ -1719,26 +1818,33 @@ func (s *JSONStore) GetLocalPlayerIDs(ctx context.Context) ([]string, error) {
 		return nil, ErrStoreClosed
 	}
 
-	idMap := make(map[string]bool)
-	for _, a := range s.auth {
-		if strings.TrimSpace(a.AccountID) != "" {
-			idMap[strings.TrimSpace(a.AccountID)] = true
+	seen := make(map[string]bool)
+	var ids []string
+	addID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id != "" && id != "0" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
 		}
 	}
 
+	if primary := s.primaryLocalPlayerIDLocked(); primary != "" {
+		addID(primary)
+	}
 	for _, mps := range s.matchPlayers {
 		for _, mp := range mps {
-			if mp.IsLocal && strings.TrimSpace(mp.PlayerID) != "" {
-				idMap[strings.TrimSpace(mp.PlayerID)] = true
+			if mp != nil && mp.IsLocal {
+				addID(mp.PlayerID)
 			}
 		}
 	}
-
-	ids := make([]string, 0, len(idMap))
-	for id := range idMap {
-		ids = append(ids, id)
+	for provider, a := range s.auth {
+		if isPollingProvider(provider) || isPollingProvider(a.Provider) {
+			continue
+		}
+		addID(a.AccountID)
 	}
-	sort.Strings(ids)
+
 	return ids, nil
 }
 
@@ -2037,7 +2143,10 @@ func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats
 
 	// Upsert players and match_players
 	localAccounts := make(map[string]bool)
-	for _, a := range s.auth {
+	for provider, a := range s.auth {
+		if isPollingProvider(provider) || isPollingProvider(a.Provider) {
+			continue
+		}
 		if a.AccountID != "" {
 			localAccounts[strings.ToLower(a.AccountID)] = true
 		}

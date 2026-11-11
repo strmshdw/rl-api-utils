@@ -2,8 +2,10 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/dank/rl-api-utils/internal/ballchasing"
 )
@@ -831,8 +833,102 @@ func TestSQLiteStore_PostUploadStatsSyncPersistsAcrossRestarts(t *testing.T) {
 	}
 }
 
+func TestLocalPlayerProfileUsesPrimaryAccountNotSyncAccount(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "local_primary.db")
 
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+	defer store.Close()
 
+	// Save primary auth and a newer polling/sync dummy account in auth_state
+	_ = store.SaveAuthState(ctx, "steam", "tok1", "76561198816594023", "strmshdwalt")
+	time.Sleep(5 * time.Millisecond)
+	_ = store.SaveAuthState(ctx, "epic_polling", "tok2", "d0fc9d9a31ac4f7095757181c2a6acfc", "oOstrmshdwOo")
 
+	// Sync a match where the primary playing account is Steam|76561198816594023|0 ("strmshdw")
+	st := &ReplayMatchStats{
+		MatchGUID:   "GUID-PRIMARY-LOCAL-1",
+		MapName:     "Mannfield",
+		Playlist:    11,
+		BlueScore:   4,
+		OrangeScore: 1,
+		Duration:    300,
+		Date:        "2026-11-10T22:00:00Z",
+		Players: []ReplayPlayerStats{
+			{
+				Name:     "strmshdw",
+				Platform: "Steam",
+				OnlineID: "76561198816594023",
+				Team:     0,
+				IsLocal:  true,
+				Score:    650,
+				Goals:    3,
+				Assists:  1,
+				Saves:    2,
+				Shots:    5,
+				Boost:    &ballchasing.BoostStats{BPM: 420, AvgAmount: 52},
+			},
+			{
+				Name:     "RivalPilot",
+				Platform: "Epic",
+				OnlineID: "63ec4e0d7fc54aeba883c6470b83d91f",
+				Team:     1,
+				IsLocal:  false,
+				Score:    240,
+				Goals:    1,
+			},
+		},
+	}
+	if err := store.SyncReplayStats(ctx, st); err != nil {
+		t.Fatalf("SyncReplayStats: %v", err)
+	}
 
+	// 1. GetLocalPlayerIDs must put primary match_players ID first and exclude epic_polling account
+	localIDs, err := store.GetLocalPlayerIDs(ctx)
+	if err != nil {
+		t.Fatalf("GetLocalPlayerIDs: %v", err)
+	}
+	if len(localIDs) == 0 || localIDs[0] != "Steam|76561198816594023|0" {
+		t.Errorf("localIDs = %v; want Steam|76561198816594023|0 first", localIDs)
+	}
+	for _, id := range localIDs {
+		if id == "d0fc9d9a31ac4f7095757181c2a6acfc" {
+			t.Errorf("GetLocalPlayerIDs must not include polling sync account %q, got %v", id, localIDs)
+		}
+	}
+
+	// 2. GetLocalPlayerProfile must resolve to primary account ID and name ("Steam|76561198816594023|0", "strmshdw")
+	for _, queryID := range []string{"me", "76561198816594023", "Steam|76561198816594023|0"} {
+		prof, matchups, err := store.GetLocalPlayerProfile(ctx, queryID)
+		if err != nil {
+			t.Fatalf("GetLocalPlayerProfile(%q): %v", queryID, err)
+		}
+		if prof.PlayerID != "Steam|76561198816594023|0" {
+			t.Errorf("GetLocalPlayerProfile(%q).PlayerID = %q; want Steam|76561198816594023|0", queryID, prof.PlayerID)
+		}
+		if prof.PlayerName != "strmshdw" {
+			t.Errorf("GetLocalPlayerProfile(%q).PlayerName = %q; want strmshdw", queryID, prof.PlayerName)
+		}
+		if prof.Platform != "Steam" {
+			t.Errorf("GetLocalPlayerProfile(%q).Platform = %q; want Steam", queryID, prof.Platform)
+		}
+		if len(matchups) != 1 || matchups[0].WinsAsTeammate != 1 {
+			t.Errorf("GetLocalPlayerProfile(%q) matchups = %+v; want 1 win", queryID, matchups)
+		}
+	}
+
+	// 3. Polling sync account ID must not be treated as local player profile
+	if _, _, err := store.GetLocalPlayerProfile(ctx, "d0fc9d9a31ac4f7095757181c2a6acfc"); !errors.Is(err, ErrPlayerNotFound) {
+		t.Errorf("GetLocalPlayerProfile(polling_id) err = %v; want ErrPlayerNotFound", err)
+	}
+
+	// 4. ComputePlayerSplitStats for local player must aggregate primary account stats
+	withYou, _ := store.ComputePlayerSplitStats(ctx, "76561198816594023", "strmshdw", nil, 0, 0, 0, 0, 0, 0)
+	if withYou.Games != 1 || withYou.TotalGoals != 3 || withYou.AvgBPM != 420 {
+		t.Errorf("ComputePlayerSplitStats(local) = %+v; want Games=1, TotalGoals=3, AvgBPM=420", withYou)
+	}
+}
 
