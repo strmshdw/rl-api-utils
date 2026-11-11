@@ -116,6 +116,10 @@ func (d *Daemon) handleListMatches(w http.ResponseWriter, r *http.Request) {
 
 	matches, total, err := d.stateStore.ListHistoricalMatches(r.Context(), filter)
 	if err != nil {
+		if isClientDisconnect(r.Context(), err) {
+			d.logger.Debug("historical matches query canceled by client", slog.Any("error", err))
+			return
+		}
 		d.logger.Error("failed to list historical matches", slog.Any("error", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to list historical matches"})
@@ -134,10 +138,7 @@ func (d *Daemon) handleListMatches(w http.ResponseWriter, r *http.Request) {
 		LocalPlayerIDs: localIDs,
 	}
 
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		d.logger.Warn("error encoding matches response", slog.Any("error", err))
-	}
+	d.writeJSONResponse(w, r, http.StatusOK, resp, "error encoding matches response")
 }
 
 // handleGetMatch handles GET /api/matches/{guid}.
@@ -265,10 +266,11 @@ func (d *Daemon) handleGetMatch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(hist); err != nil {
-			d.logger.Warn("error encoding match detail response", slog.Any("error", err))
-		}
+		d.writeJSONResponse(w, r, http.StatusOK, hist, "error encoding match detail response")
+		return
+	}
+
+	if err != nil && isClientDisconnect(r.Context(), err) {
 		return
 	}
 
@@ -276,16 +278,16 @@ func (d *Daemon) handleGetMatch(w http.ResponseWriter, r *http.Request) {
 		Query: guid,
 		Limit: 1,
 	})
+	if err != nil && isClientDisconnect(r.Context(), err) {
+		return
+	}
 	if err != nil || len(matches) == 0 {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "match not found"})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(matches[0]); err != nil {
-		d.logger.Warn("error encoding match detail response", slog.Any("error", err))
-	}
+	d.writeJSONResponse(w, r, http.StatusOK, matches[0], "error encoding match detail response")
 }
 
 // handleTriggerBallchasingSync handles POST /api/sync/ballchasing.
@@ -462,10 +464,7 @@ func (d *Daemon) handleBallchasingSyncStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	prog := d.historySyncer.Progress()
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(prog); err != nil {
-		d.logger.Warn("error encoding sync status response", slog.Any("error", err))
-	}
+	d.writeJSONResponse(w, r, http.StatusOK, prog, "error encoding sync status response")
 }
 
 // handleRetryMatch handles POST /api/matches/{guid}/retry.
@@ -575,6 +574,10 @@ func (d *Daemon) handleListMMRHistory(w http.ResponseWriter, r *http.Request) {
 
 	recs, err := d.stateStore.ListMMRHistory(r.Context(), playlistID, limit)
 	if err != nil {
+		if isClientDisconnect(r.Context(), err) {
+			d.logger.Debug("mmr history query canceled by client", slog.Any("error", err))
+			return
+		}
 		d.logger.Error("failed to query mmr history", slog.Any("error", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query mmr history"})
@@ -593,12 +596,11 @@ func (d *Daemon) handleListMMRHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(MMRHistoryResponse{
+	d.writeJSONResponse(w, r, http.StatusOK, MMRHistoryResponse{
 		PlaylistID: playlistID,
 		History:    recs,
 		Total:      len(recs),
-	})
+	}, "error encoding mmr history response")
 }
 
 // handleGetSyncConfig handles GET /api/sync/config, returning the Rocket League 20-game

@@ -1030,38 +1030,48 @@ func ExtractPlayerStatsJSONFromReplay(mpStatsJSON, replayStatsJSON, playerID, pl
 	if s := strings.TrimSpace(replayStatsJSON); s != "" && s != "{}" {
 		var st ReplayMatchStats
 		if err := json.Unmarshal([]byte(s), &st); err == nil {
-			lowerID := strings.ToLower(strings.TrimSpace(playerID))
-			lowerName := strings.ToLower(strings.TrimSpace(playerName))
-			idToken := ""
-			if parts := strings.Split(lowerID, "|"); len(parts) >= 2 {
-				idToken = strings.TrimSpace(parts[1])
+			return ExtractPlayerStatsFromParsedReplay(&st, playerID, playerName, teamNum)
+		}
+	}
+	return ""
+}
+
+// ExtractPlayerStatsFromParsedReplay extracts a single player's ReplayPlayerStats JSON
+// from an already-unmarshaled ReplayMatchStats document.
+func ExtractPlayerStatsFromParsedReplay(st *ReplayMatchStats, playerID, playerName string, teamNum int) string {
+	if st == nil {
+		return ""
+	}
+	lowerID := strings.ToLower(strings.TrimSpace(playerID))
+	lowerName := strings.ToLower(strings.TrimSpace(playerName))
+	idToken := ""
+	if parts := strings.Split(lowerID, "|"); len(parts) >= 2 {
+		idToken = strings.TrimSpace(parts[1])
+	}
+	for _, p := range st.Players {
+		pID := strings.ToLower(strings.TrimSpace(p.OnlineID))
+		pName := strings.ToLower(strings.TrimSpace(p.Name))
+		if (pID != "" && pID != "0" && (pID == lowerID || pID == idToken || strings.Contains(lowerID, "|"+pID+"|") || strings.Contains(pID, "|"+idToken+"|"))) ||
+			(lowerName != "" && pName == lowerName && (teamNum < 0 || p.Team == teamNum)) ||
+			(idToken != "" && pName == idToken && (teamNum < 0 || p.Team == teamNum)) {
+			if b, err := json.Marshal(p); err == nil {
+				return string(b)
 			}
-			for _, p := range st.Players {
-				pID := strings.ToLower(strings.TrimSpace(p.OnlineID))
-				pName := strings.ToLower(strings.TrimSpace(p.Name))
-				if (pID != "" && pID != "0" && (pID == lowerID || pID == idToken || strings.Contains(lowerID, "|"+pID+"|") || strings.Contains(pID, "|"+idToken+"|"))) ||
-					(lowerName != "" && pName == lowerName && (teamNum < 0 || p.Team == teamNum)) ||
-					(idToken != "" && pName == idToken && (teamNum < 0 || p.Team == teamNum)) {
-					if b, err := json.Marshal(p); err == nil {
-						return string(b)
-					}
-				}
+		}
+	}
+	// Fallback: if teamNum is specified and there is only 1 player on that team (e.g. 1v1), return that player.
+	if teamNum >= 0 {
+		var teamCandidate *ReplayPlayerStats
+		teamCount := 0
+		for i := range st.Players {
+			if st.Players[i].Team == teamNum {
+				teamCandidate = &st.Players[i]
+				teamCount++
 			}
-			// Fallback: if teamNum is specified and there is only 1 player on that team (e.g. 1v1), return that player.
-			if teamNum >= 0 {
-				var teamCandidate *ReplayPlayerStats
-				teamCount := 0
-				for i := range st.Players {
-					if st.Players[i].Team == teamNum {
-						teamCandidate = &st.Players[i]
-						teamCount++
-					}
-				}
-				if teamCount == 1 && teamCandidate != nil {
-					if b, err := json.Marshal(teamCandidate); err == nil {
-						return string(b)
-					}
-				}
+		}
+		if teamCount == 1 && teamCandidate != nil {
+			if b, err := json.Marshal(teamCandidate); err == nil {
+				return string(b)
 			}
 		}
 	}
@@ -1175,7 +1185,7 @@ func SortAndPaginatePlayerSummaries(matching []*PlayerSummary, filter PlayerDire
 				}
 				return a.TotalMatches > b.TotalMatches
 			}
-		case "against_wr":
+		case "against_wr", "opponent_wr", "vs_win_rate":
 			oppGamesA := a.TotalWinsAsOpponent + a.TotalLossesAsOpponent
 			oppGamesB := b.TotalWinsAsOpponent + b.TotalLossesAsOpponent
 			rateA := 0.0
@@ -1213,7 +1223,7 @@ func SortAndPaginatePlayerSummaries(matching []*PlayerSummary, filter PlayerDire
 				}
 				return ptsA > ptsB
 			}
-		case "against_pts":
+		case "against_pts", "vs_pts":
 			ptsA := 0.0
 			if a.AgainstYouStats != nil {
 				ptsA = a.AgainstYouStats.AvgScore
