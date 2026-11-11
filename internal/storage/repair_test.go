@@ -716,6 +716,122 @@ func TestSQLiteStore_SyncReplayStats_ResolvesExistingMatchAndCanonicalPlayers(t 
 	}
 }
 
+func TestSQLiteStore_PostUploadStatsSyncPersistsAcrossRestarts(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "post_upload_persist.db")
+
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+
+	// 1. Sync a 0-player Ballchasing replay (e.g. Training / Private match where Ballchasing returns status="ok" and no players)
+	emptyBC := &ReplayMatchStats{
+		MatchGUID:      "GUID-EMPTY-BC-1",
+		MapName:        "Forbidden Temple",
+		Playlist:       0,
+		Duration:       93,
+		Overtime:       true,
+		Date:           "2026-03-21T02:59:29-07:00",
+		Players:        nil,
+		BallchasingID:  "174d6474-c9e6-4fa5-b21b-98379d10f360",
+		BallchasingURL: "https://ballchasing.com/replay/174d6474-c9e6-4fa5-b21b-98379d10f360",
+	}
+	if err := store.SyncReplayStats(ctx, emptyBC); err != nil {
+		t.Fatalf("SyncReplayStats(emptyBC): %v", err)
+	}
+	if err := store.MarkStatsSynced(ctx, "GUID-EMPTY-BC-1"); err != nil {
+		t.Fatalf("MarkStatsSynced: %v", err)
+	}
+
+	// 2. Simulate a match that was previously reset to PENDING despite already having synced_at > 0 and ballchasing_id in replay_stats_json
+	_, err = store.db.ExecContext(ctx, `
+		INSERT INTO matches (
+			match_guid, record_start_timestamp, map_name, playlist,
+			download_status, upload_status, ballchasing_id, ballchasing_url,
+			blue_score, orange_score, winner_team, replay_stats_json,
+			synced_at, stats_sync_status, stats_retry_count, created_at, updated_at
+		) VALUES (
+			'GUID-RESET-BC-2', 1773528433, 'Neon Fields', 0,
+			'DOWNLOADED', 'UPLOADED', '4ab74210-d749-4892-8c17-a6e7f3cfc3d9', 'https://ballchasing.com/replay/4ab74210-d749-4892-8c17-a6e7f3cfc3d9',
+			0, 0, -1, '{"match_guid":"GUID-RESET-BC-2","map_name":"Neon Fields","playlist":0,"blue_score":0,"orange_score":0,"duration":940,"overtime":true,"date":"2026-02-25T01:20:23-08:00","players":null,"ballchasing_id":"4ab74210-d749-4892-8c17-a6e7f3cfc3d9","ballchasing_url":"https://ballchasing.com/replay/4ab74210-d749-4892-8c17-a6e7f3cfc3d9"}',
+			1794307226, 'PENDING', 0, 1773528433, 1773528433
+		);
+	`)
+	if err != nil {
+		t.Fatalf("insert GUID-RESET-BC-2: %v", err)
+	}
+
+	// 3. Simulate a match parsed from local .replay first, then synced with a 0-player Ballchasing response (e.g. Dropshot/Private)
+	localParsed := &ReplayMatchStats{
+		MatchGUID:   "GUID-DROPSHOT-3",
+		MapName:     "Core 707",
+		Playlist:    6,
+		BlueScore:   1,
+		OrangeScore: 2,
+		Duration:    343,
+		Date:        "2026-11-08T09:15:26Z",
+		Players: []ReplayPlayerStats{
+			{Name: "LocalPilot", Platform: "Steam", OnlineID: "76561198816594023", Team: 0, IsLocal: true, Score: 1443, Goals: 1},
+			{Name: "OppPilot", Platform: "PS4", OnlineID: "2358442730872021175", Team: 1, IsLocal: false, Score: 1566, Goals: 2},
+		},
+	}
+	if err := store.SyncReplayStats(ctx, localParsed); err != nil {
+		t.Fatalf("SyncReplayStats(localParsed): %v", err)
+	}
+	if err := store.MarkUploaded(ctx, "GUID-DROPSHOT-3", "6315fa92-fd97-4914-a339-dc7a3fadb1cb", "https://ballchasing.com/replay/6315fa92-fd97-4914-a339-dc7a3fadb1cb"); err != nil {
+		t.Fatalf("MarkUploaded(GUID-DROPSHOT-3): %v", err)
+	}
+	// Now Ballchasing returns 0 players for this private Dropshot match
+	bcDropshot := &ReplayMatchStats{
+		MatchGUID:      "GUID-DROPSHOT-3",
+		MapName:        "Core 707",
+		Playlist:       6,
+		Duration:       343,
+		Overtime:       true,
+		Date:           "2026-11-08T09:15:26Z",
+		Players:        nil,
+		BallchasingID:  "6315fa92-fd97-4914-a339-dc7a3fadb1cb",
+		BallchasingURL: "https://ballchasing.com/replay/6315fa92-fd97-4914-a339-dc7a3fadb1cb",
+	}
+	if err := store.SyncReplayStats(ctx, bcDropshot); err != nil {
+		t.Fatalf("SyncReplayStats(bcDropshot): %v", err)
+	}
+	if err := store.MarkStatsSynced(ctx, "GUID-DROPSHOT-3"); err != nil {
+		t.Fatalf("MarkStatsSynced(GUID-DROPSHOT-3): %v", err)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Re-open store (simulating daemon restart)
+	store, err = NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("re-open NewSQLiteStore: %v", err)
+	}
+	defer store.Close()
+
+	// Verify 0 matches are pending stats sync after restart
+	pending, err := store.ListPendingStatsSync(ctx, 3)
+	if err != nil {
+		t.Fatalf("ListPendingStatsSync: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("len(pending) after restart = %d; want 0 (got %+v)", len(pending), pending[0])
+	}
+
+	// Verify GUID-DROPSHOT-3 preserved its 1-2 score and players across the 0-player Ballchasing sync and restart
+	m3, err := store.GetMatch(ctx, "GUID-DROPSHOT-3")
+	if err != nil {
+		t.Fatalf("GetMatch(GUID-DROPSHOT-3): %v", err)
+	}
+	if m3.BlueScore != 1 || m3.OrangeScore != 2 || m3.StatsSyncStatus != StatsSyncSynced {
+		t.Errorf("GUID-DROPSHOT-3 = %d-%d status=%s; want 1-2 SYNCED", m3.BlueScore, m3.OrangeScore, m3.StatsSyncStatus)
+	}
+}
+
+
 
 
 
