@@ -176,31 +176,34 @@ describe('HistoricalMatchDetailModal', () => {
     expect(container.textContent).toContain('550');
     expect(container.textContent).not.toContain('528'); // 550 * 0.96 must never be fabricated
 
-    // Tab 3: 3. SPEED & MOVEMENT (km/h with uu/s tooltip)
+    // Tab 3: 3. SPEED & MOVEMENT (native Unreal Units uu/s)
     await clickText(container, '3. SPEED & MOVEMENT');
     expect(container.textContent).toContain('AVG SPEED');
     expect(container.textContent).toContain('SUPERSONIC');
-    expect(container.textContent).toContain('52 km/h');
-    expect(container.querySelector('[title="1450 uu/s"]')).toBeTruthy();
+    expect(container.textContent).toContain('1450 uu/s');
+    expect(container.textContent).toContain('1380 uu/s');
+    expect(container.textContent).not.toContain('km/h');
 
-    // Tab 4: 4. POSITIONING & ROTATION (2v2 shows 1ST MAN / 2ND MAN and m distance with uu tooltip)
+    // Tab 4: 4. POSITIONING & ROTATION (2v2 shows 1ST MAN / 2ND MAN and native uu distance)
     await clickText(container, '4. POSITIONING & ROTATION');
     expect(container.textContent).toContain('DEF 1/3');
     expect(container.textContent).toContain('BEHIND BALL');
     expect(container.textContent).toContain('1ST MAN');
     expect(container.textContent).toContain('2ND MAN');
     expect(container.textContent).not.toContain('3RD MAN');
-    expect(container.textContent).toContain('24.5 m');
-    expect(container.querySelector('[title="2450 uu"]')).toBeTruthy();
+    expect(container.textContent).toContain('2450 uu');
+    expect(container.textContent).not.toContain('24.5 m');
 
-    // Tab 5: 5. TEAM HEAD-TO-HEAD (clean AVG SUPERSONIC % without share-of-sum suffix, plus km/h AVG SPEED)
+    // Tab 5: 5. TEAM HEAD-TO-HEAD (clean AVG SUPERSONIC % without share-of-sum suffix, plus uu/s AVG SPEED)
     await clickText(container, '5. TEAM HEAD-TO-HEAD');
     expect(container.textContent).toContain('TEAM SCORE (PTS)');
     expect(container.textContent).toContain('TOTAL BOOST COLLECTED');
     expect(container.textContent).toContain('DEMOLITIONS INFLICTED');
     expect(container.textContent).toContain('BLUE 18.5%');
     expect(container.textContent).toContain('12% ORANGE');
-    expect(container.textContent).toContain('52 km/h');
+    expect(container.textContent).toContain('BLUE 1450 uu/s');
+    expect(container.textContent).toContain('1380 uu/s ORANGE');
+    expect(container.textContent).not.toContain('km/h');
 
     // Tab 6: RAW JSON tab
     await clickText(container, 'RAW JSON');
@@ -226,7 +229,8 @@ describe('HistoricalMatchDetailModal', () => {
 
     await clickText(container, '4. POSITIONING & ROTATION');
     expect(container.textContent).toContain('DEF 1/3');
-    expect(container.textContent).toContain('24.5 m');
+    expect(container.textContent).toContain('2450 uu');
+    expect(container.textContent).not.toContain('24.5 m');
     expect(container.textContent).not.toContain('1ST MAN');
     expect(container.textContent).not.toContain('2ND MAN');
     expect(container.textContent).not.toContain('3RD MAN');

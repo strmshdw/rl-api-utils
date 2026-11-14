@@ -166,11 +166,8 @@ export const MatchMovementTab: React.FC<TeamTelemetryTabProps> = ({
               >
                 {displayPlayerName(p)}
               </button>
-              <span
-                className="text-right t-text-strong text-ink-strong"
-                title={mv?.avg_speed != null ? `${Math.round(mv.avg_speed)} uu/s` : undefined}
-              >
-                {mv?.avg_speed != null ? `${Math.round(mv.avg_speed * 0.036)} km/h` : '—'}
+              <span className="text-right t-text-strong text-ink-strong">
+                {mv?.avg_speed != null ? `${Math.round(mv.avg_speed)} uu/s` : '—'}
               </span>
               <span className="text-right t-text-win text-win">{mv?.percent_supersonic_speed != null ? `${mv.percent_supersonic_speed.toFixed(1)}%` : '—'}</span>
               <span className="text-right t-text-ink2 text-ink-2">{mv?.percent_boost_speed != null ? `${mv.percent_boost_speed.toFixed(1)}%` : '—'}</span>
@@ -186,11 +183,8 @@ export const MatchMovementTab: React.FC<TeamTelemetryTabProps> = ({
           <span className={`font-sans ${isBlue ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'}`}>
             {teamLabel} TOTALS / AVG
           </span>
-          <span
-            className="text-right t-text-strong text-ink-strong"
-            title={teamAvgSpeedUu != null ? `${Math.round(teamAvgSpeedUu)} uu/s` : undefined}
-          >
-            {teamAvgSpeedUu != null ? `${Math.round(teamAvgSpeedUu * 0.036)} km/h` : '—'}
+          <span title="Team average" className="text-right t-text-strong text-ink-strong">
+            {teamAvgSpeedUu != null ? `${Math.round(teamAvgSpeedUu)} uu/s` : '—'}
           </span>
           <span className="text-right t-text-win text-win">{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_supersonic_speed ?? 0)}%` : '—'}</span>
           <span className="text-right t-text-ink2 text-ink-2">{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_boost_speed ?? 0)}%` : '—'}</span>
@@ -274,11 +268,8 @@ export const MatchPositioningTab: React.FC<MatchPositioningTabProps> = ({
                   <span className="text-right t-text-ink2 text-ink-2">{pos?.percent_most_back != null ? `${pos.percent_most_back.toFixed(1)}%` : '—'}</span>
                 </>
               )}
-              <span
-                className="text-right t-text-muted text-muted"
-                title={pos?.avg_distance_to_ball != null ? `${Math.round(pos.avg_distance_to_ball)} uu` : undefined}
-              >
-                {pos?.avg_distance_to_ball != null ? `${(pos.avg_distance_to_ball / 100).toFixed(1)} m` : '—'}
+              <span className="text-right t-text-muted text-muted">
+                {pos?.avg_distance_to_ball != null ? `${Math.round(pos.avg_distance_to_ball)} uu` : '—'}
               </span>
             </div>
           );
@@ -298,11 +289,8 @@ export const MatchPositioningTab: React.FC<MatchPositioningTabProps> = ({
               <span className="text-right t-text-ink2 text-ink-2">{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_most_back ?? 0)}%` : '—'}</span>
             </>
           )}
-          <span
-            className="text-right t-text-muted text-muted"
-            title={teamAvgDistUu != null ? `${Math.round(teamAvgDistUu)} uu` : undefined}
-          >
-            {teamAvgDistUu != null ? `${(teamAvgDistUu / 100).toFixed(1)} m` : '—'}
+          <span title="Team average" className="text-right t-text-muted text-muted">
+            {teamAvgDistUu != null ? `${Math.round(teamAvgDistUu)} uu` : '—'}
           </span>
         </div>
       </div>
@@ -341,8 +329,6 @@ interface H2HRowMetric {
   orangeRaw: number;
   blueText: string;
   orangeText: string;
-  blueTitle?: string;
-  orangeTitle?: string;
 }
 
 export const MatchH2HTab: React.FC<{
@@ -353,8 +339,8 @@ export const MatchH2HTab: React.FC<{
   const orangeSpeedRows = orangePlayers.filter((p) => p.movement?.avg_speed != null);
   const blueSpeedUu = blueSpeedRows.length > 0 ? meanBy(blueSpeedRows, (p) => p.movement!.avg_speed!) : 0;
   const orangeSpeedUu = orangeSpeedRows.length > 0 ? meanBy(orangeSpeedRows, (p) => p.movement!.avg_speed!) : 0;
-  const blueSpeedKmh = Math.round(blueSpeedUu * 0.036);
-  const orangeSpeedKmh = Math.round(orangeSpeedUu * 0.036);
+  const blueSpeedRounded = Math.round(blueSpeedUu);
+  const orangeSpeedRounded = Math.round(orangeSpeedUu);
 
   const blueSupRows = bluePlayers.filter((p) => p.movement?.percent_supersonic_speed != null);
   const orangeSupRows = orangePlayers.filter((p) => p.movement?.percent_supersonic_speed != null);
@@ -390,10 +376,8 @@ export const MatchH2HTab: React.FC<{
       label: 'AVG SPEED',
       blueRaw: blueSpeedUu,
       orangeRaw: orangeSpeedUu,
-      blueText: `BLUE ${blueSpeedKmh} km/h`,
-      orangeText: `${orangeSpeedKmh} km/h ORANGE`,
-      blueTitle: blueSpeedRows.length > 0 ? `${Math.round(blueSpeedUu)} uu/s` : undefined,
-      orangeTitle: orangeSpeedRows.length > 0 ? `${Math.round(orangeSpeedUu)} uu/s` : undefined,
+      blueText: `BLUE ${blueSpeedRounded} uu/s`,
+      orangeText: `${orangeSpeedRounded} uu/s ORANGE`,
     },
     {
       label: 'AVG SUPERSONIC %',
@@ -418,11 +402,11 @@ export const MatchH2HTab: React.FC<{
           return (
             <div key={m.label}>
               <div className="flex justify-between mb-1.5 text-base">
-                <span className="t-text-blue text-blue-ink t-font-mono" title={m.blueTitle}>
+                <span className="t-text-blue text-blue-ink t-font-mono">
                   {m.blueText}
                 </span>
                 <span className="t-text-strong text-ink-strong tracking-wider">{m.label}</span>
-                <span className="t-text-orange text-orange-ink t-font-mono" title={m.orangeTitle}>
+                <span className="t-text-orange text-orange-ink t-font-mono">
                   {m.orangeText}
                 </span>
               </div>
