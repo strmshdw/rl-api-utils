@@ -5,25 +5,25 @@
 ## 1. Visual Design System & Persistent User Settings
 
 ### 1.1 Exact 14 `THEME_STYLES` & CSS Variables (`themeRegistry.ts`)
-Preserve all 14 theme IDs (`ThemeStyle`) with their complete `--t-*` token dictionaries (dark & light mode variants where supported):
-1. `deco` (Art Deco Broadcast — default dark `#0a0908` / `#181614` / `#789dba` / `#d9825b`)
-2. `midnight` (Midnight Arena)
-3. `obsidian` (Obsidian Slate)
-4. `esports` (Championship Broadcast)
-5. `carbon` (Carbon Telemetry)
-6. `emerald` (Pitch Emerald)
-7. `crimson` (Goal Line Crimson)
-8. `cyber` (Neon Cyber)
-9. `sunset` (Sunset Boulevard)
-10. `nordic` (Nordic Frost)
-11. `synthwave` (Retro Synthwave)
-12. `mono` (Monochrome Wire)
-13. `royal` (Royal Gold)
-14. `paper` (Editorial Paper / light)
+Preserve all 14 `ThemeStyleKey` IDs with their complete `--t-*` token dictionaries (dark & light mode variants):
+1. `broadcast` — `01 · Deco Monolith: Woodblock (Default)` (`#0a0908` / `#181614` / `#789dba` / `#d9825b`)
+2. `tactical` — `02 · Deco Monolith: Lacquer & Brass`
+3. `swiss` — `03 · Deco Monolith: Carved Inkstone`
+4. `arashi` — `04 · Deco Monolith: Warm Parchment (Light)`
+5. `classic` — `05 · Classic Broadcast (Original RL/SYNC)`
+6. `arena` — `06 · Glassmorphic Arena (Translucent Frosted HUD)`
+7. `carbon` — `07 · Carbon Paddock (Motorsport Telemetry)`
+8. `synthwave` — `08 · Mannfield Night (Neon Violet & Laser)`
+9. `editorial` — `09 · Editorial Gazette (Fraunces Serif & Warm Press)`
+10. `nordic` — `10 · Nordic Frost (Clean Arctic Slate & Ice)`
+11. `terminal` — `11 · Retro CRT Phosphor (Monospace Mainframe)`
+12. `solar` — `12 · Utopia Daylight (Warm Sand, Blue & Terracotta)`
+13. `industrial` — `13 · Cobalt Blueprint (CAD Engineering Grid)`
+14. `oled` — `14 · Pure OLED Pitch (Zero-Glow True Black)`
 
 Additional styling tokens:
-- `ColorMode`: `'dark' | 'light'` (updates `document.documentElement.dataset.theme` & `colorScheme`)
-- `FontScale`: `'compact' | 'normal' | 'comfortable' | 'large'` (`0.875rem`, `1rem`, `1.125rem`, `1.25rem` root scale)
+- `ColorMode`: `'dark' | 'light'` (updates `document.documentElement.dataset.style`, `dataset.theme`/`data-mode`, and `colorScheme`)
+- `FontScale`: `'normal' | 'xl'` (`16px` / `18.4px` root `fontSize`)
 
 ### 1.2 LocalStorage Keys & Custom DOM Events (Preserved 100%)
 1. `rlsync_theme_style`

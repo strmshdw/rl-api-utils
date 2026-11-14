@@ -235,7 +235,7 @@ describe('PlayersView', () => {
   });
 
   it('uses backend with_you_stats on playlist filter in PlayerProfilePage and respects local_result on opponent matches', async () => {
-    const { synthesizeRoleStats } = await import('../../utils/broadcast');
+    const { emptyRoleStats } = await import('../../utils/roleStats');
     globalThis.fetch = vi.fn((url: string) => {
       if (url.startsWith('/api/players?')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ players: PLAYERS, total: PLAYERS.length, limit: 24, offset: 0 }) });
@@ -292,8 +292,8 @@ describe('PlayersView', () => {
             matchups: [
               { player_id: 'Steam|AeroPulse|0', playlist_id: 11, wins_as_teammate: 3, losses_as_teammate: 1, wins_as_opponent: 2, losses_as_opponent: 1, total_matches: 7, last_played_at: new Date().toISOString() },
             ],
-            with_you_stats: synthesizeRoleStats(4, 3, 1, { avg_score: 777 }),
-            against_you_stats: synthesizeRoleStats(3, 2, 1, { avg_score: 666 }),
+            with_you_stats: emptyRoleStats(4, 3, 1, { avg_score: 777 }),
+            against_you_stats: emptyRoleStats(3, 2, 1, { avg_score: 666 }),
           }),
       });
     }) as unknown as typeof fetch;

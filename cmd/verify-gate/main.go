@@ -131,8 +131,7 @@ func runNpm(root string, args ...string) error {
 	if _, err := exec.LookPath("npm.cmd"); err == nil {
 		npmExe = "npm.cmd"
 	}
-	fullArgs := append([]string{"--prefix", "web"}, args...)
-	return runCmdStream(root, npmExe, fullArgs...)
+	return runCmdStream(filepath.Join(root, "web"), npmExe, args...)
 }
 
 func runCmdCapture(dir, name string, args ...string) (string, error) {
