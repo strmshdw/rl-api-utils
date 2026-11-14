@@ -1,0 +1,135 @@
+dtos:
+  - name: PlayerStatsSummary
+    ts_name: PlayerStatsSummary
+    doc: "Real-time box score counters received from StatsPlayer."
+    fields:
+      - { name: Score,   go_type: int, ts_type: number, json: score }
+      - { name: Goals,   go_type: int, ts_type: number, json: goals }
+      - { name: Assists, go_type: int, ts_type: number, json: assists }
+      - { name: Saves,   go_type: int, ts_type: number, json: saves }
+      - { name: Shots,   go_type: int, ts_type: number, json: shots }
+      - { name: Demos,   go_type: int, ts_type: number, json: demos }
+
+  - name: PlayerPlaylistRank
+    ts_name: PlayerPlaylistRank
+    doc: "Normalized competitive rank and skill rating for a specific playlist."
+    fields:
+      - { name: PlaylistID,    go_type: int,     ts_type: number,  json: playlist_id }
+      - { name: PlaylistName,  go_type: string,  ts_type: string,  json: playlist_name }
+      - { name: Tier,          go_type: int,     ts_type: number,  json: tier }
+      - { name: Division,      go_type: int,     ts_type: number,  json: division }
+      - { name: RankName,      go_type: string,  ts_type: string,  json: rank_name }
+      - { name: ShortRank,     go_type: string,  ts_type: "string?", json: short_rank, omitempty: true }
+      - { name: MMR,           go_type: float64, ts_type: number,  json: mmr }
+      - { name: MatchesPlayed, go_type: int,     ts_type: number,  json: matches_played }
+
+  - name: PlayerMatchup
+    ts_name: PlayerMatchup
+    doc: "Head-to-head encounter statistics between the local player and another player."
+    fields:
+      - { name: PlayerID,     go_type: string,    ts_type: string,  json: player_id }
+      - { name: PlaylistID,   go_type: int,       ts_type: number,  json: playlist_id }
+      - { name: GamesWith,    go_type: int,       ts_type: number,  json: games_with }
+      - { name: WinsWith,     go_type: int,       ts_type: number,  json: wins_with }
+      - { name: LossesWith,   go_type: int,       ts_type: number,  json: losses_with }
+      - { name: GamesAgainst, go_type: int,       ts_type: number,  json: games_against }
+      - { name: WinsAgainst,  go_type: int,       ts_type: number,  json: wins_against }
+      - { name: LossesAgainst,go_type: int,       ts_type: number,  json: losses_against }
+      - { name: LastPlayedAt, go_type: time.Time, ts_type: string,  json: last_played_at }
+      - { name: UpdatedAt,    go_type: time.Time, ts_type: string,  json: updated_at }
+
+  - name: RoleStatsBreakdown
+    ts_name: RoleStatsBreakdown
+    doc: "Aggregated match stats when paired with or against a player."
+    fields:
+      - { name: Games,      go_type: int,     ts_type: number, json: games }
+      - { name: Wins,       go_type: int,     ts_type: number, json: wins }
+      - { name: Losses,     go_type: int,     ts_type: number, json: losses }
+      - { name: WinRate,    go_type: float64, ts_type: number, json: win_rate }
+      - { name: Goals,      go_type: int,     ts_type: number, json: goals }
+      - { name: Assists,    go_type: int,     ts_type: number, json: assists }
+      - { name: Saves,      go_type: int,     ts_type: number, json: saves }
+      - { name: Shots,      go_type: int,     ts_type: number, json: shots }
+      - { name: Demos,      go_type: int,     ts_type: number, json: demos }
+      - { name: Score,      go_type: int,     ts_type: number, json: score }
+      - { name: AvgGoals,   go_type: float64, ts_type: number, json: avg_goals }
+      - { name: AvgAssists, go_type: float64, ts_type: number, json: avg_assists }
+      - { name: AvgSaves,   go_type: float64, ts_type: number, json: avg_saves }
+      - { name: AvgShots,   go_type: float64, ts_type: number, json: avg_shots }
+      - { name: AvgDemos,   go_type: float64, ts_type: number, json: avg_demos }
+      - { name: AvgScore,   go_type: float64, ts_type: number, json: avg_score }
+      - { name: ShotPct,    go_type: float64, ts_type: number, json: shot_pct }
+
+  - name: PlayerRoleStatsSummary
+    ts_name: PlayerRoleStatsSummary
+    doc: "Split teammate vs opponent aggregate performance for a tracked player."
+    fields:
+      - { name: Teammate, go_type: RoleStatsBreakdown, ts_type: RoleStatsBreakdown, json: teammate }
+      - { name: Opponent, go_type: RoleStatsBreakdown, ts_type: RoleStatsBreakdown, json: opponent }
+
+  - name: MatchClock
+    ts_name: MatchClock
+    doc: "In-game remaining clock and overtime flag."
+    fields:
+      - { name: SecondsRemaining, go_type: int,  ts_type: number, json: seconds_remaining }
+      - { name: IsOvertime,       go_type: bool, ts_type: boolean, json: is_overtime }
+
+  - name: PendingMatch
+    ts_name: PendingMatch
+    doc: "Online match observed live that has not yet been downloaded/persisted."
+    fields:
+      - { name: MatchGUID,  go_type: string,    ts_type: string, json: match_guid }
+      - { name: DetectedAt, go_type: time.Time, ts_type: string, json: detected_at }
+
+  - name: StatsAPIStatus
+    ts_name: StatsAPIStatus
+    doc: "Operational status of the local Rocket League Stats API tracker."
+    fields:
+      - { name: Enabled,            go_type: bool,           ts_type: boolean,        json: enabled }
+      - { name: GameConnected,      go_type: bool,           ts_type: boolean,        json: game_connected }
+      - { name: PendingCount,       go_type: int,            ts_type: number,         json: pending_count }
+      - { name: TriggerThreshold,   go_type: int,            ts_type: number,         json: trigger_threshold }
+      - { name: ForceSyncOnTrigger, go_type: bool,           ts_type: boolean,        json: force_sync_on_trigger }
+      - { name: EnableToast,        go_type: bool,           ts_type: boolean,        json: enable_toast }
+      - { name: MaxHostedReplays,   go_type: int,            ts_type: number,         json: max_hosted_replays }
+      - { name: PendingMatches,     go_type: "[]PendingMatch", ts_type: "PendingMatch[]", json: pending_matches }
+
+  - name: SyncProgress
+    ts_name: SyncProgress
+    doc: "Real-time progress of historical Ballchasing synchronization."
+    fields:
+      - { name: Syncing,     go_type: bool,       ts_type: boolean,  json: syncing }
+      - { name: TotalFound,  go_type: int,        ts_type: number,   json: total_found }
+      - { name: Processed,   go_type: int,        ts_type: number,   json: processed }
+      - { name: NewImported, go_type: int,        ts_type: number,   json: new_imported }
+      - { name: Errors,      go_type: int,        ts_type: number,   json: errors }
+      - { name: LastError,   go_type: string,     ts_type: "string?", json: last_error, omitempty: true }
+      - { name: StartedAt,   go_type: "*time.Time", ts_type: "string?", json: started_at, omitempty: true }
+      - { name: FinishedAt,  go_type: "*time.Time", ts_type: "string?", json: finished_at, omitempty: true }
+
+  - name: MMRHistoryRecord
+    ts_name: MMRHistoryEntry
+    doc: "Recorded post-match MMR checkpoint."
+    fields:
+      - { name: ID,         go_type: int64,     ts_type: "number?", json: id, omitempty: true }
+      - { name: PlayerID,   go_type: string,    ts_type: string,    json: player_id }
+      - { name: PlaylistID, go_type: int,       ts_type: number,    json: playlist_id }
+      - { name: MatchGUID,  go_type: string,    ts_type: string,    json: match_guid }
+      - { name: MMR,        go_type: float64,   ts_type: number,    json: mmr }
+      - { name: Tier,       go_type: int,       ts_type: number,    json: tier }
+      - { name: Division,   go_type: int,       ts_type: number,    json: division }
+      - { name: RecordedAt, go_type: time.Time, ts_type: string,    json: recorded_at }
+
+  - name: SyncConfigResponse
+    ts_name: SyncConfig
+    doc: "Runtime-configurable synchronization and tracking settings."
+    fields:
+      - { name: SyncInterval,         go_type: string, ts_type: string,  json: sync_interval }
+      - { name: PollingInterval,      go_type: string, ts_type: string,  json: polling_interval }
+      - { name: PollingEnabled,       go_type: bool,   ts_type: boolean, json: polling_enabled }
+      - { name: AutoFetchRanks,       go_type: bool,   ts_type: boolean, json: auto_fetch_ranks }
+      - { name: AutoSyncHistory,      go_type: bool,   ts_type: boolean, json: auto_sync_history }
+      - { name: TriggerThreshold,     go_type: int,    ts_type: number,  json: trigger_threshold }
+      - { name: ForceSyncOnTrigger,   go_type: bool,   ts_type: boolean, json: force_sync_on_trigger }
+      - { name: EnableToast,          go_type: bool,   ts_type: boolean, json: enable_toast }
+      - { name: SessionContinueWindow,go_type: string, ts_type: string,  json: session_continue_window }

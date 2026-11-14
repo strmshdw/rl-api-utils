@@ -1,0 +1,38 @@
+stat_columns:
+  - { key: score,    label: "Score",    short_label: "PTS",  description: "Match points earned" }
+  - { key: goals,    label: "Goals",    short_label: "G",    description: "Goals scored" }
+  - { key: assists,  label: "Assists",  short_label: "A",    description: "Assists recorded" }
+  - { key: shots,    label: "Shots",    short_label: "SH",   description: "Shots on target" }
+  - { key: saves,    label: "Saves",    short_label: "SV",   description: "Shots saved" }
+  - { key: demos,    label: "Demos",    short_label: "DM",   description: "Demolitions inflicted" }
+  - { key: mmr,      label: "MMR",      short_label: "MMR",  description: "Playlist skill rating" }
+  - { key: rank,     label: "Rank",     short_label: "RANK", description: "Competitive tier and division" }
+  - { key: h2h,      label: "H2H",      short_label: "H2H",  description: "Head-to-head series record" }
+  - { key: platform, label: "Platform", short_label: "PLT",  description: "Player platform badge" }
+
+# Note: keep canonical column order expected by web UI tests
+column_order:
+  - score
+  - goals
+  - assists
+  - saves
+  - shots
+  - demos
+  - mmr
+  - rank
+  - h2h
+  - platform
+
+presets:
+  full:
+    name: "Full"
+    description: "All box score, rank, MMR, H2H, and platform telemetry"
+    columns: [score, goals, assists, saves, shots, demos, mmr, rank, h2h, platform]
+  competitive:
+    name: "Competitive"
+    description: "Rank, MMR, H2H matchup record, goals, and points"
+    columns: [score, goals, mmr, rank, h2h]
+  streamer:
+    name: "Streamer"
+    description: "Compact box score hiding MMR, rank, and H2H records"
+    columns: [score, goals, assists, saves]
