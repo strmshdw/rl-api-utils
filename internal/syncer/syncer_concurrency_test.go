@@ -128,12 +128,13 @@ func TestSyncer_ContextCancellation_DuringDownload(t *testing.T) {
 	)
 	downloader := newMockDownloader()
 	downloader.blockChan = make(chan struct{})
+	downloader.startedChan = make(chan struct{})
 
 	s, _ := New(store, provider, downloader, newMockUploader())
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		<-downloader.startedChan
 		cancel()
 	}()
 
@@ -156,12 +157,13 @@ func TestSyncer_ContextCancellation_DuringUpload(t *testing.T) {
 	)
 	uploader := newMockUploader()
 	uploader.blockChan = make(chan struct{})
+	uploader.startedChan = make(chan struct{})
 
 	s, _ := New(store, provider, newMockDownloader(), uploader)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		<-uploader.startedChan
 		cancel()
 	}()
 
@@ -189,6 +191,7 @@ func TestSyncer_ContextCancellation_DuringStatsPoll_NoPoison(t *testing.T) {
 
 	fetcher := newMockStatsFetcher()
 	fetcher.blockChan = make(chan struct{})
+	fetcher.startedChan = make(chan struct{})
 	fetcher.replays["bc-stats-cancel"] = &ballchasing.ReplayItem{ID: "bc-stats-cancel", Status: "ok"}
 
 	s, _ := New(store, newMockHistoryProvider(), newMockDownloader(), newMockUploader(),
@@ -198,7 +201,7 @@ func TestSyncer_ContextCancellation_DuringStatsPoll_NoPoison(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		<-fetcher.startedChan
 		cancel()
 	}()
 

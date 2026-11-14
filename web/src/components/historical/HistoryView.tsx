@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { HistoricalMatchRecord, MatchesResponse } from '../../types/api';
+import { CurrentMatchResponse, HistoricalMatchRecord, MatchesResponse } from '../../types/api';
 import { isDemoMode, SAMPLE_HISTORICAL_MATCHES } from '../../utils/sampleData';
 import { COLUMN_HEADER, GhostButton, PageHeader, PrimaryButton, SearchInput, Segmented } from '../common/ui';
 import { HistoricalMatchDetailModal } from './HistoricalMatchDetailModal';
@@ -47,11 +47,13 @@ const EMPTY_IDS = new Set<string>();
 interface HistoryViewProps {
   /** Lower-cased online IDs of the local player, used to orient W/L and highlight "you". */
   localPlayerIds?: Set<string>;
+  liveMatch?: CurrentMatchResponse | null;
   onOpenFullProfile?: (playerId: string, playerName?: string) => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
   localPlayerIds = EMPTY_IDS,
+  liveMatch,
   onOpenFullProfile,
 }) => {
   const { dateRangeQueryParams } = useDashboard();
@@ -436,6 +438,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           playerName={profilePlayerName}
           onClose={() => setProfilePlayerId(null)}
           localPlayerIds={effectiveLocalIds}
+          liveMatch={liveMatch}
           onOpenFullProfile={onOpenFullProfile}
         />
       )}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlayerDetailResponse, PlayerMatchDetail, PlayerMatchesResponse, PlayerPlaylistRank, PlayerRoleStatsSummary } from '../../types/api';
+import { CurrentMatchResponse, PlayerDetailResponse, PlayerMatchDetail, PlayerMatchesResponse, PlayerPlaylistRank, PlayerRoleStatsSummary } from '../../types/api';
 import { computeDynamicRelationshipTag, computeLiveThreatBadges, emptyRoleStats, formatMmr, playlistLabels, shortRank, trackerUrl } from '../../utils/broadcast';
 import { getSamplePlayerMatches, getSamplePlayerProfile, isDemoMode, SAMPLE_CURRENT_MATCH } from '../../utils/sampleData';
 import { useDashboard } from '../../context/DashboardContext';
@@ -73,7 +73,7 @@ export function usePlayerDossierData(
   playerId: string | null,
   playerName: string | undefined,
   localPlayerIds: Set<string>,
-  options: { enabled?: boolean; pageSize?: number } = {},
+  options: { enabled?: boolean; pageSize?: number; liveMatch?: CurrentMatchResponse | null } = {},
 ): PlayerDossierDataState {
   const { enabled = true, pageSize = 20 } = options;
   const { dateRangeQueryParams } = useDashboard();
@@ -302,10 +302,17 @@ export function usePlayerDossierData(
   );
 
   const threatBadges = useMemo(() => {
+    const activeMatch =
+      options.liveMatch !== undefined
+        ? options.liveMatch
+        : isDemoMode()
+        ? SAMPLE_CURRENT_MATCH
+        : null;
+    if (!activeMatch?.active_match) return [];
     const allLobby = [
-      ...(SAMPLE_CURRENT_MATCH.local_player ? [SAMPLE_CURRENT_MATCH.local_player] : []),
-      ...(SAMPLE_CURRENT_MATCH.teammates || []),
-      ...(SAMPLE_CURRENT_MATCH.opponents || []),
+      ...(activeMatch.local_player ? [activeMatch.local_player] : []),
+      ...(activeMatch.teammates || []),
+      ...(activeMatch.opponents || []),
     ];
     const target = allLobby.find(
       (lp) => lp.player_id === id || lp.name.toLowerCase() === name.toLowerCase(),
@@ -313,11 +320,11 @@ export function usePlayerDossierData(
     if (!target) return [];
     return computeLiveThreatBadges(
       target,
-      SAMPLE_CURRENT_MATCH.local_player,
+      activeMatch.local_player,
       allLobby,
-      SAMPLE_CURRENT_MATCH.playlist_id,
+      activeMatch.playlist_id,
     );
-  }, [id, name]);
+  }, [id, name, options.liveMatch]);
 
   const filteredAndSortedMatches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();

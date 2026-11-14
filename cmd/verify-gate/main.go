@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -14,6 +15,7 @@ func main() {
 	root := flag.String("root", ".", "repository root")
 	skipBuild := flag.Bool("skip-build", false, "skip Pillar 2 build commands")
 	skipTests := flag.Bool("skip-tests", false, "skip Pillar 3 test commands")
+	requireRace := flag.Bool("require-race", false, "fail Pillar 3 if gcc/cgo is unavailable for go test -race")
 	allowLegacyLOC := flag.Bool("allow-legacy-loc", false, "only warn on >800 LOC (never allowed in release gate)")
 	flag.Parse()
 
@@ -44,11 +46,16 @@ func main() {
 	}
 
 	if !*skipTests {
-		if err := runPillar3(absRoot); err != nil {
+		usedRace, err := runPillar3(absRoot, *requireRace)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "[Pillar 3] FAILED: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("[Pillar 3] Go (-race) & Vitest suites PASSED")
+		if usedRace {
+			fmt.Println("[Pillar 3] Go (-race) & Vitest suites PASSED")
+		} else {
+			fmt.Println("[Pillar 3] Go (non-cgo; -race unavailable without gcc) & Vitest suites PASSED")
+		}
 	}
 
 	fmt.Println("4-PILLAR PRE-MERGE GATE PASSED (Exit Code 0)")
@@ -109,21 +116,26 @@ func runPillar2(root string) error {
 	return nil
 }
 
-func runPillar3(root string) error {
+func runPillar3(root string, requireRace bool) (bool, error) {
+	mustRace := requireRace || strings.EqualFold(os.Getenv("CI"), "true") || runtime.GOOS != "windows"
+	usedRace := false
 	if _, err := exec.LookPath("gcc"); err == nil {
+		usedRace = true
 		if err := runCmdStream(root, "go", "test", "-race", "-count=1", "./..."); err != nil {
-			return fmt.Errorf("go test -race: %w", err)
+			return false, fmt.Errorf("go test -race: %w", err)
 		}
+	} else if mustRace {
+		return false, fmt.Errorf("go test -race required (requireRace=%v, CI=%q, GOOS=%s) but gcc not found on PATH", requireRace, os.Getenv("CI"), runtime.GOOS)
 	} else {
-		fmt.Println("[Pillar 3] gcc not found on PATH; running go test -count=1 ./... (non-cgo mode)")
+		fmt.Fprintln(os.Stderr, "[Pillar 3] WARN: gcc not found on PATH; Go -race requires cgo — running go test -count=1 ./... (pass -require-race or set CI=true to enforce -race)")
 		if err := runCmdStream(root, "go", "test", "-count=1", "./..."); err != nil {
-			return fmt.Errorf("go test: %w", err)
+			return false, fmt.Errorf("go test: %w", err)
 		}
 	}
 	if err := runNpm(root, "test", "--", "--run"); err != nil {
-		return fmt.Errorf("vitest: %w", err)
+		return usedRace, fmt.Errorf("vitest: %w", err)
 	}
-	return nil
+	return usedRace, nil
 }
 
 func runNpm(root string, args ...string) error {

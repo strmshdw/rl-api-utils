@@ -8,7 +8,7 @@
 - `AuthProvider`: `Name() string`, `ProviderKey() string`, `Authenticate(ctx context.Context) (*TokenInfo, error)`, `TokenInfo() *TokenInfo`, `SetTokenSaver(TokenSaver)`, `Close() error`.
 - **Clock-Injectable `TokenInfo`**: Add `nowFn func() time.Time` (defaults to `time.Now`) and buffer `5 * time.Minute`. `IsExpired()` returns true if nil, `AccessToken == ""`, or `!ExpiresAt.IsZero() && nowFn().Add(5*time.Minute).After(ExpiresAt)`.
 - **Mutex-Serialized Refresh**: Both `EpicAuthProvider` and `SteamAuthProvider` guard all token refreshes/re-auths with `refreshMu sync.Mutex` (double-checked under lock) so concurrent callers (`syncer` + `playertrack` rank poller) never trigger parallel refresh token invalidation races.
-- **Persistence Precedence**: Consult `StateStore.LoadAuthState(providerKey)` before prompting interactively, even when stale `auth_code` remains in config; persist refreshed tokens via `TokenSaver` (`yaml_update.go`) and `StateStore.SaveAuthState`.
+- **Persistence Precedence & Logging**: Consult `StateStore.LoadAuthState(providerKey)` before prompting interactively, even when stale `auth_code` remains in config; persist refreshed tokens via `TokenSaver` (`yaml_update.go`) and `StateStore.SaveAuthState`, logging persistence failures via `auth.WithLogger(*slog.Logger)` (`logPersistError` -> `slog.Default()` fallback).
 
 ### 1.2 Epic Games Services (`EpicAuthProvider`)
 Uses `github.com/dank/rlapi` (`EGS` interface):
@@ -38,7 +38,7 @@ Uses `github.com/dank/rlapi` (`EGS` interface):
 
 ### 2.2 `ReplayDownloader`
 - HTTP client with configurable timeout (`30s` default) + exponential backoff (up to `maxRetries` on 5xx / transient transport errors, **immediate fail** on `404`/`410` expired CDN URL or `4xx` except `429`).
-- **Download & Verify**: Stream response up to `maxReplayDownloadBytes = 32 << 20` (32 MiB) into temp file `.tmp-<safeGUID>.replay` inside `replayDir`, compute SHA/size, parse header via `replay.ParseHeaderBytes` to ensure valid Rocket League replay, `Sync()` + close, then `os.Rename` atomically to `<timestamp>_<guid>.replay` (cleaning up `.tmp-*` on any error or `ctx.Done()`).
+- **Download & Verify**: Stream response up to `DefaultMaxDownloadBytes = 64 * 1024 * 1024` (64 MiB) into temp file `.tmp-<safeGUID>-*.replay` inside `replayDir`, validate header when `psynet.WithValidateReplay(true)` is enabled (enforced in `cmd/rl-sync/main.go`) via `replay.ParseReplayFile` / UE3 parser to ensure valid Rocket League replay, `Sync()` + close, then `os.Rename` atomically to `<safeGUID>.replay` (cleaning up `.tmp-*` on any error or `ctx.Done()`).
 
 ---
 
@@ -48,7 +48,7 @@ Uses `github.com/dank/rlapi` (`EGS` interface):
 - Base URL default `https://ballchasing.com/api`, header `Authorization: <token>`.
 - `Ping(ctx)`: `GET /api/` verifying key validity & uploader identity.
 - `UploadReplay(ctx, filePath, visibility)`:
-  - Validates visibility (`public`, `unlisted`, `private`, default `private`).
+  - Validates visibility (`public`, `unlisted`, `private`, `DefaultVisibility = "public"`).
   - Streams multipart body via `io.Pipe` or `io.MultiReader` + `onceCloser` (zero whole-file memory copy).
   - HTTP `201`: returns `UploadResult{ID, Location, Duplicate: false}`.
   - HTTP `409`: parses `error` / existing `id` if returned and returns `UploadResult{ID, Duplicate: true}` as non-fatal success.

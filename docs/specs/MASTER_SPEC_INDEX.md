@@ -14,6 +14,7 @@ All packages MUST satisfy a strict directed acyclic graph verified statically by
 Layer 0 (SSoT & Build):
   schema/*.yaml ──(schemagen)──▶ internal/contracts, web/src/contracts
   internal/version
+  internal/web              ──▶ (go:embed all:dist)
 
 Layer 1 (Pure Domain Core — Zero I/O,Zero SQL,Zero HTTP):
   internal/domain           ──▶ contracts
@@ -21,7 +22,7 @@ Layer 1 (Pure Domain Core — Zero I/O,Zero SQL,Zero HTTP):
 Layer 2 (Infrastructure Foundations):
   internal/config           ──▶ domain, contracts
   internal/replay           ──▶ domain, contracts            (@perf-isolation binary parser)
-  internal/storage          ──▶ domain, contracts, config    (SQLite repos + legacy .json importer)
+  internal/storage          ──▶ domain, contracts, config    (SQLite repos + JSONStore .json compatibility)
 
 Layer 3 (External Protocol Adapters):
   internal/auth             ──▶ config, storage, contracts
@@ -32,14 +33,13 @@ Layer 3 (External Protocol Adapters):
 Layer 4 (Domain Application Orchestrators):
   internal/syncer           ──▶ domain, contracts, storage, psynet, ballchasing, statsapi
   internal/playertrack      ──▶ domain, contracts, config, storage, statsapi, auth
+
+Layer 5 (Session State & Event Hub):
   internal/session          ──▶ domain, contracts, storage, statsapi, playertrack
 
-Layer 5 (Delivery & Presentation):
-  internal/web              ──▶ (go:embed all:dist)
+Layer 6 (Delivery, Composition Root & Tooling):
   internal/daemon           ──▶ version, domain, contracts, config, storage, statsapi,
                                 playertrack, session, syncer, ballchasing, web
-
-Layer 6 (Composition Root & Tooling):
   cmd/rl-sync               ──▶ all runtime packages above
   cmd/schemagen             ──▶ schema/*.yaml only
   cmd/verify-gate           ──▶ stdlib only (independent static/build/test gate)
@@ -56,7 +56,7 @@ types/       (re-exports contracts + UI-only view types)
    ▲
 hooks/       (useLiveMatch, useSession, useMMRHistory, usePlayerSearch, useColumnConfig, useBallchasingSync)
    ▲
-context/     (ThemeContext, SSEContext, NavigationContext, DashboardStateContext)
+context/     (ThemeContext, SSEContext, NavigationContext, DashboardContext)
    ▲
 components/common/      (Modal, BoxScore, Sparkline, ui primitives)
    ▲
@@ -72,11 +72,11 @@ App.tsx ──▶ main.tsx    (dev-only __ENABLE_PREVIEW__ provider statically e
 | Spec | Domain | Key Contracts & Invariants |
 | :--- | :--- | :--- |
 | [01_schema_ssot_and_domain_math.md](./01_schema_ssot_and_domain_math.md) | SSoT & Domain Math | `schema/` layout, 23 rank tiers (0-based & 1-based div), 13 playlists, SplitStats/Spotlights math, primary ID parser, replay binary invariants |
-| [02_configuration_and_storage.md](./02_configuration_and_storage.md) | Config & Persistence | 49 config fields, 58 `RL_SYNC_*` env vars, 22 CLI flags, comment-preserving YAML writes, 8-table SQLite DDL, v1→v4 migrations, legacy `.json` importer, batched zero-N+1 queries |
+| [02_configuration_and_storage.md](./02_configuration_and_storage.md) | Config & Persistence | 49 config fields, 58 `RL_SYNC_*` env vars, 22 CLI flags, comment-preserving YAML writes, 8-table SQLite DDL, v1→v4 migrations, `.json` `JSONStore` compatibility, batched zero-N+1 queries |
 | [03_auth_and_external_protocols.md](./03_auth_and_external_protocols.md) | Auth & External APIs | Epic OAuth (`EGS`), Steam IPC (`steam/steam-auth.js`), credential collision check, PsyNet RPC (`rlapi v0.1.28`), CDN replay downloader, Ballchasing v2 + shared 2 rps limiter, UE3 `.replay` parser |
 | [04_sync_engine_and_statsapi.md](./04_sync_engine_and_statsapi.md) | Sync & Live Telemetry | Syncer state machine, separate retry counters, `017db99` / `3f9d1d8` guarantees, Ballchasing history sync, `TAStatsAPI` WS/TCP listener, 20-match tracker, Windows toast |
 | [05_playertrack_session_daemon_cli.md](./05_playertrack_session_daemon_cli.md) | Tracking, Daemon & CLI | Rank LRU/TTL cache, local player resolution (`3744274`), Session epoch/continuation/archival, SSE broadcaster, all 30 HTTP routes/aliases, CSRF/origin/traversal guards, CLI runner |
-| [06_broadcast_web_architecture.md](./06_broadcast_web_architecture.md) | Web UI & Overlay | 14 CSS themes, 4 font scales, 7 `localStorage` keys, split contexts, `<PlayerDossierView />`, honest telemetry (zero fake data multipliers), OBS overlay, `__ENABLE_PREVIEW__` tree-shaking |
+| [06_broadcast_web_architecture.md](./06_broadcast_web_architecture.md) | Web UI & Overlay | 14 CSS themes, 2 font scales (`'normal' | 'xl'`), 7 `localStorage` keys, split contexts, `<PlayerDossierView />`, honest telemetry (zero fake data multipliers), OBS overlay, `__ENABLE_PREVIEW__` tree-shaking |
 
 ---
 
@@ -90,9 +90,9 @@ App.tsx ──▶ main.tsx    (dev-only __ENABLE_PREVIEW__ provider statically e
    - **Pillar 4 (Trunk Lock)**: Immediately exit `42` on `main` or `master`.
    - **Pillar 1 (Static & Structure)**: `go run ./cmd/schemagen -check`, `docs/specs/*.md < 46,080 B`, every source/test file `< 800 LOC`, acyclic Go & TS import DAG, `SOLID-SLICE-01` / `SOLID-PERF-01`, `go vet ./...`, `npm --prefix web exec tsc -- -b`.
    - **Pillar 2 (Production Artifacts)**: `npm --prefix web run build` (asserting preview fixtures pruned from bundle), `go build -o rl-sync.exe ./cmd/rl-sync` (clean build).
-   - **Pillar 3 (Verification)**: `go test -race ./...` and `npm --prefix web test -- --run`.
+   - **Pillar 3 (Verification)**: `go test -race -count=1 ./...` when `gcc`/cgo is present (mandatory on non-Windows, `CI=true`, or `-require-race`; warns and runs pure-Go `go test -count=1 ./...` on local Windows hosts without `gcc`), including `@perf-isolation` parity tests in `tests/parity/` and domain invariant suites in `tests/invariants/` (`migration_and_017db99_test.go`, `identity_3744274_test.go`, `http_security_and_fb1fc22_test.go`, `shutdown_3f9d1d8_test.go`), plus `npm --prefix web test -- --run`.
 5. **Known Legacy Bugs Eliminated by Construction**:
-   - Eliminate dual-store SQLite/JSON bloat (`sqlite.go` 5.6k LOC + `jsonstore.go` 3.8k LOC) via small SQLite repository modules + `< 250 LOC` legacy JSON auto-importer.
+   - Eliminate monolithic multi-thousand-LOC storage bloat (`sqlite.go` 5.6k LOC + `jsonstore.go` 3.8k LOC) via cohesive `< 800 LOC` SQLite repository modules + cohesive `.json` `JSONStore` compatibility modules.
    - Eliminate N+1 SQLite queries (`ListHistoricalMatches`, `ListPlayerMatches`, `GetSessionSummary`, `enrichSessionTelemetry`).
    - Serialize OAuth refreshes (`refreshMu`), make `TokenInfo.IsExpired` clock-injectable, fix Steam `LoginKey`/`EpicAccountID` races, fix Windows `USERNAME` fallback in `steam-auth.js`, consult `StateStore` even when `auth_code` remains in YAML.
    - Bound blocking PsyNet RPCs to 30s timeout contexts; wrap Ballchasing 404 as `ErrNotFound`; throttle all background Ballchasing GETs through a shared 2 req/sec limiter; serialize `syncer.RunCycle` and `PollAndSyncPendingStats`.

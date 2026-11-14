@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -118,6 +119,7 @@ type providerOptions struct {
 	prompter   CodePrompter
 	steamGen   SteamTicketGenerator
 	tokenSaver ConfigTokenSaver
+	logger     *slog.Logger
 }
 
 // WithEGSClient sets a custom EGS client (for testing or custom transports).
@@ -169,10 +171,20 @@ func WithConfigTokenSaver(saver ConfigTokenSaver) Option {
 	}
 }
 
+// WithLogger sets the structured logger used for non-fatal auth persistence diagnostics.
+func WithLogger(logger *slog.Logger) Option {
+	return func(o *providerOptions) {
+		if logger != nil {
+			o.logger = logger
+		}
+	}
+}
+
 func defaultOptions() *providerOptions {
 	return &providerOptions{
 		egsClient:  rlapi.NewEGS(),
 		clock:      time.Now,
+		logger:     slog.Default(),
 		role:       RolePrimary,
 		prompter:   nil,
 		steamGen:   NewNodeSteamTicketGenerator(""),
@@ -217,4 +229,11 @@ func NewPollingProvider(cfg config.PollingAuthConfig, opts ...Option) (AuthProvi
 	// Prepend WithAccountRole(RolePolling) so caller options can still customize it.
 	combinedOpts := append([]Option{WithAccountRole(RolePolling)}, opts...)
 	return NewProvider(authCfg, nil, combinedOpts...)
+}
+
+func logPersistError(logger *slog.Logger, msg string, err error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn(msg, "error", err)
 }

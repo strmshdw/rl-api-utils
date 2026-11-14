@@ -229,46 +229,50 @@ func (d *Daemon) handleGetMatch(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "match not found")
 		return
 	}
+	if strings.TrimSpace(guid) == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid match guid")
+		return
+	}
 
 	m, err := d.stateStore.GetMatch(r.Context(), guid)
-	if err == nil && m != nil {
-		hist := &storage.HistoricalMatchRecord{
-			MatchRecord: *m,
-			Result:      "unknown",
+	if err != nil {
+		if isClientDisconnect(r.Context(), err) {
+			return
 		}
-		if m.ReplayStatsJSON != "" {
-			var st storage.ReplayMatchStats
-			if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err == nil {
-				hist.Stats = &st
-			}
+		if errors.Is(err, storage.ErrInvalidGUID) {
+			writeJSONError(w, http.StatusBadRequest, "invalid match guid")
+			return
 		}
-		if enricher, ok := d.stateStore.(matchStatsEnricher); ok {
-			hist.Stats = enricher.EnrichMatchStatsWithPlayers(r.Context(), guid, m.Playlist, m, hist.Stats)
+		if errors.Is(err, storage.ErrMatchNotFound) {
+			writeJSONError(w, http.StatusNotFound, "match not found")
+			return
 		}
-		localTeam := d.resolveMatchLocalTeam(r.Context(), guid, hist.Stats)
-		hist.Result = computeMatchOutcome(m, localTeam)
-
-		d.writeJSONResponse(w, r, http.StatusOK, hist, "error encoding match detail response")
+		d.logger.Error("failed to retrieve match", slog.String("guid", guid), slog.Any("error", err))
+		writeJSONError(w, http.StatusInternalServerError, "failed to retrieve match")
 		return
 	}
-
-	if err != nil && isClientDisconnect(r.Context(), err) {
-		return
-	}
-
-	matches, _, err := d.stateStore.ListHistoricalMatches(r.Context(), storage.MatchFilter{
-		Query: guid,
-		Limit: 1,
-	})
-	if err != nil && isClientDisconnect(r.Context(), err) {
-		return
-	}
-	if err != nil || len(matches) == 0 {
+	if m == nil {
 		writeJSONError(w, http.StatusNotFound, "match not found")
 		return
 	}
 
-	d.writeJSONResponse(w, r, http.StatusOK, matches[0], "error encoding match detail response")
+	hist := &storage.HistoricalMatchRecord{
+		MatchRecord: *m,
+		Result:      "unknown",
+	}
+	if m.ReplayStatsJSON != "" {
+		var st storage.ReplayMatchStats
+		if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err == nil {
+			hist.Stats = &st
+		}
+	}
+	if enricher, ok := d.stateStore.(matchStatsEnricher); ok {
+		hist.Stats = enricher.EnrichMatchStatsWithPlayers(r.Context(), guid, m.Playlist, m, hist.Stats)
+	}
+	localTeam := d.resolveMatchLocalTeam(r.Context(), guid, hist.Stats)
+	hist.Result = computeMatchOutcome(m, localTeam)
+
+	d.writeJSONResponse(w, r, http.StatusOK, hist, "error encoding match detail response")
 }
 
 // handlePruneMatches handles POST /api/matches/prune.

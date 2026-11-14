@@ -404,7 +404,9 @@ func (s *Syncer) SyncDownloadedReplayStats(ctx context.Context, matchGUID, local
 	}
 
 	if len(matchPlayers) > 0 {
-		_ = s.store.SaveMatchPlayers(ctx, matchGUID, matchPlayers)
+		if err := s.store.SaveMatchPlayers(ctx, matchGUID, matchPlayers); err != nil {
+			return fmt.Errorf("saving match players: %w", err)
+		}
 	}
 
 	outcomes := buildOutcomesFromCandidates(candidates, localIdx, localTeam, meta.WinnerTeam, found, meta.PlayerName, "")

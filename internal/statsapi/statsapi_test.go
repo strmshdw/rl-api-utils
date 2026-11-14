@@ -311,3 +311,49 @@ func TestListener_TCP(t *testing.T) {
 
 	listener.Stop()
 }
+
+func TestTracker_Close_CancelsAndWaitsAsyncSync(t *testing.T) {
+	store := newMockStore()
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+
+	tracker, err := statsapi.NewTracker(store, statsapi.TrackerConfig{
+		TriggerThreshold:   1,
+		ForceSyncOnTrigger: true,
+	}, statsapi.WithToastNotifier(statsapi.NewNoopToastNotifier()), statsapi.WithSyncTrigger(func(ctx context.Context, reason string) error {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return ctx.Err()
+	}))
+	if err != nil {
+		t.Fatalf("NewTracker failed: %v", err)
+	}
+
+	if _, _, err := tracker.RecordMatch(context.Background(), "async-close-guid"); err != nil {
+		t.Fatalf("RecordMatch failed: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(1 * time.Second):
+		t.Fatal("async sync trigger did not start")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		tracker.Close()
+		close(done)
+	}()
+
+	select {
+	case <-canceled:
+	case <-time.After(1 * time.Second):
+		t.Fatal("Tracker.Close did not cancel async sync context")
+	}
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("Tracker.Close did not finish waiting for async sync")
+	}
+}

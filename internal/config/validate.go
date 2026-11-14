@@ -117,6 +117,7 @@ func (c *Config) applyCLI(cli CLIFlags) {
 	}
 	if cli.SessionContinueWindow != nil {
 		c.Session.ContinueWindow = Duration(*cli.SessionContinueWindow)
+		c.Session.continueWindowSet = true
 	}
 	if cli.WebEnabled != nil {
 		c.Web.Enabled = *cli.WebEnabled
@@ -240,7 +241,7 @@ func (c *Config) validateAuthConflict(errs *[]error) {
 func (c *Config) validatePlayerTrackingAndSession(errs *[]error) {
 	c.PlayerTracking.LocalPlayerID = strings.TrimSpace(c.PlayerTracking.LocalPlayerID)
 	c.PlayerTracking.LocalPlayerName = strings.TrimSpace(c.PlayerTracking.LocalPlayerName)
-	if c.PlayerTracking.SessionContinueWindow != 0 && c.Session.ContinueWindow == Duration(DefaultSessionContinueWindow) {
+	if !c.Session.continueWindowSet && c.PlayerTracking.SessionContinueWindow != 0 && c.Session.ContinueWindow == Duration(DefaultSessionContinueWindow) {
 		c.Session.ContinueWindow = c.PlayerTracking.SessionContinueWindow
 	}
 	if c.Session.ContinueWindow.Duration() < 0 {
@@ -249,7 +250,7 @@ func (c *Config) validatePlayerTrackingAndSession(errs *[]error) {
 }
 
 func (c *Config) validateBallchasing(errs *[]error) {
-	if strings.TrimSpace(c.Ballchasing.APIKey) == "" {
+	if !c.Sync.DryRun && strings.TrimSpace(c.Ballchasing.APIKey) == "" {
 		*errs = append(*errs, errors.New("ballchasing: 'api_key' is required"))
 	}
 	c.Ballchasing.Visibility = strings.ToLower(strings.TrimSpace(c.Ballchasing.Visibility))

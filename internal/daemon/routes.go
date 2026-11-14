@@ -54,6 +54,7 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 	mux.HandleFunc("GET /api/sync/ballchasing/status", d.handleBallchasingSyncStatus)
 	mux.HandleFunc("GET /api/sync/config", d.handleGetSyncConfig)
 	mux.HandleFunc("POST /api/sync/config", d.handleUpdateSyncConfig)
+	mux.HandleFunc("PATCH /api/sync/config", d.handleUpdateSyncConfig)
 	mux.HandleFunc("POST /api/sync/now", d.handleManualSyncNow)
 	mux.HandleFunc("GET /api/events", d.handleEvents)
 

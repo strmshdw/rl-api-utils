@@ -50,12 +50,14 @@ type Daemon struct {
 	webHandler     http.Handler
 	manualTrigger  chan string
 
-	mu            sync.Mutex
-	ctx           context.Context
-	replayLimit   int
-	inFlight      bool
-	wg            sync.WaitGroup
-	prevConnected bool
+	mu                 sync.Mutex
+	ctx                context.Context
+	replayLimit        int
+	inFlight           bool
+	statsPollInFlight  bool
+	historySyncRunning bool
+	wg                 sync.WaitGroup
+	prevConnected      bool
 }
 
 // Option allows customizing Daemon configuration.
@@ -172,6 +174,12 @@ func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
 		if !d.sessionTracker.HasExplicitContinueWindow() {
 			d.sessionTracker.SetContinueWindow(d.cfg.EffectiveSessionContinueWindow())
 		}
+	}
+
+	if d.sessionTracker != nil {
+		d.sessionTracker.SetSummaryEnricher(func(sum *session.SessionResponse) *session.SessionResponse {
+			return d.enrichSessionTelemetry(d.daemonContext(), sum)
+		})
 	}
 
 	if d.playerTracker != nil && d.sessionTracker != nil {

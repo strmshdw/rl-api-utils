@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -179,14 +178,12 @@ func (d *Daemon) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(SessionListResponse{
+	d.writeJSONResponse(w, r, http.StatusOK, SessionListResponse{
 		Sessions: sessions,
 		Total:    total,
 		Limit:    limit,
 		Offset:   offset,
-	})
+	}, "error encoding session list response")
 }
 
 // handleGetHistoricalSession handles GET /api/sessions/{id}, returning the full details of a specific session.

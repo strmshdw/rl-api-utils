@@ -144,6 +144,9 @@ func (c *Config) applyEnv() error {
 				return fmt.Errorf("invalid %s %q: %w", b.key, val, err)
 			}
 			*b.dst = Duration(parsed)
+			if b.dst == &c.Session.ContinueWindow {
+				c.Session.continueWindowSet = true
+			}
 		}
 	}
 

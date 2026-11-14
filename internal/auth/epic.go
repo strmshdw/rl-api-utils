@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ type EpicAuthProvider struct {
 	accountRole AccountRole
 	prompter    CodePrompter
 	tokenSaver  ConfigTokenSaver
+	logger      *slog.Logger
 
 	refreshMu sync.Mutex
 	mu        sync.RWMutex
@@ -52,6 +54,7 @@ func NewEpicProvider(cfg config.EpicConfig, store storage.StateStore, opts ...Op
 		accountRole: role,
 		prompter:    options.prompter,
 		tokenSaver:  options.tokenSaver,
+		logger:      options.logger,
 	}, nil
 }
 
@@ -355,10 +358,14 @@ func (p *EpicAuthProvider) exchangeAndPersistLocked(
 
 	// Persist under refreshMu so StateStore, ConfigTokenSaver, and cached TokenInfo stay consistent.
 	if p.store != nil && newRefreshToken != "" {
-		_ = p.store.SaveAuthState(ctx, storeKey, newRefreshToken, accountID, displayName)
+		if err := p.store.SaveAuthState(ctx, storeKey, newRefreshToken, accountID, displayName); err != nil {
+			logPersistError(p.logger, "epic auth state persistence failed", err)
+		}
 	}
 	if p.tokenSaver != nil && newRefreshToken != "" {
-		_ = p.tokenSaver(BuildEpicTokenUpdate(p.accountRole, newRefreshToken))
+		if err := p.tokenSaver(BuildEpicTokenUpdate(p.accountRole, newRefreshToken)); err != nil {
+			logPersistError(p.logger, "epic config token save failed", err)
+		}
 	}
 
 	p.mu.Lock()

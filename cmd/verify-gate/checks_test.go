@@ -27,3 +27,15 @@ func TestCheckFileLOCAndPerfIsolation(t *testing.T) {
 		t.Fatal("expected SOLID-SLICE-01 violation for unannotated b[:20]")
 	}
 }
+
+func TestRunPillar3_RequireRaceFailsWithoutGCC(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("CI", "")
+	usedRace, err := runPillar3(t.TempDir(), true)
+	if err == nil {
+		t.Fatal("expected runPillar3(requireRace=true) to fail when gcc is missing from PATH")
+	}
+	if usedRace {
+		t.Fatal("expected usedRace=false when gcc is missing")
+	}
+}

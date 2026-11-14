@@ -13,11 +13,11 @@ Three declarative YAML manifests feed `cmd/schemagen`, generating `internal/cont
    - `SyncMode`: `auto`, `manual`, `startup`.
    - `SSEEventType`: `match_update`, `match_ended`, `clock_updated`, `session_update`, `sync_progress`.
    - `TierNames` (`0..22`), `ShortTierNames` (`0..22`), `DivisionNames` (`0..3`), `ShortDivisionNames` (`0..3`), and SQLite storage `ShortTierStorageNames` (tier 7..9 use `"GOLD I..III"` vs tactical live UI `"GLD I..III"`—both emitted explicitly so 100% of existing rank tests & live badges remain exact).
-   - `Playlists` (`1, 2, 3, 4, 10, 11, 12, 13, 27, 28, 29, 30, 34`) with `id`, `name` (canonical `"Casual Duel (1v1)"`, `"Ranked Doubles (2v2)"`, `"Ranked Hoops"`, `"Competitive Tournaments"`), `short_label`, `is_ranked`, `is_extra_mode`, and `ballchasing_slugs`.
+   - `Playlists` (`1, 2, 3, 4, 10, 11, 12, 13, 27, 28, 29, 30, 34`) with `id`, `name` (canonical `"Casual Duel (1v1)"`, `"Ranked Doubles (2v2)"`, `"Ranked Hoops"`, `"Competitive Tournaments"`), `storage_name` (`StorageName` in Go), `is_ranked`, `is_extra_mode`, and `slugs`.
 2. `schema/telemetry.yaml`:
-   - `STAT_COLUMNS` (`core`, `shooting`, `positioning`, `boost`, `movement`) with `key`, `label`, `shortLabel`, `category`, `description`, `unit`, `decimals`, `higherIsBetter`, `compact`, `minTier`, and `PRESETS` (`standard`, `shooter`, `playmaker`, `keeper`, `analytics`, `overlay`).
+   - `stat_columns` (`score`, `goals`, `assists`, `shots`, `saves`, `demos`, `mmr`, `rank`, `h2h`, `platform`) with `key`, `label`, `short_label` (`shortLabel` in TS), `description`, canonical `column_order`, and `presets` (`full`, `competitive`, `streamer`).
 3. `schema/dto.yaml`:
-   - Shared cross-boundary JSON structs/interfaces for Health/Status, Auth, CurrentMatch/LobbyPlayer, Session (`SessionResponse`, `PlaylistSessionStats`, `SessionMatchDetail`, `SessionEvent`), Matches (`MatchesResponse`, `HistoricalMatchItem`, `RetryResponse`), Players (`PlayersListResponse`, `PlayerSummaryDTO`, `PlayerDetailResponse`, `PlayerMatchesResponse`, `SplitStatsDTO`), MMR History, Sync Control (`BallchasingSyncStatusDTO`, `SyncConfigDTO`, `SyncTriggerResult`), and Ballchasing telemetry DTOs (`ReplayPlayerStats`, `ReplayMatchStats`, etc.).
+   - 11 shared cross-boundary DTO primitives (`PlayerStatsSummary`, `PlayerPlaylistRank`, `PlayerMatchup`, `RoleStatsBreakdown`, `PlayerRoleStatsSummary`, `MatchClock`, `PendingMatch`, `StatsAPIStatus`, `SyncProgress`, `MMRHistoryRecord` / `MMRHistoryEntry`, `SyncConfigResponse` / `SyncConfig`). Composite HTTP response envelopes (`DaemonStatusResponse`, `SessionResponse`, `MatchesResponse`, `PlayerSearchResponse`, `PlayerDetailResponse`, `CurrentMatchResponse`, `ReplayMatchStats`) live in their owning bounded contexts (`daemon`, `session`, `playertrack`, `storage`) composing these contract primitives.
 
 > **Invariance Rule**: `cmd/schemagen -check` diffs generated files in-memory against disk byte-for-byte. Any manual edit in `internal/contracts/` or `web/src/contracts/` fails Pillar 1 immediately.
 
@@ -67,11 +67,10 @@ For each player `P` across completed `match_players` rows filtered by `(playlist
 - Sum `Score, Goals, Assists, Saves, Shots, Demos`, `Wins` (where `outcome == "victory"`), `Losses` (`"defeat"`).
 - Compute per-game averages only when `Games > 0` rounded to 2 decimals (`float64(sum)/float64(Games)`).
 - Compute shooting accuracy `ShotPct = (Goals / Shots) * 100` (`0` when `Shots == 0`).
-- **Global Spotlights** (`ComputeGlobalSpotlights` excluding bots & local players):
-  - `Nemesis`: highest losses against opponent (tie-break highest games against, then lexicographical `player_id`).
-  - `FavoriteTeammate`: highest wins with teammate (tie-break highest games with, win rate).
-  - `BestRivalry`: highest total encounters (`with + against`) where both teammate & opponent samples or high matchup count exist.
-  - `MostPlayed`: highest total games across all roles.
+- **Global Spotlights** (`storage/spotlights.go` `ComputeGlobalSpotlights` excluding bots & local players):
+  - `BestTeammate`: highest win rate with teammate (tie-break highest teammate games, most recent `LastSeenAt`, then lexicographical `PlayerID`).
+  - `MostFaced`: highest games against opponent (tie-break most recent `LastSeenAt`, then lexicographical `PlayerID`).
+  - `ToughestRival`: lowest local win rate against opponent (tie-break highest opponent games, most recent `LastSeenAt`, then lexicographical `PlayerID`).
 
 ### 4.3 Network Disconnect Error Classification (`IsDisconnectError`)
 Returns `true` if `err != nil` and:

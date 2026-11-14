@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { PlayerSummary } from '../../types/api';
+import { CurrentMatchResponse, PlayerSummary } from '../../types/api';
 import { usePlayerSearch } from '../../hooks/usePlayerSearch';
 import { emptyRoleStats, hasSyncedRoleTelemetry } from '../../utils/broadcast';
 import { EmptyLine, GhostButton, PageHeader, SearchInput, Segmented } from '../common/ui';
@@ -41,6 +41,7 @@ const PLATFORM_OPTIONS = [
 
 interface PlayersViewProps {
   localPlayerIds?: Set<string>;
+  liveMatch?: CurrentMatchResponse | null;
   initialInspectedPlayer?: { id: string; name?: string } | null;
   inspectedPlayer?: { id: string; name?: string } | null;
   onInspectPlayerChange?: (player: { id: string; name?: string } | null) => void;
@@ -49,6 +50,7 @@ interface PlayersViewProps {
 
 export const PlayersView: React.FC<PlayersViewProps> = ({
   localPlayerIds,
+  liveMatch,
   initialInspectedPlayer,
   inspectedPlayer,
   onInspectPlayerChange,
@@ -306,6 +308,7 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
           playerName={selectedFullPagePlayer.name}
           onBack={() => handleSelectPlayer(null)}
           localPlayerIds={localPlayerIds}
+          liveMatch={liveMatch}
           onOpenFullProfile={(id, name) => handleSelectPlayer({ id, name })}
         />
       </div>

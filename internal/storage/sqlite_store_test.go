@@ -317,7 +317,9 @@ func TestSQLiteStore_CanonicalRanksAuthAndClose(t *testing.T) {
 	if err := store.UpsertPlayer(ctx, &PlayerRecord{PlayerID: "Steam|r1|0", Platform: "Steam", PlayerName: "Legend", RanksJSON: badRanks}); err != nil {
 		t.Fatal(err)
 	}
-	store.repairCorruptedRanksJSON(ctx, false)
+	if err := store.repairCorruptedRanksJSON(ctx, false); err != nil {
+		t.Fatal(err)
+	}
 	pl, err := store.GetPlayer(ctx, "Steam|r1|0")
 	if err != nil {
 		t.Fatal(err)
@@ -351,5 +353,76 @@ func TestSQLiteStore_CanonicalRanksAuthAndClose(t *testing.T) {
 	}
 	if _, err := store.GetMatch(ctx, "any"); err == nil {
 		t.Fatal("expected error querying closed SQLiteStore")
+	}
+}
+
+func TestSQLiteStore_RepairHistoricalData_ErrorDoesNotBumpUserVersion(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "repair_err.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.db.Exec(`PRAGMA user_version = 3;`); err != nil {
+		t.Fatalf("failed to reset PRAGMA user_version = 3: %v", err)
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := store.RepairHistoricalData(canceledCtx); err == nil {
+		t.Fatal("expected RepairHistoricalData with canceled context to return an error")
+	}
+
+	var version int
+	if err := store.db.QueryRow(`PRAGMA user_version;`).Scan(&version); err != nil {
+		t.Fatalf("failed to query PRAGMA user_version: %v", err)
+	}
+	if version != 3 {
+		t.Fatalf("PRAGMA user_version = %d after failed repair, want 3 (must not bump to 4 on error)", version)
+	}
+}
+
+func TestSQLiteStore_RepairHistoricalData_PropagatesScanAndHelperErrors(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "repair_scan_err.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+	defer store.Close()
+
+	// Seed a zero-score match with empty players in replay_stats_json so repairZeroScoreMatches invokes loadReplayPlayersFromMatchPlayers.
+	if err := store.UpsertDiscoveredMatches(ctx, []*MatchRecord{{
+		MatchGUID:       "zero-score-helper-err",
+		Playlist:        11,
+		BlueScore:       0,
+		OrangeScore:     0,
+		DownloadStatus:  DownloadDownloaded,
+		ReplayStatsJSON: `{"match_guid":"zero-score-helper-err","players":[]}`,
+	}}); err != nil {
+		t.Fatalf("UpsertDiscoveredMatches: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE matches SET replay_stats_json = '{"match_guid":"zero-score-helper-err","players":[]}' WHERE match_guid = 'zero-score-helper-err';`); err != nil {
+		t.Fatalf("update replay_stats_json: %v", err)
+	}
+	// Corrupt a numeric column in match_players (SQLite dynamic typing allows storing text in INTEGER column)
+	// so rows.Scan inside loadReplayPlayersFromMatchPlayers fails deterministically.
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO match_players (match_guid, player_id, team_num, goals) VALUES ('zero-score-helper-err', 'Steam|p1|0', 'not-an-int', 1);`); err != nil {
+		t.Fatalf("insert corrupted match_player row: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `PRAGMA user_version = 3;`); err != nil {
+		t.Fatalf("reset user_version: %v", err)
+	}
+
+	if err := store.RepairHistoricalData(ctx); err == nil {
+		t.Fatal("expected RepairHistoricalData to fail when loadReplayPlayersFromMatchPlayers hits a scan error")
+	}
+
+	var version int
+	if err := store.db.QueryRow(`PRAGMA user_version;`).Scan(&version); err != nil {
+		t.Fatalf("query user_version: %v", err)
+	}
+	if version != 3 {
+		t.Fatalf("PRAGMA user_version = %d after scan error, want 3", version)
 	}
 }

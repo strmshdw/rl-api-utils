@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,7 +144,9 @@ func openSQLiteStore(dbPath, connStr string, isMemory, runStartupRepair bool) (*
 	}
 
 	if runStartupRepair {
-		_ = store.repairHistoricalMatchesAndOutcomes(ctx)
+		if err := store.repairHistoricalMatchesAndOutcomes(ctx); err != nil {
+			slog.Default().Warn("sqlite startup historical repair failed", "error", err)
+		}
 	}
 
 	return store, nil

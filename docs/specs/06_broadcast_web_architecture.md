@@ -38,31 +38,32 @@ Additional styling tokens:
 
 ## 2. Clean Context Architecture (Replacing 892-LOC Monolith)
 
-Decompose `DashboardContext.tsx` into 4 focused contexts (`< 250 LOC` each):
+Decompose dashboard state into 4 focused context modules (`< 250 LOC` each):
 1. `ThemeContext`: `themeStyle`, `colorMode`, `fontScale`, setters, CSS custom property injection.
 2. `NavigationContext`: History API sync (`/` & `/live`, `/session`, `/players`, `/players/:id`, `/history`, `/history/:guid`, `?mode=overlay`), active route state, popstate listener.
 3. `SSEContext`: Single `EventSource('/api/events')` connection with reconnect indicator, latest `match_update`, `match_ended`, `clock_updated`, `session_update`, `sync_progress`, plus `lastHeartbeat`.
-4. `DashboardStateContext`: Polls `/status`, holds pinned players, dismissed replay banner state, preview fixture toggle (dev-only), and composes the above cleanly.
+4. `DashboardContext`: Polls `/status`, holds pinned players, dismissed replay banner state, preview fixture toggle (dev-only), and composes `ThemeProvider`, `NavigationProvider`, and `SSEProvider` cleanly behind `DashboardProvider` / `useDashboard()`.
 
 ---
 
 ## 3. Feature Views, Shared Abstractions & Honest Telemetry
 
 ### 3.1 Eliminate Legacy Duplication & Fabricated Data
-- **Shared `<PlayerDossierView />`**: Encapsulates player header, playlist selector, date range selector, rank grid, H2H W/L split bar, Role Split Stats (`teammate` vs `opponent`), MMR sparkline, editable notes modal trigger, and match history rows. Both `<PlayerProfilePage />` (route `/players/:id`) and `<PlayerProfileDialog />` render `<PlayerDossierView />` inside their page vs modal frame — zero duplicate stat tables!
+- **Shared `<PlayerDossierView />`**: Encapsulates player header, threat badges (derived from live `CurrentMatchResponse` in production, or preview fixtures only in demo mode), playlist selector, date range selector, rank grid, H2H W/L split bar, Role Split Stats (`teammate` vs `opponent`), MMR sparkline, editable notes modal trigger, and match history rows. Both `<PlayerProfilePage />` (route `/players/:id`) and `<PlayerProfileDialog />` render `<PlayerDossierView />` inside their page vs modal frame — zero duplicate stat tables!
 - **Shared `useBallchasingSync()` Hook**: Single polling/trigger hook for `POST /api/sync/ballchasing` + `GET /api/sync/ballchasing/status` + SSE `sync_progress`, reused by both `HistoryView` and `SettingsPanel`.
 - **Zero Fabricated Metrics**:
   - Remove `synthesizeRoleStats` (`avg_score: 420` fake numbers when telemetry isn't synced yet — render explicit `"No synced role telemetry"` state instead!).
   - Remove `getDateRangeFactor` (`0.35 / 0.65 / 0.85` synthetic multipliers — always query real filtered data from `/api/players/{id}?playlist=...&date_range=...`!).
+  - Default missing match/session counts neutrally (`pending_count ?? 0`, `map_name: ''`, `'PENDING'`) instead of fabricating `'DFH Stadium'`, `'UPLOADED'`, or `5`.
 
 ### 3.2 Views & Components (`< 500 LOC` each)
 - **Live Game View** (`LiveGameView`, `Scorebug`, `LivePlayerCard`, `IdleStateView`, `ColumnConfigModal`): Live lobby cards with custom preset/column selection via `contracts.STAT_COLUMNS` + `contracts.PRESETS`, H2H record badges, ranks, disconnect indicators, live countdown/OT timer.
 - **Session View** (`SessionView`, `SessionKpis`, `MatchDetailModal`): KPIs, per-playlist MMR gain/loss pills, continuation banner (`Continue Previous Session` / `Dismiss`), chronological match list with expandable/modal box score (`<BoxScore />`).
-- **Players View** (`PlayersView`, `PlayerDossierView`, `PlayerNotesModal`, `GlobalSpotlightsPanel`): Search + sort + pinned players + global spotlights (`Nemesis`, `FavoriteTeammate`, `BestRivalry`, `MostPlayed`).
+- **Players View** (`PlayersView`, `PlayerDossierView`, `PlayerNotesModal`, `PlayersSpotlightGrid`): Search + sort + pinned players + global spotlights (`BestTeammate`, `MostFaced`, `ToughestRival`).
 - **History View** (`HistoryView`, `HistoricalMatchDetailModal`): Status/playlist/date-range/search filters, Ballchasing backfill controls, match detail drill-down, retry button for `FAILED` matches, match prune dialog.
 - **Layout & Overlay** (`TopBar`, `SettingsPanel`, `ReplayLimitBanner`, `OBSOverlayView`):
   - `?mode=overlay`: Chromakey/transparent minimal OBS scoreboard & MMR strip responding instantaneously to SSE events.
 
 ### 3.3 Dev Preview Tree-Shaking (`__ENABLE_PREVIEW__`)
-- `web/src/preview/sampleData.ts` contains optional rich preview fixtures for `vite build:dev`.
-- Import `preview/` exclusively inside `if (__ENABLE_PREVIEW__)` dynamic import (`import('../preview/sampleData')`) so Vite/Rollup tree-shakes 100% of sample fixture code out of `internal/web/dist/assets/*.js` during `npm run build` (`--mode production`).
+- `web/src/utils/sampleData.ts` gates all preview fixture literals (including `__RL_SYNC_DEV_PREVIEW_FIXTURE__`) behind the compile-time `__ENABLE_PREVIEW__` constant (`vite.config.ts`), exporting inert empty defaults whenever `__ENABLE_PREVIEW__` is `false`.
+- During `npm run build` (`vite build --mode production`), Rollup dead-code-eliminates 100% of preview fixture branches from `internal/web/dist/assets/*.js`, verified by `cmd/verify-gate` Pillar 2.

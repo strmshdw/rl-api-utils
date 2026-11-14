@@ -83,7 +83,7 @@ func NewDefaultRunner(stdout, stderr io.Writer) *Runner {
 			return psynet.NewClient(cfg)
 		},
 		NewDownloader: func(timeout time.Duration) psynet.ReplayDownloader {
-			return psynet.NewDownloader(psynet.WithTimeout(timeout))
+			return psynet.NewDownloader(psynet.WithTimeout(timeout), psynet.WithValidateReplay(true))
 		},
 		NewBallchasing: func(cfg ballchasing.ClientConfig) (ballchasing.ReplayUploader, error) {
 			return ballchasing.NewClient(cfg)

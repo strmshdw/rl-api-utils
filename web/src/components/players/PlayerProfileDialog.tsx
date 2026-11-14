@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { CurrentMatchResponse } from '../../types/api';
 import { Modal } from '../common/Modal';
 import { platformLabel } from '../../utils/broadcast';
 import { PlayerDossierView } from './PlayerDossierView';
@@ -12,6 +13,7 @@ interface PlayerProfileDialogProps {
   playerName?: string;
   onClose: () => void;
   localPlayerIds?: Set<string>;
+  liveMatch?: CurrentMatchResponse | null;
   onOpenFullProfile?: (playerId: string, playerName?: string) => void;
 }
 
@@ -22,6 +24,7 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
   playerName,
   onClose,
   localPlayerIds = NO_IDS,
+  liveMatch,
   onOpenFullProfile,
 }) => {
   const [historyStack, setHistoryStack] = useState<Array<{ id: string; name?: string }>>([]);
@@ -58,6 +61,7 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
   const dossier = usePlayerDossierData(activeId, activeName, localPlayerIds, {
     enabled: Boolean(activeId),
     pageSize: 10,
+    liveMatch,
   });
 
   if (!activeId) return null;
@@ -95,13 +99,31 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
     setHistoryStack((prev) => prev.slice(0, prev.length - 1));
   };
 
+  const kickerBadges = (
+    <>
+      <span
+        className={`px-2 py-0.5 t-bg-page bg-page t-border border border-line text-sm font-extrabold ${dossier.relTag.color}`}
+      >
+        {dossier.relTag.tag}
+      </span>
+      {dossier.threatBadges.map((b, idx) => (
+        <span
+          key={idx}
+          className={`px-2 py-0.5 text-sm font-extrabold uppercase tracking-wide ${b.classes}`}
+        >
+          {b.label}
+        </span>
+      ))}
+    </>
+  );
+
   return (
     <Modal
       isOpen
       onClose={onClose}
       kicker={
         historyStack.length > 1 ? (
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleBack}
@@ -114,23 +136,12 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
             <span className="text-muted text-sm">
               ({historyStack.map((h) => h.name || h.id).join(' → ')})
             </span>
+            {kickerBadges}
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <span>PLAYER PROFILE · {platformLabel(dossier.platform)}</span>
-            <span
-              className={`px-2 py-0.5 t-bg-page bg-page t-border border border-line text-sm font-extrabold ${dossier.relTag.color}`}
-            >
-              {dossier.relTag.tag}
-            </span>
-            {dossier.threatBadges.map((b, idx) => (
-              <span
-                key={idx}
-                className={`px-2 py-0.5 text-sm font-extrabold uppercase tracking-wide ${b.classes}`}
-              >
-                {b.label}
-              </span>
-            ))}
+            {kickerBadges}
           </div>
         )
       }
@@ -178,6 +189,7 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
         variant="dialog"
         localPlayerIds={localPlayerIds}
         dossier={dossier}
+        liveMatch={liveMatch}
         onSelectPlayer={handlePlayerClick}
       />
     </Modal>

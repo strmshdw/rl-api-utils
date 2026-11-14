@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { SessionMatchDetail, SessionResponse } from '../../types/api';
+import React, { useEffect, useMemo, useState } from 'react';
+import { CurrentMatchResponse, SessionMatchDetail, SessionResponse } from '../../types/api';
 import {
   chronological,
   formatAgo,
@@ -27,6 +27,7 @@ export { ContinueSessionBanner, type ContinueSessionBannerProps } from './Sessio
 interface SessionViewProps {
   session: SessionResponse | null;
   pastSessions?: SessionResponse[];
+  liveMatch?: CurrentMatchResponse | null;
   isLoading: boolean;
   error: string | null;
   onResetSession: () => void;
@@ -39,6 +40,7 @@ interface SessionViewProps {
 export const SessionView: React.FC<SessionViewProps> = ({
   session,
   pastSessions = [],
+  liveMatch,
   isLoading,
   error,
   onResetSession,
@@ -51,7 +53,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [playlistFilter, setPlaylistFilter] = useState<SessionPlaylistFilter>('all');
   const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
   const [inspectedSessionId, setInspectedSessionId] = useState<string | null>(null);
-  const [pendingCleared, setPendingCleared] = useState(false);
+  const [clearedPendingSnapshot, setClearedPendingSnapshot] = useState<{
+    sessionId: string | undefined;
+    count: number;
+  } | null>(null);
   const [localThreshold, setLocalThreshold] = useState<number>(session?.trigger_threshold ?? 15);
   const [localForceSync, setLocalForceSync] = useState<boolean>(
     session?.force_sync_on_trigger ?? false,
@@ -60,15 +65,48 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [profilePlayerName, setProfilePlayerName] = useState<string | undefined>(undefined);
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
 
+  useEffect(() => {
+    if (session?.trigger_threshold && session.trigger_threshold > 0) {
+      setLocalThreshold(session.trigger_threshold);
+    }
+  }, [session?.trigger_threshold]);
+
+  useEffect(() => {
+    if (typeof session?.force_sync_on_trigger === 'boolean') {
+      setLocalForceSync(session.force_sync_on_trigger);
+    }
+  }, [session?.force_sync_on_trigger]);
+
+  useEffect(() => {
+    if (
+      clearedPendingSnapshot !== null &&
+      (session?.session_id !== clearedPendingSnapshot.sessionId ||
+        (session?.pending_count ?? 0) !== clearedPendingSnapshot.count)
+    ) {
+      setClearedPendingSnapshot(null);
+    }
+  }, [clearedPendingSnapshot, session?.session_id, session?.pending_count]);
+
+  const markPendingClearedOptimistically = () => {
+    setClearedPendingSnapshot({
+      sessionId: session?.session_id,
+      count: session?.pending_count ?? 0,
+    });
+  };
+
   const { isSyncing, syncStatus, syncMessage, triggerSync } = useBallchasingSync({
     onSyncComplete: () => {
-      setPendingCleared(true);
+      markPendingClearedOptimistically();
       onRefreshSession?.();
     },
   });
 
   const maxHostedReplays = session?.max_hosted_replays || 20;
-  const pendingCount = pendingCleared ? 0 : (session?.pending_count ?? 5);
+  const isOptimisticallyCleared =
+    clearedPendingSnapshot !== null &&
+    session?.session_id === clearedPendingSnapshot.sessionId &&
+    (session?.pending_count ?? 0) === clearedPendingSnapshot.count;
+  const pendingCount = isOptimisticallyCleared ? 0 : (session?.pending_count ?? 0);
   const triggerThreshold = localThreshold > 0 ? localThreshold : (session?.trigger_threshold ?? 15);
 
   const inspectedSession = useMemo(() => {
@@ -104,7 +142,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const handleSyncSessionNow = async () => {
     if (isSyncing) return;
     await triggerSync({ includeReplaySync: true });
-    setPendingCleared(true);
+    markPendingClearedOptimistically();
     onRefreshSession?.();
   };
 
@@ -354,6 +392,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           playerName={profilePlayerName}
           onClose={() => setProfilePlayerId(null)}
           localPlayerIds={localPlayerIds}
+          liveMatch={liveMatch}
         />
       )}
     </div>

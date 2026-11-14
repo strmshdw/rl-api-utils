@@ -37,6 +37,10 @@ type Tracker struct {
 	triggerFn SyncTriggerFunc
 	cfg       TrackerConfig
 	logger    *slog.Logger
+	baseCtx   context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	closed    bool
 
 	pendingMatches  map[string]time.Time
 	lastToastTime   time.Time
@@ -83,10 +87,13 @@ func NewTracker(store MatchChecker, cfg TrackerConfig, opts ...Option) (*Tracker
 		cfg.ToastCooldown = 2 * time.Minute
 	}
 
+	baseCtx, cancel := context.WithCancel(context.Background())
 	t := &Tracker{
 		store:          store,
 		cfg:            cfg,
 		logger:         slog.Default(),
+		baseCtx:        baseCtx,
+		cancel:         cancel,
 		pendingMatches: make(map[string]time.Time),
 	}
 
@@ -286,11 +293,39 @@ func isMatchPersisted(match *storage.MatchRecord) bool {
 		match.UploadStatus == storage.UploadDuplicate
 }
 
+// Close cancels in-flight asynchronous sync dispatches and waits for them to exit.
+func (t *Tracker) Close() {
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		t.wg.Wait()
+		return
+	}
+	t.closed = true
+	cancel := t.cancel
+	t.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	t.wg.Wait()
+}
+
 func (t *Tracker) dispatchAsyncSync(triggerFn SyncTriggerFunc, reason, errLogMsg string) {
+	t.mu.Lock()
+	if t.closed || t.baseCtx == nil || t.baseCtx.Err() != nil {
+		t.mu.Unlock()
+		return
+	}
+	t.wg.Add(1)
+	baseCtx := t.baseCtx
+	t.mu.Unlock()
+
 	go func() {
-		syncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer t.wg.Done()
+		syncCtx, cancel := context.WithTimeout(baseCtx, 2*time.Minute)
 		defer cancel()
-		if syncErr := triggerFn(syncCtx, reason); syncErr != nil {
+		if syncErr := triggerFn(syncCtx, reason); syncErr != nil && !errors.Is(syncErr, context.Canceled) {
 			t.logger.Error(errLogMsg, slog.Any("error", syncErr))
 		}
 	}()

@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -159,11 +160,13 @@ func TestAdversarial_StalledSubscribersNonBlocking(t *testing.T) {
 
 	// Register 10 fast subscribers: drain continuously
 	fastCancels := make([]func(), fastCount)
+	fastChans := make([]<-chan SessionEvent, fastCount)
 	fastReceived := make([]atomic.Int64, fastCount)
 	var wgFast sync.WaitGroup
 
 	for i := 0; i < fastCount; i++ {
 		ch, cancel := b.Subscribe()
+		fastChans[i] = ch
 		fastCancels[i] = cancel
 		wgFast.Add(1)
 		go func(idx int, c <-chan SessionEvent) {
@@ -186,9 +189,9 @@ func TestAdversarial_StalledSubscribersNonBlocking(t *testing.T) {
 		t.Fatalf("expected %d subscribers, got %d", stalledCount+fastCount, count)
 	}
 
-	// Broadcast 1,000 events and record latencies
+	// Broadcast 1,000 events and record pure Broadcast() latencies
 	var maxBroadcastDuration time.Duration
-	startTotal := time.Now()
+	var totalDuration time.Duration
 
 	for i := 0; i < totalEvents; i++ {
 		t0 := time.Now()
@@ -197,15 +200,20 @@ func TestAdversarial_StalledSubscribersNonBlocking(t *testing.T) {
 			Data:  i,
 		})
 		d := time.Since(t0)
+		totalDuration += d
 		if d > maxBroadcastDuration {
 			maxBroadcastDuration = d
 		}
-		// Yield execution briefly every 20 events to allow fast subscriber goroutines to drain buffers under heavy CPU load
-		if i%20 == 0 {
-			time.Sleep(150 * time.Microsecond)
+		// Ensure fast subscriber goroutines get CPU slices before overflowing the 64-slot ring under heavy parallel test load
+		if i%16 == 15 {
+			drainDeadline := time.Now().Add(100 * time.Millisecond)
+			for _, fch := range fastChans {
+				for len(fch) > defaultSubscriberBufferSize/2 && time.Now().Before(drainDeadline) {
+					runtime.Gosched()
+				}
+			}
 		}
 	}
-	totalDuration := time.Since(startTotal)
 	avgDuration := totalDuration / totalEvents
 
 	t.Logf("Broadcast 1,000 events to %d subscribers (100 stalled + 10 fast): total=%v, avg/event=%v, max single broadcast=%v",
@@ -230,8 +238,13 @@ func TestAdversarial_StalledSubscribersNonBlocking(t *testing.T) {
 		}
 	}
 
-	// Allow fast subscribers an adequate window to complete draining under heavy CI load
-	time.Sleep(150 * time.Millisecond)
+	// Wait for fast subscribers to finish draining buffered items under heavy CI load
+	drainEnd := time.Now().Add(500 * time.Millisecond)
+	for _, fch := range fastChans {
+		for len(fch) > 0 && time.Now().Before(drainEnd) {
+			runtime.Gosched()
+		}
+	}
 
 	// Close fast subscribers and wait
 	for _, cancel := range fastCancels {

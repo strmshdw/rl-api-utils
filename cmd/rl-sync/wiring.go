@@ -19,12 +19,15 @@ func (r *Runner) initPrimaryAuth(ctx context.Context, cfg *config.Config, store 
 	prompter := auth.NewTerminalPrompter(r.Stdin, r.Stdout)
 	steamGen := auth.NewNodeSteamTicketGenerator("")
 
-	r.AuthOptions = append(r.AuthOptions,
+	prevOpts := r.AuthOptions
+	r.AuthOptions = append(append([]auth.Option(nil), prevOpts...),
 		auth.WithAccountRole(auth.RolePrimary),
 		auth.WithCodePrompter(prompter),
 		auth.WithSteamGenerator(steamGen),
 		auth.WithConfigTokenSaver(tokenSaver),
+		auth.WithLogger(logger),
 	)
+	defer func() { r.AuthOptions = prevOpts }()
 
 	authProvider, err := r.NewAuth(cfg.Auth, store)
 	if err != nil {
@@ -140,6 +143,7 @@ func (r *Runner) initPollingRankClient(ctx context.Context, cfg *config.Config, 
 		auth.WithCodePrompter(prompter),
 		auth.WithSteamGenerator(steamGen),
 		auth.WithConfigTokenSaver(tokenSaver),
+		auth.WithLogger(logger),
 	)
 	if authErr != nil {
 		logger.Warn("failed to initialize polling auth provider; falling back to NoOpRankClient",

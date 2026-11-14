@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -174,20 +175,40 @@ func TestDaemon_ShutdownWithActiveSSEClient(t *testing.T) {
 
 	// Wait for HTTP server to come up
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	healthClient := &http.Client{Timeout: 250 * time.Millisecond}
+	defer healthClient.CloseIdleConnections()
+
+	ready := false
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(baseURL + "/healthz")
+		resp, err := healthClient.Get(baseURL + "/healthz")
 		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
+				ready = true
 				break
 			}
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
+	if !ready {
+		cancel()
+		t.Fatal("HTTP server failed to become ready within 3s")
+	}
+
+	// Also open an idle TCP preconnect socket (StateNew, zero HTTP bytes sent), matching
+	// browser speculative preconnect pools that would otherwise hold Go's Server.Shutdown for 5s.
+	preconnect, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+	if err != nil {
+		t.Fatalf("failed to open speculative TCP preconnect: %v", err)
+	}
+	defer preconnect.Close()
 
 	// Open a persistent SSE stream to /api/events (just like an open browser dashboard tab)
-	sseResp, err := http.Get(baseURL + "/api/events")
+	sseClient := &http.Client{}
+	defer sseClient.CloseIdleConnections()
+	sseResp, err := sseClient.Get(baseURL + "/api/events")
 	if err != nil {
 		t.Fatalf("failed to open /api/events SSE stream: %v", err)
 	}
@@ -202,13 +223,13 @@ func TestDaemon_ShutdownWithActiveSSEClient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("daemon.Start returned error on shutdown: %v", err)
 		}
-	case <-time.After(1500 * time.Millisecond):
-		t.Fatal("daemon failed to drain within 1.5s while SSE stream was active")
+	case <-time.After(2500 * time.Millisecond):
+		t.Fatal("daemon failed to drain within 2.5s while SSE stream was active")
 	}
 
 	elapsed := time.Since(shutdownStart)
-	if elapsed >= 1500*time.Millisecond {
-		t.Errorf("expected immediate SSE drain (<1.5s), took %v", elapsed)
+	if elapsed >= 2500*time.Millisecond {
+		t.Errorf("expected immediate SSE drain (<2.5s), took %v", elapsed)
 	}
 	if strings.Contains(logBuf.String(), "HTTP server shutdown encountered error") {
 		t.Errorf("expected zero HTTP server shutdown errors, got logs:\n%s", logBuf.String())

@@ -68,11 +68,17 @@ func (c *Config) EffectiveSessionContinueWindow() time.Duration {
 	if c == nil {
 		return DefaultSessionContinueWindow
 	}
-	if c.Session.ContinueWindow > 0 {
+	if c.Session.continueWindowSet {
+		return c.Session.ContinueWindow.Duration()
+	}
+	if c.Session.ContinueWindow > 0 && c.Session.ContinueWindow != Duration(DefaultSessionContinueWindow) {
 		return c.Session.ContinueWindow.Duration()
 	}
 	if c.PlayerTracking.SessionContinueWindow > 0 {
 		return c.PlayerTracking.SessionContinueWindow.Duration()
+	}
+	if c.Session.ContinueWindow > 0 {
+		return c.Session.ContinueWindow.Duration()
 	}
 	// If Config was constructed as a zero literal (&config.Config{}) in tests rather than NewDefaultConfig(),
 	// fall back to DefaultSessionContinueWindow unless other top-level defaults are populated.

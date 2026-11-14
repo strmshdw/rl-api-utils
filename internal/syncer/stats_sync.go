@@ -215,7 +215,9 @@ func (s *Syncer) syncBallchasingReplayDetail(ctx context.Context, matchGUID stri
 
 	// Zero-player Ballchasing responses must never overwrite existing stored match players.
 	if len(res.matchPlayers) > 0 {
-		_ = s.store.SaveMatchPlayers(ctx, matchGUID, res.matchPlayers)
+		if err := s.store.SaveMatchPlayers(ctx, matchGUID, res.matchPlayers); err != nil {
+			return fmt.Errorf("saving match players: %w", err)
+		}
 	}
 
 	recordOutcomesIfNonEmpty(ctx, s.store, s.logger, "ballchasing detail", matchGUID, res.playlistID, res.outcomes, res.hasDate, res.matchTime)

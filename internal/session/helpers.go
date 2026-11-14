@@ -28,8 +28,27 @@ func (s *SessionTracker) SetClock(nowFn func() time.Time) {
 	s.mu.Unlock()
 }
 
-func (s *SessionTracker) broadcastSummaryUpdate() *SessionResponse {
+// SetSummaryEnricher configures a callback applied to SessionResponse snapshots before
+// returning or broadcasting session updates.
+func (s *SessionTracker) SetSummaryEnricher(fn func(*SessionResponse) *SessionResponse) {
+	s.mu.Lock()
+	s.summaryEnricher = fn
+	s.mu.Unlock()
+}
+
+func (s *SessionTracker) enrichedSummary() *SessionResponse {
 	summary := s.GetSessionSummary()
+	s.mu.RLock()
+	enricher := s.summaryEnricher
+	s.mu.RUnlock()
+	if enricher != nil && summary != nil {
+		return enricher(summary)
+	}
+	return summary
+}
+
+func (s *SessionTracker) broadcastSummaryUpdate() *SessionResponse {
+	summary := s.enrichedSummary()
 	if s.broadcaster != nil {
 		s.broadcaster.Broadcast(SessionEvent{Event: EventSessionUpdate, Data: summary})
 	}

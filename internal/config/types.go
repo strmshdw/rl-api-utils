@@ -93,7 +93,38 @@ type Config struct {
 
 // SessionConfig configures play session tracking, persistence, and continuation.
 type SessionConfig struct {
-	ContinueWindow Duration `yaml:"continue_window" json:"continue_window"` // default: 2h (0 disables continuation)
+	ContinueWindow    Duration `yaml:"continue_window" json:"continue_window"` // default: 2h (0 disables continuation)
+	continueWindowSet bool
+}
+
+// UnmarshalYAML decodes SessionConfig while recording whether continue_window was explicitly provided.
+func (s *SessionConfig) UnmarshalYAML(value *yaml.Node) error {
+	var raw struct {
+		ContinueWindow *Duration `yaml:"continue_window"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.ContinueWindow != nil {
+		s.ContinueWindow = *raw.ContinueWindow
+		s.continueWindowSet = true
+	}
+	return nil
+}
+
+// UnmarshalJSON decodes SessionConfig while recording whether continue_window was explicitly provided.
+func (s *SessionConfig) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		ContinueWindow *Duration `json:"continue_window"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if raw.ContinueWindow != nil {
+		s.ContinueWindow = *raw.ContinueWindow
+		s.continueWindowSet = true
+	}
+	return nil
 }
 
 // WebConfig configures the embedded web dashboard and HTTP server.

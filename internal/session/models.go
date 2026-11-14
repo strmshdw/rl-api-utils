@@ -329,3 +329,11 @@ func WithClock(nowFn func() time.Time) Option {
 func WithNowFunc(nowFn func() time.Time) Option {
 	return WithClock(nowFn)
 }
+
+// WithSummaryEnricher configures a callback applied to SessionResponse snapshots before
+// returning or broadcasting session updates.
+func WithSummaryEnricher(fn func(*SessionResponse) *SessionResponse) Option {
+	return func(s *SessionTracker) {
+		s.summaryEnricher = fn
+	}
+}

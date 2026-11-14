@@ -39,23 +39,22 @@ Include every legacy `RL_SYNC_*` variable:
 ## 2. SQLite Storage Architecture (`internal/storage/`)
 
 ### 2.1 Decomposition Rules (Eliminating the 5,642-LOC Monolith)
-Replace monolithic `sqlite.go` + duplicated `jsonstore.go` with focused repositories sharing one serialized write/read DB handle:
-- `store.go` (< 300 LOC): `StateStore` (all 44 methods preserved), `MatchPruner`, model types, errors (`ErrMatchNotFound`, `ErrPlayerNotFound`, `ErrSessionNotFound`).
-- `db.go` (< 250 LOC): `SQLiteStore` struct, `modernc.org/sqlite` opener with pragmas (`MaxOpenConns(1)`, `WAL`, `busy_timeout=5000`, `synchronous=NORMAL`, `foreign_keys=ON`), `Close()`.
-- `migrations.go` (< 350 LOC): `schemaDDL` (exact 8 tables + 21 indexes), `v1 -> v4` column/index upgrades, idempotent rank-repair pass, local account deduplication.
-- `matches_repo.go` (< 500 LOC): match CRUD, `ResetSyncingToPending` (honoring `017db99` — NEVER reset `SYNCED` matches with 0 players), pending retries, `ListHistoricalMatches` (**batched** `WHERE match_guid IN (...)` player load — zero N+1!), replay stats upsert preserving existing `Players` when incoming count is 0 (`017db99`), `PruneMatches`.
-- `players_repo.go` (< 500 LOC): player upsert, matchup updates, atomic `RecordMatchResults`, local account resolution (`3744274` — exclude `LOWER(provider) LIKE '%_polling'`, count `is_local=1`), MMR history, `SearchPlayers` (batched subquery/CTE eliminating N+1), `GetPlayerDossier` + `ListPlayerMatches` (batched!).
-- `stats_repo.go` (< 400 LOC): `GetPlayerRoleStats` (grouped SQL + `@perf-isolation` accumulator parity tested against `tests/parity/split_stats_parity_test.go`), `GetGlobalSpotlights`.
-- `sessions_repo.go` (< 250 LOC): session CRUD storing `started_at`, `ended_at`, `last_match_at`, `updated_at` in Unix nanoseconds; auto-detect `<1e12` seconds / `<1e15` ms / ns on read.
-- `legacy_json_import.go` (< 250 LOC): If `NewStore(path)` receives `.json`, open/migrate `<path>.db` (or `<stem>.db`) and import existing JSON state once idempotently if DB is empty, maintaining 100% `NewStore(jsonPath)` backward compatibility without maintaining two separate 3,800-LOC storage engines!
+Replace monolithic `sqlite.go` + duplicated `jsonstore.go` with focused modules (`< 800 LOC` each) sharing one serialized write/read DB handle:
+- `types.go`, `helpers.go`, `player_identity.go`, `stats_extract.go`: shared storage models, helper conversions, Steam/Epic/console alias normalization (`3744274`), and replay stats extraction.
+- `sqlite_store.go`: `SQLiteStore` opener with `modernc.org/sqlite` pragmas (`MaxOpenConns(1)`, `WAL`, `busy_timeout=5000`, `synchronous=NORMAL`, `foreign_keys=ON`), startup historical repair trigger, and `Close()`.
+- `migrations.go` & `repair.go`: `schemaDDL` (exact 8 tables + 21 indexes), `v1 -> v4` upgrades, error-propagating idempotent rank/outcome repair passes (`PRAGMA user_version = 4` gated on full v4 success).
+- `repo_matches.go`, `repo_match_enrichment.go`, `repo_match_players.go`, `repo_match_stats.go`: match CRUD, `ResetSyncingToPending` (honoring `017db99`), batched `ListHistoricalMatches` (`WHERE match_guid IN (...)` — zero N+1), replay stats upsert, and `PruneMatches`.
+- `repo_players.go`, `repo_player_directory.go`, `spotlights.go`: player upsert, atomic `RecordMatchResults`, local account resolution (`3744274`), `GetPlayerDossier`, `ListPlayerMatches`, `SearchPlayers`, and `ComputeGlobalSpotlights` (`BestTeammate`, `MostFaced`, `ToughestRival`).
+- `repo_sessions.go`: session CRUD storing Unix nanosecond timestamps and auto-detecting seconds/ms/ns on read.
+- `json_store.go` & `json_snapshot.go`: JSON `StateStore` / snapshot persistence and migration compatibility.
 
 ### 2.2 Authoritative SQLite Schema (8 Tables, 21 Indexes)
-1. `matches`: `match_guid PK`, `match_time`, `game_mode`, `playlist_id`, `player_names`, `replay_url`, `local_path`, `ballchasing_id`, `ballchasing_url`, `status`, `error_message`, `retry_count`, `replay_stats_json`, `replay_stats_status`, `synced_at`, `created_at`, `updated_at`, `download_retry_count`, `upload_retry_count`, `stats_retry_count`.
-2. `auth_state`: `provider PK`, `epic_account_id`, `access_token`, `refresh_token`, `expires_at`, `display_name`, `account_id`, `updated_at`.
-3. `players`: `player_id PK`, `platform`, `account_id`, `name`, `ranks_json`, `last_seen_at`, `notes`, `updated_at`.
-4. `player_matchups`: `(player_id, playlist_id)` PK, `games_with`, `wins_with`, `losses_with`, `games_against`, `wins_against`, `losses_against`, `last_played_at`, `updated_at`.
-5. `processed_match_outcomes`: `match_guid PK`, `playlist_id`, `outcome`, `processed_at`.
-6. `match_players`: `(match_guid, player_id)` PK, `platform`, `player_name`, `team_num`, `is_local`, `score`, `goals`, `assists`, `saves`, `shots`, `demos`, `mvp`, `playlist_id`, `match_time`, `outcome`, `created_at`, `stats_json`.
-7. `mmr_history`: `id AUTOINCREMENT PK`, `player_id`, `playlist_id`, `match_guid`, `mmr`, `tier`, `division`, `recorded_at`, `UNIQUE(player_id, playlist_id, match_guid)`.
+1. `matches`: `match_guid PK`, `record_start_timestamp`, `map_name`, `playlist`, `replay_url`, `download_status`, `local_file_path`, `downloaded_at`, `upload_status`, `ballchasing_id`, `ballchasing_url`, `uploaded_at`, `retry_count`, `last_error`, `blue_score`, `orange_score`, `winner_team`, `replay_stats_json`, `synced_at`, `stats_sync_status`, `stats_retry_count`, `created_at`, `updated_at`.
+2. `auth_state`: `provider PK`, `refresh_token`, `account_id`, `display_name`, `updated_at`.
+3. `players`: `player_id PK`, `platform`, `player_name`, `player_name_lower`, `ranks_json`, `notes`, `tags`, `first_seen_at`, `last_seen_at`.
+4. `player_matchups`: `(player_id, playlist_id)` PK, `wins_as_teammate`, `losses_as_teammate`, `wins_as_opponent`, `losses_as_opponent`, `total_matches`, `last_played_at`.
+5. `processed_match_outcomes`: `match_guid PK`, `playlist_id`, `processed_at`.
+6. `match_players`: `(match_guid, player_id)` PK, `team_num`, `is_local`, `won`, `score`, `goals`, `assists`, `saves`, `shots`, `demos`, `car_name`, `stats_json`.
+7. `mmr_history`: `id AUTOINCREMENT PK`, `recorded_at`, `match_guid`, `playlist_id`, `mmr`, `mmr_change`, `tier`, `division`.
 8. `sessions`: `session_id PK`, `started_at`, `ended_at`, `last_match_at`, `updated_at`, `total_matches`, `total_wins`, `total_losses`, `win_rate`, `playlists_json`, `matches_json`, `local_player_ids`, `dismissed`.
-Plus all 21 indexes on `(status)`, `(match_time DESC)`, `(replay_stats_status)`, `(ballchasing_id)`, `players(name COLLATE NOCASE)`, `match_players(player_id, match_time DESC)`, `mmr_history(player_id, playlist_id, recorded_at DESC)`, `sessions(updated_at DESC)`.
+Plus all 21 indexes across `matches` (`idx_matches_download_status`, `idx_matches_upload_status`, `idx_matches_record_ts`, `idx_matches_playlist`, `idx_matches_stats_sync`), `players` (`idx_players_last_seen`, `idx_players_last_seen_id`, `idx_players_name`, `idx_players_name_lower`, `idx_players_platform`), `player_matchups` (`idx_player_matchups_player`), `processed_match_outcomes` (`idx_processed_matches_ts`), `match_players` (`idx_match_players_player`, `idx_match_players_player_won`, `idx_match_players_local_team`, `idx_match_players_local_player`), `mmr_history` (`idx_mmr_history_playlist`, `idx_mmr_history_recorded`, `idx_mmr_history_match`), and `sessions` (`idx_sessions_started_at`, `idx_sessions_last_match_at`).

@@ -148,6 +148,7 @@ const DashboardShell: React.FC = () => {
               <SessionView
                 session={session}
                 pastSessions={pastSessions}
+                liveMatch={match}
                 isLoading={sessionLoading}
                 error={sessionError}
                 onResetSession={resetSession}
@@ -160,12 +161,14 @@ const DashboardShell: React.FC = () => {
             {activeTab === 'history' && (
               <HistoryView
                 localPlayerIds={localPlayerIds}
+                liveMatch={match}
                 onOpenFullProfile={handleOpenFullProfile}
               />
             )}
             {activeTab === 'players' && (
               <PlayersView
                 localPlayerIds={localPlayerIds}
+                liveMatch={match}
                 initialInspectedPlayer={fullPagePlayer}
                 inspectedPlayer={fullPagePlayer}
                 onInspectPlayerChange={(player) => {
@@ -187,6 +190,7 @@ const DashboardShell: React.FC = () => {
           playerName={quickModalPlayer.name}
           onClose={handleCloseQuickPlayer}
           localPlayerIds={localPlayerIds}
+          liveMatch={match}
           onOpenFullProfile={handleOpenFullProfile}
         />
       )}

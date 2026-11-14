@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HistoricalMatchRecord } from '../../types/api';
+import { CurrentMatchResponse, HistoricalMatchRecord } from '../../types/api';
 import { COLUMN_HEADER, PANEL_LABEL, SectionLabel } from '../common/ui';
 import { Sparkline } from '../common/Sparkline';
 import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
@@ -16,6 +16,7 @@ interface PlayerDossierViewProps {
   variant?: 'dialog' | 'page';
   localPlayerIds?: Set<string>;
   dossier?: PlayerDossierDataState;
+  liveMatch?: CurrentMatchResponse | null;
   onSelectPlayer?: (playerId: string, playerName?: string) => void;
 }
 
@@ -28,6 +29,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
   variant = 'page',
   localPlayerIds = NO_IDS,
   dossier: externalDossier,
+  liveMatch,
   onSelectPlayer = () => {},
 }) => {
   const {
@@ -41,6 +43,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
   const internalDossier = usePlayerDossierData(playerId, playerName, localPlayerIds, {
     enabled: !externalDossier,
     pageSize: variant === 'dialog' ? 10 : 20,
+    liveMatch,
   });
   const d = externalDossier ?? internalDossier;
 

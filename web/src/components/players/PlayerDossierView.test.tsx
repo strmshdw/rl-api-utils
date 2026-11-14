@@ -3,9 +3,12 @@ import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { DashboardProvider, useDashboard } from '../../context/DashboardContext';
+import type { CurrentMatchResponse, SessionMatchDetail } from '../../types/api';
 import { emptyRoleStats } from '../../utils/roleStats';
 import { cleanup, flush, mount } from '../../test/dom';
+import { sessionMatchToHistoricalRecord } from '../historical/historyData';
 import { PlayerDossierView } from './PlayerDossierView';
+import { PlayerProfileDialog } from './PlayerProfileDialog';
 
 const BASE_PROFILE = {
   player_id: 'Steam|TestPilot|0',
@@ -202,5 +205,130 @@ describe('PlayerDossierView', () => {
 
     expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0?') && u.includes('playlist=11') && u.includes('from='))).toBe(true);
     expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0/matches?') && u.includes('playlist=11') && u.includes('from='))).toBe(true);
+  });
+
+  it('computes live threat badges from liveMatch prop in non-demo mode and hides mock badges when null', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/matches')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ matches: [], total: 0, limit: 10, offset: 0 }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ...BASE_PROFILE,
+            with_you_stats: emptyRoleStats(5, 4, 1),
+            against_you_stats: emptyRoleStats(4, 2, 2),
+          }),
+        } as Response;
+      }),
+    );
+
+    const liveMatch: CurrentMatchResponse = {
+      active_match: true,
+      match_ended: false,
+      match_guid: 'live-match-1',
+      playlist_id: 11,
+      playlist_name: 'Ranked Doubles',
+      teammates: [],
+      local_player: {
+        player_id: 'Epic|Me|0',
+        platform: 'Epic',
+        name: 'Me',
+        team_num: 0,
+        is_local: true,
+        is_bot: false,
+        stats: { score: 100, goals: 1, assists: 0, saves: 0, shots: 2, demos: 0 },
+        current_rank: {
+          playlist_id: 11,
+          playlist_name: 'Ranked Doubles',
+          tier: 15,
+          division: 0,
+          rank_name: 'Diamond III',
+          mmr: 1000,
+          matches_played: 10,
+        },
+      },
+      opponents: [
+        {
+          player_id: 'Steam|TestPilot|0',
+          platform: 'Steam',
+          name: 'TestPilot',
+          team_num: 1,
+          is_local: false,
+          is_bot: false,
+          stats: { score: 200, goals: 2, assists: 0, saves: 1, shots: 4, demos: 0 },
+          current_rank: {
+            playlist_id: 11,
+            playlist_name: 'Ranked Doubles',
+            tier: 18,
+            division: 2,
+            rank_name: 'Champion III',
+            mmr: 1475,
+            matches_played: 120,
+          },
+        },
+      ],
+      updated_at: '2026-10-15T18:00:00Z',
+    };
+
+    await mount(
+      <DashboardProvider>
+        <PlayerProfileDialog
+          playerId="Steam|TestPilot|0"
+          playerName="TestPilot"
+          onClose={() => {}}
+          liveMatch={liveMatch}
+        />
+      </DashboardProvider>,
+    );
+    await flush(10);
+
+    expect(document.body.textContent).toContain('HIGHER MMR (+475 VS YOU)');
+
+    cleanup();
+    await mount(
+      <DashboardProvider>
+        <PlayerProfileDialog
+          playerId="Steam|TestPilot|0"
+          playerName="TestPilot"
+          onClose={() => {}}
+          liveMatch={null}
+        />
+      </DashboardProvider>,
+    );
+    await flush(10);
+
+    expect(document.body.textContent).not.toContain('HIGHER MMR');
+  });
+
+  it('uses neutral PENDING defaults and empty map_name when converting unsampled session match', () => {
+    const match: SessionMatchDetail = {
+      match_guid: 'unsampled-guid-001',
+      playlist_id: 11,
+      playlist_name: 'Ranked Doubles',
+      started_at: '2026-10-15T17:50:00Z',
+      ended_at: '2026-10-15T18:00:00Z',
+      duration_seconds: 310,
+      result: 'victory',
+      blue_score: 3,
+      orange_score: 1,
+      starting_mmr: 1400,
+      ending_mmr: 1409,
+      mmr_change: 9,
+      players: [],
+    };
+    const rec = sessionMatchToHistoricalRecord(match);
+    expect(rec.map_name).toBe('');
+    expect(rec.download_status).toBe('PENDING');
+    expect(rec.upload_status).toBe('PENDING');
+    expect(rec.stats?.map_name).toBe('');
   });
 });

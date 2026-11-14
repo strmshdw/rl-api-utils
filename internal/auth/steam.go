@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ type SteamAuthProvider struct {
 	accountRole AccountRole
 	generator   SteamTicketGenerator
 	tokenSaver  ConfigTokenSaver
+	logger      *slog.Logger
 
 	refreshMu     sync.Mutex
 	mu            sync.RWMutex
@@ -58,6 +60,7 @@ func NewSteamProvider(cfg config.SteamConfig, store storage.StateStore, opts ...
 		accountRole:   role,
 		generator:     options.steamGen,
 		tokenSaver:    options.tokenSaver,
+		logger:        options.logger,
 		loginKey:      strings.TrimSpace(cfg.LoginKey),
 		sessionTicket: strings.TrimSpace(cfg.SessionTicket),
 		steamID64:     strings.TrimSpace(cfg.SteamID64),
@@ -351,7 +354,9 @@ func (p *SteamAuthProvider) generateTicketLocked(
 	p.mu.Unlock()
 
 	if p.tokenSaver != nil {
-		_ = p.tokenSaver(BuildSteamTokenUpdate(p.accountRole, snap.ticket, snap.steamID, snap.loginKey))
+		if err := p.tokenSaver(BuildSteamTokenUpdate(p.accountRole, snap.ticket, snap.steamID, snap.loginKey)); err != nil {
+			logPersistError(p.logger, "steam config token save failed", err)
+		}
 	}
 	return nil
 }
@@ -383,7 +388,9 @@ func (p *SteamAuthProvider) commitSessionLocked(
 	}
 
 	if p.store != nil && snap.ticket != "" && snap.steamID != "" {
-		_ = p.store.SaveAuthState(ctx, storeKey, snap.ticket, snap.steamID, snap.accountName)
+		if err := p.store.SaveAuthState(ctx, storeKey, snap.ticket, snap.steamID, snap.accountName); err != nil {
+			logPersistError(p.logger, "steam auth state persistence failed", err)
+		}
 	}
 
 	p.mu.Lock()

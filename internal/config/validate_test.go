@@ -384,6 +384,16 @@ func TestConfig_DuplicateCredentials_Error67Prevention(t *testing.T) {
 			},
 			expectErr: false,
 		},
+		{
+			name: "dry_run_allows_empty_ballchasing_api_key",
+			modify: func(c *config.Config) {
+				c.Auth.Provider = "epic"
+				c.Auth.Epic.RefreshToken = "valid-token"
+				c.Sync.DryRun = true
+				c.Ballchasing.APIKey = ""
+			},
+			expectErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -407,5 +417,55 @@ func TestConfig_DuplicateCredentials_Error67Prevention(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConfig_SessionContinueWindow_ExplicitZeroAndDefaultOverrideLegacyFallback(t *testing.T) {
+	dir := t.TempDir()
+
+	zeroCfgPath := dir + "/zero_continue.yaml"
+	zeroYAML := `auth:
+  provider: epic
+  epic:
+    refresh_token: valid-token
+ballchasing:
+  api_key: valid-key
+player_tracking:
+  session_continue_window: 3h
+session:
+  continue_window: 0s
+`
+	if err := config.AtomicWriteFile(zeroCfgPath, []byte(zeroYAML), 0600); err != nil {
+		t.Fatalf("write zero_continue.yaml: %v", err)
+	}
+	zeroCfg, err := config.Load(config.CLIFlags{ConfigPath: zeroCfgPath})
+	if err != nil {
+		t.Fatalf("Load zero_continue.yaml: %v", err)
+	}
+	if got := zeroCfg.EffectiveSessionContinueWindow(); got != 0 {
+		t.Fatalf("expected explicit session.continue_window=0s to disable continuation (0), got %v", got)
+	}
+
+	explicitDefaultPath := dir + "/explicit_2h.yaml"
+	explicit2hYAML := `auth:
+  provider: epic
+  epic:
+    refresh_token: valid-token
+ballchasing:
+  api_key: valid-key
+player_tracking:
+  session_continue_window: 4h
+session:
+  continue_window: 2h
+`
+	if err := config.AtomicWriteFile(explicitDefaultPath, []byte(explicit2hYAML), 0600); err != nil {
+		t.Fatalf("write explicit_2h.yaml: %v", err)
+	}
+	explicitCfg, err := config.Load(config.CLIFlags{ConfigPath: explicitDefaultPath})
+	if err != nil {
+		t.Fatalf("Load explicit_2h.yaml: %v", err)
+	}
+	if got := explicitCfg.EffectiveSessionContinueWindow(); got != config.DefaultSessionContinueWindow {
+		t.Fatalf("expected explicit session.continue_window=2h to win over legacy 4h, got %v", got)
 	}
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { CurrentMatchResponse } from '../../types/api';
 import { platformLabel } from '../../utils/broadcast';
 import { PlayerDossierView } from './PlayerDossierView';
 import { PlayerProfileDialog } from './PlayerProfileDialog';
@@ -9,6 +10,7 @@ interface PlayerProfilePageProps {
   playerName?: string;
   onBack: () => void;
   localPlayerIds?: Set<string>;
+  liveMatch?: CurrentMatchResponse | null;
   onOpenFullProfile?: (playerId: string, playerName?: string) => void;
 }
 
@@ -19,6 +21,7 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
   playerName,
   onBack,
   localPlayerIds = NO_IDS,
+  liveMatch,
   onOpenFullProfile,
 }) => {
   const [copied, setCopied] = useState(false);
@@ -34,6 +37,7 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
   const dossier = usePlayerDossierData(playerId, playerName, localPlayerIds, {
     enabled: Boolean(playerId),
     pageSize: 20,
+    liveMatch,
   });
 
   const copyId = () => {
@@ -68,6 +72,14 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
               >
                 {dossier.relTag.tag}
               </span>
+              {dossier.threatBadges.map((b, idx) => (
+                <span
+                  key={idx}
+                  className={`px-2 py-0.5 text-sm font-extrabold uppercase tracking-wide ${b.classes}`}
+                >
+                  {b.label}
+                </span>
+              ))}
               <button
                 type="button"
                 onClick={copyId}
@@ -99,6 +111,7 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
         variant="page"
         localPlayerIds={localPlayerIds}
         dossier={dossier}
+        liveMatch={liveMatch}
         onSelectPlayer={(pId, pName) => setQuickModalPlayer({ id: pId, name: pName })}
       />
 
@@ -108,6 +121,7 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
           playerName={quickModalPlayer.name}
           onClose={() => setQuickModalPlayer(null)}
           localPlayerIds={localPlayerIds}
+          liveMatch={liveMatch}
           onOpenFullProfile={onOpenFullProfile}
         />
       )}

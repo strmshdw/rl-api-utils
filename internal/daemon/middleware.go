@@ -44,9 +44,13 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any, allowEmpty 
 }
 
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	payload, err := json.Marshal(map[string]string{"error": msg})
+	if err != nil {
+		payload = []byte(`{"error":"internal server error"}`)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	_, _ = w.Write(append(payload, '\n'))
 }
 
 func isLoopbackHost(host string) bool {
@@ -124,7 +128,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Origin, Accept")
 
 		if r.Method == http.MethodOptions {

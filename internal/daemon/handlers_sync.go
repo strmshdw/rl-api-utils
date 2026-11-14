@@ -2,9 +2,7 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -24,21 +22,17 @@ func (d *Daemon) handleSync(ctx context.Context) http.HandlerFunc {
 		}
 		d.logger.Info("received manual trigger request via local HTTP endpoint", slog.String("remote", r.RemoteAddr))
 		if err := d.TriggerSync(ctx, "manual_http_request"); err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"error":%q}`, err.Error())))
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"sync_triggered"}`))
+		d.writeJSONResponse(w, r, http.StatusOK, map[string]string{
+			"status": "sync_triggered",
+		}, "error encoding sync trigger response")
 	}
 }
 
 // handleTriggerBallchasingSync handles POST /api/sync/ballchasing.
 func (d *Daemon) handleTriggerBallchasingSync(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	if !isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
@@ -49,30 +43,49 @@ func (d *Daemon) handleTriggerBallchasingSync(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	d.mu.Lock()
+	if d.historySyncRunning {
+		d.mu.Unlock()
+		d.writeJSONResponse(w, r, http.StatusConflict, map[string]any{
+			"status":   "in_progress",
+			"message":  "Ballchasing historical sync is already running",
+			"progress": d.historySyncer.Progress(),
+		}, "error encoding sync conflict response")
+		return
+	}
 	prog := d.historySyncer.Progress()
 	if prog.Running {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		d.mu.Unlock()
+		d.writeJSONResponse(w, r, http.StatusConflict, map[string]any{
 			"status":   "in_progress",
 			"message":  "Ballchasing historical sync is already running",
 			"progress": prog,
-		})
+		}, "error encoding sync conflict response")
 		return
 	}
-
-	syncCtx := d.daemonContext()
+	d.historySyncRunning = true
+	syncCtx := d.ctx
+	if syncCtx == nil {
+		syncCtx = context.Background()
+	}
 	d.wg.Add(1)
+	d.mu.Unlock()
+
 	go d.runBackgroundHistorySync(syncCtx)
 
-	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	d.writeJSONResponse(w, r, http.StatusAccepted, map[string]string{
 		"status":  "started",
 		"message": "Ballchasing historical sync started in background",
-	})
+	}, "error encoding sync started response")
 }
 
 func (d *Daemon) runBackgroundHistorySync(syncCtx context.Context) {
-	defer d.wg.Done()
+	defer func() {
+		d.mu.Lock()
+		d.historySyncRunning = false
+		d.mu.Unlock()
+		d.wg.Done()
+	}()
 	if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
 		d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
 			Event: session.EventSyncProgress,

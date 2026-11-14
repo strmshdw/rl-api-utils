@@ -53,6 +53,8 @@ type mockDownloader struct {
 	failForGUIDs map[string]error
 	calls        int
 	blockChan    chan struct{}
+	startedChan  chan struct{}
+	startedOnce  sync.Once
 }
 
 func newMockDownloader() *mockDownloader {
@@ -66,12 +68,16 @@ func (d *mockDownloader) DownloadReplay(ctx context.Context, matchGUID, replayUR
 	d.mu.Lock()
 	d.calls++
 	block := d.blockChan
+	started := d.startedChan
 	if err, ok := d.failForGUIDs[matchGUID]; ok {
 		d.mu.Unlock()
 		return "", err
 	}
 	d.mu.Unlock()
 
+	if started != nil {
+		d.startedOnce.Do(func() { close(started) })
+	}
 	if block != nil {
 		select {
 		case <-ctx.Done():
@@ -98,6 +104,8 @@ type mockUploader struct {
 	duplicates   map[string]bool
 	calls        int
 	blockChan    chan struct{}
+	startedChan  chan struct{}
+	startedOnce  sync.Once
 }
 
 func newMockUploader() *mockUploader {
@@ -112,6 +120,7 @@ func (u *mockUploader) UploadReplay(ctx context.Context, matchGUID, filePath str
 	u.mu.Lock()
 	u.calls++
 	block := u.blockChan
+	started := u.startedChan
 	if err, ok := u.failForGUIDs[matchGUID]; ok {
 		u.mu.Unlock()
 		return nil, err
@@ -119,6 +128,9 @@ func (u *mockUploader) UploadReplay(ctx context.Context, matchGUID, filePath str
 	isDup := u.duplicates[matchGUID]
 	u.mu.Unlock()
 
+	if started != nil {
+		u.startedOnce.Do(func() { close(started) })
+	}
 	if block != nil {
 		select {
 		case <-ctx.Done():
@@ -143,11 +155,13 @@ func (u *mockUploader) UploadReplay(ctx context.Context, matchGUID, filePath str
 }
 
 type mockStatsFetcher struct {
-	mu        sync.Mutex
-	replays   map[string]*ballchasing.ReplayItem
-	failForID map[string]error
-	calls     map[string]int
-	blockChan chan struct{}
+	mu          sync.Mutex
+	replays     map[string]*ballchasing.ReplayItem
+	failForID   map[string]error
+	calls       map[string]int
+	blockChan   chan struct{}
+	startedChan chan struct{}
+	startedOnce sync.Once
 }
 
 func newMockStatsFetcher() *mockStatsFetcher {
@@ -162,10 +176,14 @@ func (f *mockStatsFetcher) GetReplay(ctx context.Context, id string) (*ballchasi
 	f.mu.Lock()
 	f.calls[id]++
 	block := f.blockChan
+	started := f.startedChan
 	failErr, hasFail := f.failForID[id]
 	item, hasItem := f.replays[id]
 	f.mu.Unlock()
 
+	if started != nil {
+		f.startedOnce.Do(func() { close(started) })
+	}
 	if block != nil {
 		select {
 		case <-ctx.Done():

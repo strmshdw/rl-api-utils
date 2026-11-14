@@ -187,4 +187,70 @@ describe('SessionView', () => {
     await act(async () => continueBtn.click());
     expect(onContinue).toHaveBeenCalledWith('past-session-001');
   });
+
+  it('syncs server trigger config after initial null mount and unpins RL BUFFER when new matches arrive', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/sync/ballchasing')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ running: false, synced_matches: 7, total_matches: 7, last_error: '' }),
+          } as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({}) } as Response;
+      }),
+    );
+
+    const mounted = await mount(
+      <SessionView session={null} isLoading error={null} onResetSession={() => {}} />,
+    );
+
+    const loadedSession: SessionResponse = {
+      ...SAMPLE_SESSION_RESPONSE,
+      session_id: 'live-session-buffer',
+      pending_count: 7,
+      trigger_threshold: 12,
+      force_sync_on_trigger: true,
+    };
+    await mounted.rerender(
+      <SessionView session={loadedSession} isLoading={false} error={null} onResetSession={() => {}} />,
+    );
+
+    const bufferBar = mounted.container.querySelector('[data-testid="session-replay-buffer-bar"]')!;
+    const thresholdSelect = mounted.container.querySelector<HTMLSelectElement>('#session-threshold-select')!;
+    expect(thresholdSelect.value).toBe('12');
+    expect(bufferBar.textContent).toContain('AUTO-SYNC @12G: ON');
+    expect(bufferBar.textContent).toContain('RL BUFFER: 7/20 UNSYNCED');
+
+    // Trigger manual sync: optimistically clears to 0/20 while snapshot matches
+    const syncBtn = mounted.container.querySelector<HTMLButtonElement>('[data-testid="session-sync-btn"]')!;
+    await act(async () => {
+      syncBtn.click();
+    });
+    expect(bufferBar.textContent).toContain('RL BUFFER: 0/20 UNSYNCED');
+
+    // When new matches arrive and pending_count changes (even back to 7 later), RL BUFFER is never stuck at 0
+    await mounted.rerender(
+      <SessionView
+        session={{ ...loadedSession, pending_count: 2 }}
+        isLoading={false}
+        error={null}
+        onResetSession={() => {}}
+      />,
+    );
+    expect(bufferBar.textContent).toContain('RL BUFFER: 2/20 UNSYNCED');
+
+    await mounted.rerender(
+      <SessionView
+        session={{ ...loadedSession, pending_count: 7 }}
+        isLoading={false}
+        error={null}
+        onResetSession={() => {}}
+      />,
+    );
+    expect(bufferBar.textContent).toContain('RL BUFFER: 7/20 UNSYNCED');
+  });
 });

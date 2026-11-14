@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/dank/rl-api-utils/internal/session"
@@ -37,6 +38,9 @@ func (d *Daemon) startHTTPServer(ctx context.Context) {
 	banner := FormatStartupBanner(host, port, lanIP)
 	handler := d.Handler(ctx)
 
+	var connMu sync.Mutex
+	newConns := make(map[net.Conn]struct{})
+
 	httpSrv := &http.Server{
 		Addr:              httpAddr,
 		Handler:           handler,
@@ -45,18 +49,39 @@ func (d *Daemon) startHTTPServer(ctx context.Context) {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      0, // Disabled: required for persistent SSE connections
 		IdleTimeout:       60 * time.Second,
+		ConnState: func(c net.Conn, state http.ConnState) {
+			connMu.Lock()
+			if state == http.StateNew {
+				newConns[c] = struct{}{}
+			} else {
+				delete(newConns, c)
+			}
+			connMu.Unlock()
+		},
 	}
+	httpSrv.RegisterOnShutdown(func() {
+		if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
+			d.sessionTracker.Broadcaster().Close()
+		}
+		// Go's http.Server.Shutdown leaves StateNew sockets open for 5s (Issue 22682),
+		// which exceeds our 2s drain budget when browsers or probes hold preconnect sockets.
+		time.AfterFunc(50*time.Millisecond, func() {
+			connMu.Lock()
+			for c := range newConns {
+				_ = c.SetReadDeadline(time.Now())
+			}
+			connMu.Unlock()
+		})
+	})
 
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		// Check loopback availability on Windows to catch external port conflicts
-		probeLn, probeErr := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-		if probeErr != nil {
-			d.logger.Warn("local HTTP API server stopped with error", slog.Any("error", probeErr))
+		ln, listenErr := net.Listen("tcp", httpAddr)
+		if listenErr != nil {
+			d.logger.Warn("local HTTP API server stopped with error", slog.Any("error", listenErr))
 			return
 		}
-		_ = probeLn.Close()
 
 		d.logger.Info(banner,
 			slog.String("addr", httpAddr),
@@ -66,7 +91,7 @@ func (d *Daemon) startHTTPServer(ctx context.Context) {
 			slog.String("network_url", fmt.Sprintf("http://%s:%d", lanIP, port)),
 			slog.String("overlay_url", fmt.Sprintf("http://localhost:%d/?mode=overlay", port)),
 		)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			d.logger.Warn("local HTTP API server stopped with error", slog.Any("error", err))
 		}
 	}()
@@ -75,12 +100,6 @@ func (d *Daemon) startHTTPServer(ctx context.Context) {
 	go func() {
 		defer d.wg.Done()
 		<-ctx.Done()
-		if d.statsListener != nil {
-			d.statsListener.Stop()
-		}
-		if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-			d.sessionTracker.Broadcaster().Close()
-		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
@@ -88,6 +107,9 @@ func (d *Daemon) startHTTPServer(ctx context.Context) {
 				d.logger.Warn("HTTP server shutdown encountered error", slog.Any("error", err))
 			}
 			_ = httpSrv.Close()
+		}
+		if d.statsListener != nil {
+			d.statsListener.Stop()
 		}
 	}()
 }
@@ -106,6 +128,9 @@ func (d *Daemon) runEventLoop(ctx context.Context, pollInterval time.Duration) e
 		)
 		if d.statsListener != nil {
 			d.statsListener.Stop()
+		}
+		if d.statsTracker != nil {
+			d.statsTracker.Close()
 		}
 		if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
 			d.sessionTracker.Broadcaster().Close()
@@ -141,11 +166,7 @@ func (d *Daemon) runEventLoop(ctx context.Context, pollInterval time.Duration) e
 			if statsPollTicks >= 5 {
 				statsPollTicks = 0
 				if poller, ok := d.syncer.(StatsPoller); ok {
-					if err := d.executeStatsPoll(ctx, poller); err != nil {
-						if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
-							return drainAndStop()
-						}
-					}
+					d.startAsyncStatsPoll(ctx, poller)
 				}
 			}
 
@@ -187,23 +208,36 @@ func (d *Daemon) handleGameStatusTick() {
 	d.prevConnected = connected
 }
 
-func (d *Daemon) executeStatsPoll(ctx context.Context, poller StatsPoller) error {
-	d.mu.Lock()
-	if d.inFlight {
-		d.mu.Unlock()
-		return nil
+func (d *Daemon) startAsyncStatsPoll(ctx context.Context, poller StatsPoller) {
+	if ctx.Err() != nil {
+		return
 	}
-	d.inFlight = true
+	d.mu.Lock()
+	if d.inFlight || d.statsPollInFlight {
+		d.mu.Unlock()
+		return
+	}
+	d.statsPollInFlight = true
 	d.wg.Add(1)
 	d.mu.Unlock()
 
-	defer func() {
-		d.mu.Lock()
-		d.inFlight = false
-		d.wg.Done()
-		d.mu.Unlock()
+	go func() {
+		defer func() {
+			d.mu.Lock()
+			d.statsPollInFlight = false
+			d.wg.Done()
+			d.mu.Unlock()
+		}()
+		if err := d.runStatsPoll(ctx, poller); err != nil &&
+			!errors.Is(err, context.Canceled) &&
+			!errors.Is(err, context.DeadlineExceeded) &&
+			ctx.Err() == nil {
+			d.logger.Warn("background pending stats poll failed", slog.Any("error", err))
+		}
 	}()
+}
 
+func (d *Daemon) runStatsPoll(ctx context.Context, poller StatsPoller) error {
 	err := poller.PollAndSyncPendingStats(ctx)
 	if err == nil && d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
 		summary := d.enrichSessionTelemetry(ctx, d.sessionTracker.GetSessionSummary())

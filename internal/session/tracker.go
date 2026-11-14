@@ -46,6 +46,7 @@ type SessionTracker struct {
 	dismissedContinueIDs   map[string]bool
 	archivedMemorySessions map[string]*storage.SessionRecord
 	nowFunc                func() time.Time
+	summaryEnricher        func(*SessionResponse) *SessionResponse
 }
 
 // NewSessionTracker constructs a fresh SessionTracker.
@@ -289,7 +290,7 @@ func (s *SessionTracker) ConcludeMatch(match *playertrack.CurrentMatchResponse) 
 	}
 	s.saveRecordToStore(currentRec)
 
-	summary := s.GetSessionSummary()
+	summary := s.enrichedSummary()
 	if s.broadcaster != nil {
 		s.broadcaster.Broadcast(SessionEvent{Event: EventMatchEnded, Data: detailClone})
 		s.broadcaster.Broadcast(SessionEvent{Event: EventSessionUpdate, Data: summary})

@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -331,6 +332,72 @@ func TestM4_Adversarial_SSE_ActiveMatchSessionFallbackBug(t *testing.T) {
 
 	if !receivedMatchUpdate {
 		t.Errorf("expected initial SSE snapshot to contain match_update when playerTracker is idle and summary.ActiveMatch exists")
+	}
+}
+
+func TestM4_SSE_InitialAndConcludedSessionUpdatesAreEnriched(t *testing.T) {
+	d, st, _ := setupWebTestDaemon(t)
+	server := httptest.NewServer(d.Handler(context.Background()))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/events failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	readSessionEvent := func() session.SessionResponse {
+		for {
+			line, readErr := reader.ReadString('\n')
+			if readErr != nil {
+				t.Fatalf("SSE read failed before session_update: %v", readErr)
+			}
+			if strings.TrimSpace(line) != "event: session_update" {
+				continue
+			}
+			for {
+				dataLine, dErr := reader.ReadString('\n')
+				if dErr != nil {
+					t.Fatalf("SSE data read failed: %v", dErr)
+				}
+				dataLine = strings.TrimSpace(dataLine)
+				if strings.HasPrefix(dataLine, "data:") {
+					raw := strings.TrimSpace(strings.TrimPrefix(dataLine, "data:"))
+					var out session.SessionResponse
+					if uErr := json.Unmarshal([]byte(raw), &out); uErr != nil {
+						t.Fatalf("unmarshal session_update failed: %v", uErr)
+					}
+					return out
+				}
+			}
+		}
+	}
+
+	initSum := readSessionEvent()
+	if initSum.MaxHostedReplays != 20 || initSum.TriggerThreshold <= 0 {
+		t.Fatalf("expected enriched initial SSE session_update (max_hosted_replays=20, trigger_threshold>0), got %+v", initSum)
+	}
+
+	st.OnMatchConcluded(&playertrack.CurrentMatchResponse{
+		ActiveMatch:  true,
+		MatchEnded:   true,
+		MatchGUID:    "sse-enriched-conclude-1",
+		PlaylistID:   11,
+		PlaylistName: "Ranked Doubles (2v2)",
+		Result:       "victory",
+	})
+
+	nextSum := readSessionEvent()
+	if nextSum.TotalMatches != 1 || nextSum.MaxHostedReplays != 20 || nextSum.TriggerThreshold <= 0 {
+		t.Fatalf("expected enriched concluded SSE session_update, got %+v", nextSum)
 	}
 }
 

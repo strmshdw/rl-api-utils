@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dank/rl-api-utils/internal/auth"
 	"github.com/dank/rl-api-utils/internal/ballchasing"
@@ -260,5 +261,32 @@ func TestCLI_SyncBallchasingHistory_Flag(t *testing.T) {
 	}
 	if daemonStarted {
 		t.Error("expected daemon not to start when --sync-ballchasing-history flag is passed")
+	}
+}
+
+func TestCLI_NewDownloader_EnforcesUE3Validation_And_RunnerDoesNotMutateAuthOptions(t *testing.T) {
+	runner := createTestRunner(io.Discard, io.Discard)
+	// Restore production NewDownloader factory to test default UE3 validation wiring
+	prodRunner := NewDefaultRunner(io.Discard, io.Discard)
+	dl := prodRunner.NewDownloader(5 * time.Second)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("NOT_A_VALID_UE3_REPLAY"), 80))
+	}))
+	defer srv.Close()
+
+	if _, err := dl.DownloadReplay(context.Background(), "guid-ue3-check", srv.URL, t.TempDir()); err == nil {
+		t.Fatal("expected NewDownloader with WithValidateReplay(true) to reject non-UE3 payload")
+	}
+
+	runner.AuthOptions = []auth.Option{auth.WithEGSClient(nil)}
+	for i := 0; i < 2; i++ {
+		if code := runner.Run(context.Background(), []string{"--once"}); code != 0 {
+			t.Fatalf("run %d exited with %d", i, code)
+		}
+		if len(runner.AuthOptions) != 1 {
+			t.Fatalf("run %d mutated runner.AuthOptions len to %d, want 1", i, len(runner.AuthOptions))
+		}
 	}
 }
