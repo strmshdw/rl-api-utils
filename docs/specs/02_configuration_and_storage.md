@@ -10,29 +10,24 @@ Load order (lowest to highest priority):
 3. Environment variables (`RL_SYNC_*` — 58 variable checks across all sections)
 4. CLI flags (22 config flags + `-version`/`-v`/`-help`/`-h`)
 
-### 1.1 Exact Sections & Defaults (49 Fields)
-- `auth`: `provider` (`"epic"`), `epic_account_id`, `auth_code`, `refresh_token`, `access_token`, `token_expires_at`, `steam_username`, `steam_password`, `steam_guard_code`, `steam_login_key`, `steam_script_path` (`""`)
-- `psynet`: `environment` (`"prod"`), `request_timeout` (`30s`), `reconnect_delay` (`5s`), `max_retries` (`3`)
-- `ballchasing`: `api_token`, `visibility` (`"private"`), `upload_timeout` (`60s`), `rate_limit` (`500ms`), `enabled` (`true`)
-- `sync`: `poll_interval` (`5m`), `replay_dir` (`"replays"`), `db_path` (`"rl-sync.db"`), `max_concurrent_downloads` (`2`), `once` (`false`), `dry_run` (`false`), `sync_ballchasing_history` (`false`), `ballchasing_history_sync_interval` (`30m`)
-- `stats_api`: `enabled` (`true`), `address` (`"127.0.0.1:49124"`), `protocol` (`"websocket"`), `trigger_threshold` (`15`), `force_sync_on_trigger` (`false`), `enable_toast` (`true`)
-- `player_tracking`: `enabled` (`true`), `local_player_id`, `local_player_name`, `auto_fetch_ranks` (`true`), `rank_cache_ttl` (`15m`), `session_continue_window` (*Duration pointer*; default `2h`; explicit `0s` disables session continuation!)
-- `polling_auth`: `enabled` (`false`), `provider` (`"epic"`), `epic_account_id`, `auth_code`, `refresh_token`, `access_token`, `token_expires_at`, `steam_username`, `steam_password`, `steam_guard_code`, `steam_login_key`, `steam_script_path` (`""`)
-- `web`: `enabled` (`true`), `host` (`"127.0.0.1"`), `port` (`49125`)
-- `logging`: `level` (`"info"`), `format` (`"text"`)
+### 1.1 Exact Sections & Struct Layout
+- `auth` (`AuthConfig`): `provider` (`"epic"` | `"steam"`), `epic` (`refresh_token`, `auth_code`, `account_id`, `display_name`), `steam` (`username`, `password`, `session_ticket`, `steam_id_64`, `account_name`, `login_key`).
+- `polling_auth` (`PollingAuthConfig`): `enabled` (`false`), `provider` (`"epic"`), `epic` (`EpicConfig`), `steam` (`SteamConfig`).
+- `player_tracking` (`PlayerTrackingConfig`): `enabled` (`true`), `local_player_id`, `local_player_name`, `auto_fetch_ranks` (`true`), `session_continue_window` (optional Duration override).
+- `session` (`SessionConfig`): `continue_window` (`2h`, `0s` disables continuation).
+- `ballchasing` (`BallchasingConfig`): `api_key`, `visibility` (`"private"` | `"unlisted"` | `"public"`), `base_url` (`"https://ballchasing.com/api"`), `timeout` (`60s`), `max_retries` (`3`).
+- `sync` (`SyncConfig`): `poll_interval` (`5m`), `replay_dir` (`"./replays"`), `db_path` (`"./rl-sync.db"`), `keep_local_files` (`true`), `download_timeout` (`30s`), `replay_limit` (`200` default when `<= 0`), `dry_run` (`false`), `once` (`false`).
+- `stats_api` (`StatsAPIConfig`): `enabled` (`true`), `address` (`"127.0.0.1:49124"`), `protocol` (`"websocket"` | `"tcp"`), `trigger_threshold` (`15`), `force_sync_on_trigger` (`false`), `enable_toast` (`true`), `http_trigger_port` (`49125`), `auto_sync_on_exit` (`true`).
+- `web` (`WebConfig`): `enabled` (`true`), `host` (`"127.0.0.1"`), `port` (`49125`).
+- `logging` (`LoggingConfig`): `level` (`"info"`), `format` (`"text"` | `"json"`).
 
 ### 1.2 Environment Overrides (Preserved 100%)
-Include every legacy `RL_SYNC_*` name and alias:
-- `RL_SYNC_CONFIG`
-- `RL_SYNC_AUTH_PROVIDER` / `RL_SYNC_PROVIDER`, `RL_SYNC_EPIC_ACCOUNT_ID`, `RL_SYNC_EPIC_AUTH_CODE` / `RL_SYNC_AUTH_CODE`, `RL_SYNC_EPIC_REFRESH_TOKEN` / `RL_SYNC_REFRESH_TOKEN`, `RL_SYNC_EPIC_ACCESS_TOKEN` / `RL_SYNC_ACCESS_TOKEN`, `RL_SYNC_STEAM_USERNAME`, `RL_SYNC_STEAM_PASSWORD`, `RL_SYNC_STEAM_GUARD_CODE`, `RL_SYNC_STEAM_LOGIN_KEY`, `RL_SYNC_STEAM_SCRIPT_PATH`
-- `RL_SYNC_PSYNET_ENV`, `RL_SYNC_PSYNET_TIMEOUT`
-- `RL_SYNC_BALLCHASING_TOKEN` / `BALLCHASING_API_TOKEN`, `RL_SYNC_BALLCHASING_VISIBILITY`, `RL_SYNC_BALLCHASING_ENABLED`
-- `RL_SYNC_POLL_INTERVAL`, `RL_SYNC_REPLAY_DIR`, `RL_SYNC_DB_PATH`, `RL_SYNC_ONCE`, `RL_SYNC_DRY_RUN`, `RL_SYNC_SYNC_BALLCHASING_HISTORY`, `RL_SYNC_BALLCHASING_HISTORY_SYNC_INTERVAL`
-- `RL_SYNC_STATS_API_ENABLED`, `RL_SYNC_STATS_API_ADDRESS`, `RL_SYNC_STATS_API_PROTOCOL`, `RL_SYNC_STATS_API_TRIGGER_THRESHOLD`, `RL_SYNC_STATS_API_FORCE_SYNC_ON_TRIGGER`, `RL_SYNC_STATS_API_ENABLE_TOAST`
-- `RL_SYNC_PLAYER_TRACKING_ENABLED`, `RL_SYNC_LOCAL_PLAYER_ID`, `RL_SYNC_LOCAL_PLAYER_NAME`, `RL_SYNC_AUTO_FETCH_RANKS`, `RL_SYNC_RANK_CACHE_TTL`, `RL_SYNC_SESSION_CONTINUE_WINDOW`
-- `RL_SYNC_POLLING_AUTH_ENABLED`, `RL_SYNC_POLLING_AUTH_PROVIDER`, `RL_SYNC_POLLING_EPIC_ACCOUNT_ID`, `RL_SYNC_POLLING_EPIC_AUTH_CODE`, `RL_SYNC_POLLING_EPIC_REFRESH_TOKEN`, `RL_SYNC_POLLING_EPIC_ACCESS_TOKEN`, `RL_SYNC_POLLING_STEAM_USERNAME`, `RL_SYNC_POLLING_STEAM_PASSWORD`, `RL_SYNC_POLLING_STEAM_GUARD_CODE`, `RL_SYNC_POLLING_STEAM_LOGIN_KEY`, `RL_SYNC_POLLING_STEAM_SCRIPT_PATH`
-- `RL_SYNC_WEB_ENABLED`, `RL_SYNC_WEB_HOST`, `RL_SYNC_WEB_PORT`
-- `RL_SYNC_LOG_LEVEL`, `RL_SYNC_LOG_FORMAT`
+Include every legacy `RL_SYNC_*` variable:
+- Auth (primary): `RL_SYNC_AUTH_PROVIDER`, `RL_SYNC_EPIC_REFRESH_TOKEN`, `RL_SYNC_EPIC_AUTH_CODE`, `RL_SYNC_EPIC_ACCOUNT_ID`, `RL_SYNC_EPIC_DISPLAY_NAME`, `RL_SYNC_STEAM_USERNAME`, `RL_SYNC_STEAM_PASSWORD`, `RL_SYNC_STEAM_SESSION_TICKET`, `RL_SYNC_STEAM_ID_64`, `RL_SYNC_STEAM_ACCOUNT_NAME`, `RL_SYNC_STEAM_LOGIN_KEY`
+- Polling auth: `RL_SYNC_POLLING_AUTH_ENABLED`, `RL_SYNC_POLLING_AUTH_PROVIDER`, `RL_SYNC_POLLING_EPIC_REFRESH_TOKEN`, `RL_SYNC_POLLING_EPIC_AUTH_CODE`, `RL_SYNC_POLLING_EPIC_AUTHORIZATION_CODE`, `RL_SYNC_POLLING_EPIC_ACCOUNT_ID`, `RL_SYNC_POLLING_EPIC_DISPLAY_NAME`, `RL_SYNC_POLLING_STEAM_USERNAME`, `RL_SYNC_POLLING_STEAM_PASSWORD`, `RL_SYNC_POLLING_STEAM_SESSION_TICKET`, `RL_SYNC_POLLING_STEAM_ID_64`, `RL_SYNC_POLLING_STEAM_ACCOUNT_NAME`, `RL_SYNC_POLLING_STEAM_LOGIN_KEY`
+- Player tracking & session: `RL_SYNC_PLAYER_TRACKING_ENABLED`, `RL_SYNC_LOCAL_PLAYER_ID`, `RL_SYNC_PLAYER_TRACKING_LOCAL_PLAYER_ID`, `RL_SYNC_LOCAL_PLAYER_NAME`, `RL_SYNC_PLAYER_TRACKING_LOCAL_PLAYER_NAME`, `RL_SYNC_AUTO_FETCH_RANKS`, `RL_SYNC_PLAYER_TRACKING_AUTO_FETCH_RANKS`, `RL_SYNC_SESSION_CONTINUE_WINDOW`, `RL_SYNC_CONTINUE_WINDOW`
+- Ballchasing & Sync: `RL_SYNC_BALLCHASING_API_KEY`, `RL_SYNC_BALLCHASING_VISIBILITY`, `RL_SYNC_BALLCHASING_BASE_URL`, `RL_SYNC_BALLCHASING_TIMEOUT`, `RL_SYNC_BALLCHASING_MAX_RETRIES`, `RL_SYNC_POLL_INTERVAL`, `RL_SYNC_REPLAY_DIR`, `RL_SYNC_DB_PATH`, `RL_SYNC_KEEP_LOCAL_FILES`, `RL_SYNC_DOWNLOAD_TIMEOUT`, `RL_SYNC_DRY_RUN`, `RL_SYNC_ONCE`
+- Stats API, Web & Logging: `RL_SYNC_STATS_API_ENABLED`, `RL_SYNC_STATS_API_ADDRESS`, `RL_SYNC_STATS_API_PROTOCOL`, `RL_SYNC_TRIGGER_THRESHOLD`, `RL_SYNC_FORCE_SYNC_ON_TRIGGER`, `RL_SYNC_ENABLE_TOAST`, `RL_SYNC_HTTP_TRIGGER_PORT`, `RL_SYNC_AUTO_SYNC_ON_EXIT`, `RL_SYNC_WEB_ENABLED`, `RL_SYNC_WEB_HOST`, `RL_SYNC_WEB_PORT`, `RL_SYNC_LOG_LEVEL`, `RL_SYNC_LOG_FORMAT`
 
 ### 1.3 Comment-Preserving Atomic Persistence (`yaml_update.go` & `atomic.go`)
 - `AtomicWriteFile(path, data, perm)`: write temp file in same directory, `Sync()`, close, `Rename` over target (plus Windows retry backoff for AV locks), clean up temp on failure.

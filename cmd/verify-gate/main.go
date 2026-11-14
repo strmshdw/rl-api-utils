@@ -110,8 +110,15 @@ func runPillar2(root string) error {
 }
 
 func runPillar3(root string) error {
-	if err := runCmdStream(root, "go", "test", "-race", "./..."); err != nil {
-		return fmt.Errorf("go test -race: %w", err)
+	if _, err := exec.LookPath("gcc"); err == nil {
+		if err := runCmdStream(root, "go", "test", "-race", "-count=1", "./..."); err != nil {
+			return fmt.Errorf("go test -race: %w", err)
+		}
+	} else {
+		fmt.Println("[Pillar 3] gcc not found on PATH; running go test -count=1 ./... (non-cgo mode)")
+		if err := runCmdStream(root, "go", "test", "-count=1", "./..."); err != nil {
+			return fmt.Errorf("go test: %w", err)
+		}
 	}
 	if err := runNpm(root, "test", "--", "--run"); err != nil {
 		return fmt.Errorf("vitest: %w", err)

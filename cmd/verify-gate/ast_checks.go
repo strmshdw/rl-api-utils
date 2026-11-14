@@ -16,12 +16,13 @@ import (
 const modulePrefix = "github.com/dank/rl-api-utils/"
 
 var goLayer = map[string]int{
-	"internal/contracts": 0, "internal/version": 0,
+	"internal/contracts": 0, "internal/version": 0, "internal/web": 0,
 	"internal/domain":    1,
 	"internal/config":    2, "internal/replay": 2, "internal/storage": 2,
 	"internal/auth":      3, "internal/psynet": 3, "internal/ballchasing": 3, "internal/statsapi": 3,
-	"internal/syncer":    4, "internal/playertrack": 4, "internal/session": 4,
-	"internal/web":       5, "internal/daemon": 5,
+	"internal/syncer":    4, "internal/playertrack": 4,
+	"internal/session":   5,
+	"internal/daemon":    6,
 }
 
 func checkGoDAG(root string) error {
@@ -50,14 +51,8 @@ func checkGoDAG(root string) error {
 				continue
 			}
 			dstRank, knownDst := goLayer[dstPkg]
-			if knownSrc && knownDst && dstRank >= srcRank && !(srcRank == 2 && dstRank == 2 && srcPkg != "internal/config" && dstPkg == "internal/config") {
-				if !(srcPkg == "internal/psynet" && (dstPkg == "internal/replay" || dstPkg == "internal/storage")) &&
-					!(srcPkg == "internal/auth" && (dstPkg == "internal/config" || dstPkg == "internal/storage")) &&
-					!(srcPkg == "internal/statsapi" && dstPkg == "internal/storage") {
-					if dstRank > srcRank || (dstRank == srcRank && srcPkg != dstPkg) {
-						violations = append(violations, fmt.Sprintf("%s (L%d) -> %s (L%d)", srcPkg, srcRank, dstPkg, dstRank))
-					}
-				}
+			if knownSrc && knownDst && dstPkg != srcPkg && dstRank >= srcRank {
+				violations = append(violations, fmt.Sprintf("%s (L%d) -> %s (L%d)", srcPkg, srcRank, dstPkg, dstRank))
 			}
 		}
 		return nil
