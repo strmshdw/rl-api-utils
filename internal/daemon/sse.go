@@ -37,6 +37,14 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	d.mu.Unlock()
 
+	select {
+	case <-r.Context().Done():
+		return
+	case <-daemonDone:
+		return
+	default:
+	}
+
 	if d.sessionTracker == nil {
 		select {
 		case <-r.Context().Done():
@@ -53,7 +61,7 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// 4. Initial Snapshot: session_update
-	summary := d.sessionTracker.GetSessionSummary()
+	summary := d.enrichSessionTelemetry(r.Context(), d.sessionTracker.GetSessionSummary())
 	if summary != nil {
 		sessionEv := session.SessionEvent{
 			Event: session.EventSessionUpdate,

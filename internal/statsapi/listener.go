@@ -221,19 +221,7 @@ func (l *Listener) runWebSocket(ctx context.Context) error {
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
 	}
-	connDone := make(chan struct{})
-	defer func() {
-		close(connDone)
-		_ = conn.Close()
-	}()
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = conn.SetReadDeadline(time.Now())
-			_ = conn.Close()
-		case <-connDone:
-		}
-	}()
+	defer watchConnCancel(ctx, conn)()
 
 	l.setConnected(true)
 	l.logger.Info("connected to Rocket League Stats API via WebSocket", slog.String("url", u.String()))
@@ -263,19 +251,7 @@ func (l *Listener) runTCP(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	connDone := make(chan struct{})
-	defer func() {
-		close(connDone)
-		_ = conn.Close()
-	}()
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = conn.SetReadDeadline(time.Now())
-			_ = conn.Close()
-		case <-connDone:
-		}
-	}()
+	defer watchConnCancel(ctx, conn)()
 
 	l.setConnected(true)
 	l.logger.Info("connected to Rocket League Stats API via TCP", slog.String("address", l.cfg.Address))
@@ -323,18 +299,7 @@ func (l *Listener) handleRawMessage(ctx context.Context, data []byte) {
 
 	switch msg.Event {
 	case "MatchCreated":
-		if guid != "" {
-			l.logger.Info("match event detected via Stats API",
-				slog.String("event", msg.Event),
-				slog.String("match_guid", guid),
-			)
-			if _, _, err := l.tracker.RecordMatch(ctx, guid); err != nil {
-				l.logger.Warn("error recording match in tracker",
-					slog.String("match_guid", guid),
-					slog.Any("error", err),
-				)
-			}
-		}
+		l.recordObservedMatch(ctx, msg.Event, guid)
 
 	case "UpdateState":
 		handler := l.PlayerEventHandler()
@@ -360,18 +325,7 @@ func (l *Listener) handleRawMessage(ctx context.Context, data []byte) {
 		}
 
 	case "MatchEnded":
-		if guid != "" {
-			l.logger.Info("match event detected via Stats API",
-				slog.String("event", msg.Event),
-				slog.String("match_guid", guid),
-			)
-			if _, _, err := l.tracker.RecordMatch(ctx, guid); err != nil {
-				l.logger.Warn("error recording match in tracker",
-					slog.String("match_guid", guid),
-					slog.Any("error", err),
-				)
-			}
-		}
+		l.recordObservedMatch(ctx, msg.Event, guid)
 
 		handler := l.PlayerEventHandler()
 		if handler != nil {
@@ -383,5 +337,43 @@ func (l *Listener) handleRawMessage(ctx context.Context, data []byte) {
 				)
 			}
 		}
+	}
+}
+
+type deadlineCloser interface {
+	SetReadDeadline(time.Time) error
+	Close() error
+}
+
+// watchConnCancel preserves instant context-cancel wakeup by expiring read deadlines and closing conn.
+func watchConnCancel(ctx context.Context, conn deadlineCloser) func() {
+	connDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.SetReadDeadline(time.Now())
+			_ = conn.Close()
+		case <-connDone:
+		}
+	}()
+	return func() {
+		close(connDone)
+		_ = conn.Close()
+	}
+}
+
+func (l *Listener) recordObservedMatch(ctx context.Context, event, guid string) {
+	if guid == "" {
+		return
+	}
+	l.logger.Info("match event detected via Stats API",
+		slog.String("event", event),
+		slog.String("match_guid", guid),
+	)
+	if _, _, err := l.tracker.RecordMatch(ctx, guid); err != nil {
+		l.logger.Warn("error recording match in tracker",
+			slog.String("match_guid", guid),
+			slog.Any("error", err),
+		)
 	}
 }

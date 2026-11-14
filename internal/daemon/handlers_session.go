@@ -2,13 +2,11 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
+	"github.com/dank/rl-api-utils/internal/domain"
 	"github.com/dank/rl-api-utils/internal/session"
 	"github.com/dank/rl-api-utils/internal/storage"
 )
@@ -51,22 +49,16 @@ func (d *Daemon) enrichSessionTelemetry(ctx context.Context, summary *session.Se
 // handleGetSession handles GET /api/session, returning current session telemetry,
 // playlist progression, match history list, and any continuable previous session.
 func (d *Daemon) handleGetSession(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	q := r.URL.Query()
 	playlist := strings.TrimSpace(q.Get("playlist"))
 	fromUnix := storage.ParseDateFilter(q.Get("from"), false)
 	toUnix := storage.ParseDateFilter(q.Get("to"), true)
 
-	if d.sessionTracker == nil {
-		w.WriteHeader(http.StatusOK)
-		summary := session.FilterSessionSummary(session.NewSessionTracker().GetSessionSummary(), playlist, fromUnix, toUnix, d.stateStore)
-		summary = d.enrichSessionTelemetry(r.Context(), summary)
-		_ = json.NewEncoder(w).Encode(summary)
-		return
+	tracker := d.sessionTracker
+	if tracker == nil {
+		tracker = session.NewSessionTracker()
 	}
-
-	summary := session.FilterSessionSummary(d.sessionTracker.GetSessionSummary(), playlist, fromUnix, toUnix, d.stateStore)
+	summary := session.FilterSessionSummary(tracker.GetSessionSummary(), playlist, fromUnix, toUnix, d.stateStore)
 	summary = d.enrichSessionTelemetry(r.Context(), summary)
 	d.writeJSONResponse(w, r, http.StatusOK, summary, "error encoding session summary")
 }
@@ -80,11 +72,8 @@ func (d *Daemon) handleResetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
 	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
+		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 
@@ -92,11 +81,10 @@ func (d *Daemon) handleResetSession(w http.ResponseWriter, r *http.Request) {
 		d.sessionTracker.Reset()
 	}
 
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	d.writeJSONResponse(w, r, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"message": "session reset",
-	})
+	}, "error encoding session reset response")
 }
 
 // handleContinueSession handles POST /api/session/continue, resuming a previous session
@@ -108,41 +96,31 @@ func (d *Daemon) handleContinueSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
 	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
+		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 
 	if d.sessionTracker == nil {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": session.ErrNoContinuableSession.Error()})
+		writeJSONError(w, http.StatusConflict, session.ErrNoContinuableSession.Error())
 		return
 	}
 
 	var reqBody sessionActionRequest
-	if r.Body != nil {
-		defer r.Body.Close()
-		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&reqBody); err != nil && !errors.Is(err, io.EOF) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
-			return
-		}
+	if !decodeJSONBody(w, r, &reqBody, true) {
+		return
 	}
 
 	summary, err := d.sessionTracker.ContinueSession(reqBody.SessionID)
 	if err != nil {
+		status := http.StatusInternalServerError
 		switch {
 		case errors.Is(err, storage.ErrSessionNotFound):
-			w.WriteHeader(http.StatusNotFound)
+			status = http.StatusNotFound
 		case errors.Is(err, session.ErrNoContinuableSession), errors.Is(err, session.ErrContinueWindowExpired):
-			w.WriteHeader(http.StatusConflict)
-		default:
-			w.WriteHeader(http.StatusInternalServerError)
+			status = http.StatusConflict
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		writeJSONError(w, status, err.Error())
 		return
 	}
 
@@ -159,110 +137,83 @@ func (d *Daemon) handleDismissContinueSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
 	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
+		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 
 	var reqBody sessionActionRequest
-	if r.Body != nil {
-		defer r.Body.Close()
-		_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&reqBody)
+	if !decodeJSONBody(w, r, &reqBody, true) {
+		return
 	}
 
 	if d.sessionTracker == nil {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(d.enrichSessionTelemetry(r.Context(), session.NewSessionTracker().GetSessionSummary()))
+		d.writeJSONResponse(w, r, http.StatusOK,
+			d.enrichSessionTelemetry(r.Context(), session.NewSessionTracker().GetSessionSummary()),
+			"error encoding dismissed session summary")
 		return
 	}
 
 	summary := d.enrichSessionTelemetry(r.Context(), d.sessionTracker.DismissContinuableSession(reqBody.SessionID))
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(summary)
+	d.writeJSONResponse(w, r, http.StatusOK, summary, "error encoding dismissed session summary")
 }
 
 // handleListSessions handles GET /api/sessions, returning a paginated list of persisted sessions.
 func (d *Daemon) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	limit := 50
-	offset := 0
-	q := r.URL.Query()
-	if lStr := strings.TrimSpace(q.Get("limit")); lStr != "" {
-		if v, err := strconv.Atoi(lStr); err == nil && v > 0 {
-			limit = v
-			if limit > 200 {
-				limit = 200
-			}
-		}
-	}
-	if oStr := strings.TrimSpace(q.Get("offset")); oStr != "" {
-		if v, err := strconv.Atoi(oStr); err == nil && v >= 0 {
-			offset = v
-		}
-	}
+	limit, offset := parseLimitOffset(r.URL.Query(), 50, 200)
 
 	if d.sessionTracker == nil {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(SessionListResponse{
+		d.writeJSONResponse(w, r, http.StatusOK, SessionListResponse{
 			Sessions: []*session.SessionResponse{},
 			Total:    0,
 			Limit:    limit,
 			Offset:   offset,
-		})
+		}, "error encoding empty session list")
 		return
 	}
 
 	sessions, total, err := d.sessionTracker.ListSessions(r.Context(), limit, offset)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(SessionListResponse{
+	d.writeJSONResponse(w, r, http.StatusOK, SessionListResponse{
 		Sessions: sessions,
 		Total:    total,
 		Limit:    limit,
 		Offset:   offset,
-	})
+	}, "error encoding session list response")
 }
 
 // handleGetHistoricalSession handles GET /api/sessions/{id}, returning the full details of a specific session.
 func (d *Daemon) handleGetHistoricalSession(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	sessionID := strings.TrimSpace(r.PathValue("id"))
 	if sessionID == "" {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "session not found"})
+		writeJSONError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	cleanID, err := domain.SanitizePathSegment(sessionID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid session id")
 		return
 	}
 
 	if d.sessionTracker == nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "session not found"})
+		writeJSONError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	resp, err := d.sessionTracker.GetHistoricalSession(r.Context(), sessionID)
+	resp, err := d.sessionTracker.GetHistoricalSession(r.Context(), cleanID)
 	if err != nil {
 		if errors.Is(err, storage.ErrSessionNotFound) {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "session not found"})
+			writeJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	resp = d.enrichSessionTelemetry(r.Context(), resp)
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	d.writeJSONResponse(w, r, http.StatusOK, resp, "error encoding historical session")
 }
-

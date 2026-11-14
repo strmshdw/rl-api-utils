@@ -233,7 +233,7 @@ func TestExtractOvertime(t *testing.T) {
 func TestExtractDemolitionsAndMatchStartEpoch(t *testing.T) {
 	meta := &ReplayMetadata{}
 	props := map[string]*propertyValue{
-		"MatchStartEpoch": {int64Val: 1729066236}, // 2024-10-16 08:10:36 UTC
+		"MatchStartEpoch":    {int64Val: 1729066236}, // 2024-10-16 08:10:36 UTC
 		"TotalSecondsPlayed": {floatVal: 300.0},
 		"PlayerStats": {
 			subProps: []map[string]*propertyValue{

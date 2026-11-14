@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/dank/rl-api-utils/internal/session"
 	"github.com/dank/rl-api-utils/internal/storage"
-	"github.com/dank/rl-api-utils/internal/syncer"
 )
 
 // MatchesResponse represents the paginated envelope returned by GET /api/matches.
@@ -26,30 +24,126 @@ type MatchesResponse struct {
 	LocalPlayerIDs []string                         `json:"local_player_ids,omitempty"`
 }
 
-// handleListMatches handles GET /api/matches and GET /api/historical-matches.
-func (d *Daemon) handleListMatches(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+// MMRHistoryResponse represents the payload returned by GET /api/mmr-history.
+type MMRHistoryResponse struct {
+	PlaylistID int                         `json:"playlist_id"`
+	History    []*storage.MMRHistoryRecord `json:"history"`
+	Total      int                         `json:"total"`
+}
 
-	q := r.URL.Query()
-	limit := 50
+type matchStatsEnricher interface {
+	EnrichMatchStatsWithPlayers(ctx context.Context, matchGUID string, playlist int, mr *storage.MatchRecord, st *storage.ReplayMatchStats) *storage.ReplayMatchStats
+}
+
+func parseLimitOffset(q url.Values, defaultLimit, maxLimit int) (int, int) {
+	limit := defaultLimit
 	if rawLimit := q.Get("limit"); rawLimit != "" {
 		if parsed, err := strconv.Atoi(rawLimit); err == nil {
 			if parsed < 1 {
 				limit = 1
-			} else if parsed > 100 {
-				limit = 100
+			} else if parsed > maxLimit {
+				limit = maxLimit
 			} else {
 				limit = parsed
 			}
 		}
 	}
-
 	offset := 0
 	if rawOffset := q.Get("offset"); rawOffset != "" {
 		if parsed, err := strconv.Atoi(rawOffset); err == nil && parsed >= 0 {
 			offset = parsed
 		}
 	}
+	return limit, offset
+}
+
+func computeMatchOutcome(m *storage.MatchRecord, localTeam int) string {
+	team := 0
+	if localTeam == 1 {
+		team = 1
+	}
+	localScore, oppScore := m.BlueScore, m.OrangeScore
+	if team == 1 {
+		localScore, oppScore = m.OrangeScore, m.BlueScore
+	}
+	if localScore > oppScore {
+		return "victory"
+	}
+	if oppScore > localScore {
+		return "defeat"
+	}
+	if m.WinnerTeam != nil && *m.WinnerTeam != -1 {
+		if *m.WinnerTeam == team {
+			return "victory"
+		}
+		return "defeat"
+	}
+	return "draw"
+}
+
+func (d *Daemon) resolveLocalPlayerIDs(ctx context.Context) []string {
+	var localIDs []string
+	if d.stateStore != nil {
+		if ids, err := d.stateStore.GetLocalPlayerIDs(ctx); err == nil {
+			localIDs = ids
+		}
+	}
+	if len(localIDs) == 0 && d.sessionTracker != nil {
+		localIDs = d.sessionTracker.GetLocalPlayerIDs()
+	}
+	return localIDs
+}
+
+func (d *Daemon) resolveMatchLocalTeam(ctx context.Context, guid string, stats *storage.ReplayMatchStats) int {
+	var localSet map[string]bool
+	loadLocalSet := func() map[string]bool {
+		if localSet != nil {
+			return localSet
+		}
+		localIDs, err := d.stateStore.GetLocalPlayerIDs(ctx)
+		if err != nil || len(localIDs) == 0 {
+			localSet = map[string]bool{}
+			return localSet
+		}
+		localSet = make(map[string]bool, len(localIDs))
+		for _, id := range localIDs {
+			localSet[id] = true
+		}
+		return localSet
+	}
+
+	if mps, err := d.stateStore.GetMatchPlayers(ctx, guid); err == nil && len(mps) > 0 {
+		for _, mp := range mps {
+			if mp.IsLocal {
+				return mp.TeamNum
+			}
+		}
+		if set := loadLocalSet(); len(set) > 0 {
+			for _, mp := range mps {
+				if set[mp.PlayerID] {
+					return mp.TeamNum
+				}
+			}
+		}
+	}
+
+	if stats != nil && len(stats.Players) > 0 {
+		if set := loadLocalSet(); len(set) > 0 {
+			for _, p := range stats.Players {
+				fullID := fmt.Sprintf("%s|%s|0", p.Platform, p.OnlineID)
+				if set[fullID] || set[p.OnlineID] {
+					return p.Team
+				}
+			}
+		}
+	}
+	return -1
+}
+
+// handleListMatches handles GET /api/matches and GET /api/historical-matches.
+func (d *Daemon) handleListMatches(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, offset := parseLimitOffset(q, 50, 100)
 
 	playlist := 0
 	rawPlaylist := strings.TrimSpace(q.Get("playlist"))
@@ -59,13 +153,10 @@ func (d *Daemon) handleListMatches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	query := strings.TrimSpace(q.Get("query"))
 	search := strings.TrimSpace(q.Get("search"))
 	if search == "" {
 		search = strings.TrimSpace(q.Get("q"))
 	}
-	result := strings.ToLower(strings.TrimSpace(q.Get("result")))
-	status := strings.TrimSpace(q.Get("status"))
 	sortBy := strings.TrimSpace(q.Get("sort_by"))
 	if sortBy == "" {
 		sortBy = strings.TrimSpace(q.Get("sort"))
@@ -74,40 +165,28 @@ func (d *Daemon) handleListMatches(w http.ResponseWriter, r *http.Request) {
 	if sortDir == "" {
 		sortDir = strings.TrimSpace(q.Get("order"))
 	}
-	fromUnix := storage.ParseDateFilter(q.Get("from"), false)
-	toUnix := storage.ParseDateFilter(q.Get("to"), true)
 
-	var localIDs []string
-	if d.stateStore != nil {
-		if ids, err := d.stateStore.GetLocalPlayerIDs(r.Context()); err == nil {
-			localIDs = ids
-		}
-	}
-	if len(localIDs) == 0 && d.sessionTracker != nil {
-		localIDs = d.sessionTracker.GetLocalPlayerIDs()
-	}
-
+	localIDs := d.resolveLocalPlayerIDs(r.Context())
 	if d.stateStore == nil {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(MatchesResponse{
+		d.writeJSONResponse(w, r, http.StatusOK, MatchesResponse{
 			Matches:        make([]*storage.HistoricalMatchRecord, 0),
 			Total:          0,
 			Limit:          limit,
 			Offset:         offset,
 			LocalPlayerIDs: localIDs,
-		})
+		}, "error encoding empty matches response")
 		return
 	}
 
 	filter := storage.MatchFilter{
 		Playlist:       playlist,
 		PlaylistFilter: rawPlaylist,
-		FromUnix:       fromUnix,
-		ToUnix:         toUnix,
-		Status:         status,
-		Query:          query,
+		FromUnix:       storage.ParseDateFilter(q.Get("from"), false),
+		ToUnix:         storage.ParseDateFilter(q.Get("to"), true),
+		Status:         strings.TrimSpace(q.Get("status")),
+		Query:          strings.TrimSpace(q.Get("query")),
 		Search:         search,
-		Result:         result,
+		Result:         strings.ToLower(strings.TrimSpace(q.Get("result"))),
 		SortBy:         sortBy,
 		SortDir:        sortDir,
 		Limit:          limit,
@@ -121,8 +200,7 @@ func (d *Daemon) handleListMatches(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.logger.Error("failed to list historical matches", slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to list historical matches"})
+		writeJSONError(w, http.StatusInternalServerError, "failed to list historical matches")
 		return
 	}
 
@@ -130,21 +208,17 @@ func (d *Daemon) handleListMatches(w http.ResponseWriter, r *http.Request) {
 		matches = make([]*storage.HistoricalMatchRecord, 0)
 	}
 
-	resp := MatchesResponse{
+	d.writeJSONResponse(w, r, http.StatusOK, MatchesResponse{
 		Matches:        matches,
 		Total:          total,
 		Limit:          limit,
 		Offset:         offset,
 		LocalPlayerIDs: localIDs,
-	}
-
-	d.writeJSONResponse(w, r, http.StatusOK, resp, "error encoding matches response")
+	}, "error encoding matches response")
 }
 
 // handleGetMatch handles GET /api/matches/{guid}.
 func (d *Daemon) handleGetMatch(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	rawGUID := r.PathValue("guid")
 	if rawGUID == "" {
 		rawGUID = strings.TrimPrefix(r.URL.Path, "/api/matches/")
@@ -152,227 +226,53 @@ func (d *Daemon) handleGetMatch(w http.ResponseWriter, r *http.Request) {
 	}
 	guid := strings.Trim(rawGUID, "/")
 	if guid == "" || d.stateStore == nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "match not found"})
+		writeJSONError(w, http.StatusNotFound, "match not found")
+		return
+	}
+	if strings.TrimSpace(guid) == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid match guid")
 		return
 	}
 
 	m, err := d.stateStore.GetMatch(r.Context(), guid)
-	if err == nil && m != nil {
-		hist := &storage.HistoricalMatchRecord{
-			MatchRecord: *m,
-			Result:      "unknown",
-		}
-		if m.ReplayStatsJSON != "" {
-			var st storage.ReplayMatchStats
-			if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err == nil {
-				hist.Stats = &st
-			}
-		}
-		if enricher, ok := d.stateStore.(interface {
-			EnrichMatchStatsWithPlayers(ctx context.Context, matchGUID string, playlist int, mr *storage.MatchRecord, st *storage.ReplayMatchStats) *storage.ReplayMatchStats
-		}); ok {
-			hist.Stats = enricher.EnrichMatchStatsWithPlayers(r.Context(), guid, m.Playlist, m, hist.Stats)
-		}
-		// Dynamically resolve local team
-		localTeam := -1
-		if mps, err := d.stateStore.GetMatchPlayers(r.Context(), guid); err == nil && len(mps) > 0 {
-			for _, mp := range mps {
-				if mp.IsLocal {
-					localTeam = mp.TeamNum
-					break
-				}
-			}
-			if localTeam < 0 {
-				if localIDs, err := d.stateStore.GetLocalPlayerIDs(r.Context()); err == nil && len(localIDs) > 0 {
-					localSet := make(map[string]bool, len(localIDs))
-					for _, id := range localIDs {
-						localSet[id] = true
-					}
-					for _, mp := range mps {
-						if localSet[mp.PlayerID] {
-							localTeam = mp.TeamNum
-							break
-						}
-					}
-				}
-			}
-		}
-
-		if localTeam < 0 && hist.Stats != nil && len(hist.Stats.Players) > 0 {
-			if localIDs, err := d.stateStore.GetLocalPlayerIDs(r.Context()); err == nil && len(localIDs) > 0 {
-				localSet := make(map[string]bool, len(localIDs))
-				for _, id := range localIDs {
-					localSet[id] = true
-				}
-				for _, p := range hist.Stats.Players {
-					fullID := fmt.Sprintf("%s|%s|0", p.Platform, p.OnlineID)
-					if localSet[fullID] || localSet[p.OnlineID] {
-						localTeam = p.Team
-						break
-					}
-				}
-			}
-		}
-
-		// Compute hist.Result relative to local team and m.WinnerTeam, matching ListHistoricalMatches
-		if localTeam == 0 {
-			if m.BlueScore > m.OrangeScore {
-				hist.Result = "victory"
-			} else if m.OrangeScore > m.BlueScore {
-				hist.Result = "defeat"
-			} else if m.WinnerTeam != nil && *m.WinnerTeam != -1 {
-				if *m.WinnerTeam == 0 {
-					hist.Result = "victory"
-				} else {
-					hist.Result = "defeat"
-				}
-			} else if (m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0)) || (m.WinnerTeam != nil && *m.WinnerTeam == -1) {
-				hist.Result = "draw"
-			} else {
-				hist.Result = "draw"
-			}
-		} else if localTeam == 1 {
-			if m.OrangeScore > m.BlueScore {
-				hist.Result = "victory"
-			} else if m.BlueScore > m.OrangeScore {
-				hist.Result = "defeat"
-			} else if m.WinnerTeam != nil && *m.WinnerTeam != -1 {
-				if *m.WinnerTeam == 1 {
-					hist.Result = "victory"
-				} else {
-					hist.Result = "defeat"
-				}
-			} else if (m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0)) || (m.WinnerTeam != nil && *m.WinnerTeam == -1) {
-				hist.Result = "draw"
-			} else {
-				hist.Result = "draw"
-			}
-		} else {
-			if m.BlueScore > m.OrangeScore {
-				hist.Result = "victory"
-			} else if m.OrangeScore > m.BlueScore {
-				hist.Result = "defeat"
-			} else if m.WinnerTeam != nil && *m.WinnerTeam != -1 {
-				if *m.WinnerTeam == 0 {
-					hist.Result = "victory"
-				} else {
-					hist.Result = "defeat"
-				}
-			} else if (m.BlueScore == m.OrangeScore && (m.BlueScore > 0 || m.OrangeScore > 0)) || (m.WinnerTeam != nil && *m.WinnerTeam == -1) {
-				hist.Result = "draw"
-			} else {
-				hist.Result = "draw"
-			}
-		}
-
-		d.writeJSONResponse(w, r, http.StatusOK, hist, "error encoding match detail response")
-		return
-	}
-
-	if err != nil && isClientDisconnect(r.Context(), err) {
-		return
-	}
-
-	matches, _, err := d.stateStore.ListHistoricalMatches(r.Context(), storage.MatchFilter{
-		Query: guid,
-		Limit: 1,
-	})
-	if err != nil && isClientDisconnect(r.Context(), err) {
-		return
-	}
-	if err != nil || len(matches) == 0 {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "match not found"})
-		return
-	}
-
-	d.writeJSONResponse(w, r, http.StatusOK, matches[0], "error encoding match detail response")
-}
-
-// handleTriggerBallchasingSync handles POST /api/sync/ballchasing.
-func (d *Daemon) handleTriggerBallchasingSync(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
-		return
-	}
-
-	if d.historySyncer == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "ballchasing historical syncer not configured"})
-		return
-	}
-
-	prog := d.historySyncer.Progress()
-	if prog.Running {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":   "in_progress",
-			"message":  "Ballchasing historical sync is already running",
-			"progress": prog,
-		})
-		return
-	}
-
-	syncCtx := d.daemonContext()
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
-		if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-			d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
-				Event: session.EventSyncProgress,
-				Data: map[string]any{
-					"status":   "started",
-					"running":  true,
-					"progress": d.historySyncer.Progress(),
-				},
-			})
-		}
-		if poller, ok := d.syncer.(StatsPoller); ok && poller != nil {
-			_ = poller.PollAndSyncPendingStats(syncCtx)
-		}
-		if syncCtx.Err() != nil {
+	if err != nil {
+		if isClientDisconnect(r.Context(), err) {
 			return
 		}
-		res, err := d.historySyncer.Sync(syncCtx)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || syncCtx.Err() != nil {
-				return
-			}
-			d.logger.Error("background ballchasing historical sync failed", slog.Any("error", err))
-		}
-		if syncCtx.Err() != nil {
+		if errors.Is(err, storage.ErrInvalidGUID) {
+			writeJSONError(w, http.StatusBadRequest, "invalid match guid")
 			return
 		}
-		if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-			statusStr := "completed"
-			if err != nil {
-				statusStr = "failed"
-			}
-			d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
-				Event: session.EventSyncProgress,
-				Data: map[string]any{
-					"status":   statusStr,
-					"running":  false,
-					"progress": res,
-				},
-			})
-			summary := d.enrichSessionTelemetry(syncCtx, d.sessionTracker.GetSessionSummary())
-			d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
-				Event: session.EventSessionUpdate,
-				Data:  summary,
-			})
+		if errors.Is(err, storage.ErrMatchNotFound) {
+			writeJSONError(w, http.StatusNotFound, "match not found")
+			return
 		}
-	}()
+		d.logger.Error("failed to retrieve match", slog.String("guid", guid), slog.Any("error", err))
+		writeJSONError(w, http.StatusInternalServerError, "failed to retrieve match")
+		return
+	}
+	if m == nil {
+		writeJSONError(w, http.StatusNotFound, "match not found")
+		return
+	}
 
-	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status":  "started",
-		"message": "Ballchasing historical sync started in background",
-	})
+	hist := &storage.HistoricalMatchRecord{
+		MatchRecord: *m,
+		Result:      "unknown",
+	}
+	if m.ReplayStatsJSON != "" {
+		var st storage.ReplayMatchStats
+		if err := json.Unmarshal([]byte(m.ReplayStatsJSON), &st); err == nil {
+			hist.Stats = &st
+		}
+	}
+	if enricher, ok := d.stateStore.(matchStatsEnricher); ok {
+		hist.Stats = enricher.EnrichMatchStatsWithPlayers(r.Context(), guid, m.Playlist, m, hist.Stats)
+	}
+	localTeam := d.resolveMatchLocalTeam(r.Context(), guid, hist.Stats)
+	hist.Result = computeMatchOutcome(m, localTeam)
+
+	d.writeJSONResponse(w, r, http.StatusOK, hist, "error encoding match detail response")
 }
 
 // handlePruneMatches handles POST /api/matches/prune.
@@ -382,11 +282,9 @@ func (d *Daemon) handlePruneMatches(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 
 	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
+		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 
@@ -395,13 +293,8 @@ func (d *Daemon) handlePruneMatches(w http.ResponseWriter, r *http.Request) {
 		ReplayLimit int `json:"replay_limit"`
 		NewLimit    int `json:"new_limit"`
 	}
-	if r.Body != nil {
-		defer r.Body.Close()
-		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
-			return
-		}
+	if !decodeJSONBody(w, r, &payload, true) {
+		return
 	}
 
 	effectiveNewLimit := payload.ReplayLimit
@@ -424,8 +317,7 @@ func (d *Daemon) handlePruneMatches(w http.ResponseWriter, r *http.Request) {
 			pruned, err = pruner.PruneOldestMatches(r.Context(), pruneCount)
 			if err != nil {
 				d.logger.Error("failed to prune oldest matches", slog.Any("error", err))
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to prune matches"})
+				writeJSONError(w, http.StatusInternalServerError, "failed to prune matches")
 				return
 			}
 		}
@@ -440,40 +332,20 @@ func (d *Daemon) handlePruneMatches(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	d.writeJSONResponse(w, r, http.StatusOK, map[string]any{
 		"status":              "ok",
 		"pruned_count":        pruned,
 		"replay_count":        st.ReplayCount,
 		"replay_limit":        st.ReplayLimit,
 		"replay_usage_pct":    st.ReplayUsagePct,
 		"replay_limit_status": st.ReplayLimitStatus,
-	})
-}
-
-// handleBallchasingSyncStatus handles GET /api/sync/ballchasing/status.
-func (d *Daemon) handleBallchasingSyncStatus(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if d.historySyncer == nil {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(syncer.BallchasingHistorySyncProgress{
-			Running: false,
-		})
-		return
-	}
-
-	prog := d.historySyncer.Progress()
-	d.writeJSONResponse(w, r, http.StatusOK, prog, "error encoding sync status response")
+	}, "error encoding prune response")
 }
 
 // handleRetryMatch handles POST /api/matches/{guid}/retry.
 func (d *Daemon) handleRetryMatch(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
+		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 
@@ -484,91 +356,65 @@ func (d *Daemon) handleRetryMatch(w http.ResponseWriter, r *http.Request) {
 	}
 	guid, err := url.PathUnescape(strings.Trim(rawGUID, "/"))
 	if err != nil || guid == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid match guid"})
+		writeJSONError(w, http.StatusBadRequest, "invalid match guid")
 		return
 	}
 
 	if d.stateStore == nil {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "storage unavailable"})
+		writeJSONError(w, http.StatusServiceUnavailable, "storage unavailable")
 		return
 	}
 
 	if err := d.stateStore.ResetMatchRetry(r.Context(), guid); err != nil {
 		if errors.Is(err, storage.ErrMatchNotFound) {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "match not found"})
+			writeJSONError(w, http.StatusNotFound, "match not found")
 			return
 		}
 		if errors.Is(err, storage.ErrInvalidGUID) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid match guid"})
+			writeJSONError(w, http.StatusBadRequest, "invalid match guid")
 			return
 		}
 		d.logger.Error("failed to reset match retry", slog.String("guid", guid), slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to reset match retry"})
+		writeJSONError(w, http.StatusInternalServerError, "failed to reset match retry")
 		return
 	}
 
 	_ = d.TriggerSync(r.Context(), "retry_match_"+guid)
 
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	d.writeJSONResponse(w, r, http.StatusOK, map[string]string{
 		"status":     "ok",
 		"message":    "match retry queued",
 		"match_guid": guid,
-	})
-}
-
-// MMRHistoryResponse represents the payload returned by GET /api/mmr-history.
-type MMRHistoryResponse struct {
-	PlaylistID int                         `json:"playlist_id"`
-	History    []*storage.MMRHistoryRecord `json:"history"`
-	Total      int                         `json:"total"`
+	}, "error encoding match retry response")
 }
 
 // handleListMMRHistory handles GET /api/mmr-history.
 func (d *Daemon) handleListMMRHistory(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
+	q := r.URL.Query()
 	playlistID := 0
-	if rawPlaylist := r.URL.Query().Get("playlist_id"); rawPlaylist != "" {
+	if rawPlaylist := q.Get("playlist_id"); rawPlaylist != "" {
 		if p, err := strconv.Atoi(rawPlaylist); err == nil && p > 0 {
 			playlistID = p
 		}
-	} else if rawP := r.URL.Query().Get("playlist"); rawP != "" {
+	} else if rawP := q.Get("playlist"); rawP != "" {
 		if p, err := strconv.Atoi(rawP); err == nil && p > 0 {
 			playlistID = p
 		}
 	}
 
-	limit := 50
-	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
-		if p, err := strconv.Atoi(rawLimit); err == nil {
-			if p < 1 {
-				limit = 1
-			} else if p > 200 {
-				limit = 200
-			} else {
-				limit = p
-			}
-		}
-	}
+	limit, _ := parseLimitOffset(q, 50, 200)
 
-	order := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("order")))
+	order := strings.ToLower(strings.TrimSpace(q.Get("order")))
 	if order == "" {
-		order = "asc" // default chronological for charts
+		order = "asc"
 	}
 
 	if d.stateStore == nil {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(MMRHistoryResponse{
+		d.writeJSONResponse(w, r, http.StatusOK, MMRHistoryResponse{
 			PlaylistID: playlistID,
 			History:    make([]*storage.MMRHistoryRecord, 0),
 			Total:      0,
-		})
+		}, "error encoding empty mmr history response")
 		return
 	}
 
@@ -579,8 +425,7 @@ func (d *Daemon) handleListMMRHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.logger.Error("failed to query mmr history", slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query mmr history"})
+		writeJSONError(w, http.StatusInternalServerError, "failed to query mmr history")
 		return
 	}
 
@@ -588,8 +433,6 @@ func (d *Daemon) handleListMMRHistory(w http.ResponseWriter, r *http.Request) {
 		recs = make([]*storage.MMRHistoryRecord, 0)
 	}
 
-	// ListMMRHistory in storage returns descending order (most recent first).
-	// If order is asc (default), reverse to chronological order for charts.
 	if order == "asc" && len(recs) > 1 {
 		for i, j := 0, len(recs)-1; i < j; i, j = i+1, j-1 {
 			recs[i], recs[j] = recs[j], recs[i]
@@ -601,136 +444,4 @@ func (d *Daemon) handleListMMRHistory(w http.ResponseWriter, r *http.Request) {
 		History:    recs,
 		Total:      len(recs),
 	}, "error encoding mmr history response")
-}
-
-// handleGetSyncConfig handles GET /api/sync/config, returning the Rocket League 20-game
-// hosted replay queue configuration and current pending count.
-func (d *Daemon) handleGetSyncConfig(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	st := d.buildStatusResponse(r.Context())
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"pending_count":         st.PendingCount,
-		"trigger_threshold":     st.TriggerThreshold,
-		"force_sync_on_trigger": st.ForceSyncOnTrigger,
-		"enable_toast":          st.EnableToast,
-		"auto_sync_on_exit":     st.AutoSyncOnExit,
-		"max_hosted_replays":    st.MaxHostedReplays,
-		"game_connected":        st.GameConnected,
-	})
-}
-
-// handleUpdateSyncConfig handles POST /api/sync/config, updating the configurable game threshold
-// for notifications (1..20) and automatic replay sync/download behavior.
-func (d *Daemon) handleUpdateSyncConfig(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodPatch {
-		w.Header().Set("Allow", "POST, PATCH")
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-
-	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
-		return
-	}
-
-	var payload struct {
-		TriggerThreshold   *int  `json:"trigger_threshold"`
-		ForceSyncOnTrigger *bool `json:"force_sync_on_trigger"`
-		EnableToast        *bool `json:"enable_toast"`
-		AutoSyncOnExit     *bool `json:"auto_sync_on_exit"`
-	}
-	if r.Body != nil {
-		defer r.Body.Close()
-		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
-			return
-		}
-	}
-
-	threshold := 0
-	if payload.TriggerThreshold != nil {
-		t := *payload.TriggerThreshold
-		if t < 1 {
-			t = 1
-		} else if t > 20 {
-			t = 20
-		}
-		threshold = t
-	}
-
-	d.mu.Lock()
-	if d.cfg != nil {
-		if threshold > 0 {
-			d.cfg.StatsAPI.TriggerThreshold = threshold
-		}
-		if payload.ForceSyncOnTrigger != nil {
-			d.cfg.StatsAPI.ForceSyncOnTrigger = *payload.ForceSyncOnTrigger
-		}
-		if payload.EnableToast != nil {
-			d.cfg.StatsAPI.EnableToast = *payload.EnableToast
-		}
-		if payload.AutoSyncOnExit != nil {
-			d.cfg.StatsAPI.AutoSyncOnExit = *payload.AutoSyncOnExit
-		}
-	}
-	d.mu.Unlock()
-
-	if d.statsTracker != nil {
-		d.statsTracker.UpdateConfig(threshold, payload.ForceSyncOnTrigger, payload.EnableToast)
-	}
-
-	st := d.buildStatusResponse(r.Context())
-	if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-		summary := d.enrichSessionTelemetry(r.Context(), d.sessionTracker.GetSessionSummary())
-		d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
-			Event: session.EventSessionUpdate,
-			Data:  summary,
-		})
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":                "ok",
-		"pending_count":         st.PendingCount,
-		"trigger_threshold":     st.TriggerThreshold,
-		"force_sync_on_trigger": st.ForceSyncOnTrigger,
-		"enable_toast":          st.EnableToast,
-		"auto_sync_on_exit":     st.AutoSyncOnExit,
-		"max_hosted_replays":    st.MaxHostedReplays,
-	})
-}
-
-// handleManualSyncNow handles POST /api/sync/now, immediately triggering a replay download & sync pass
-// from Rocket League's 20-game hosted replay buffer so no replays are lost.
-func (d *Daemon) handleManualSyncNow(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-
-	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
-		return
-	}
-
-	if err := d.TriggerSync(d.daemonContext(), "manual_ui_sync_now"); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	st := d.buildStatusResponse(r.Context())
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":             "sync_triggered",
-		"pending_count":      st.PendingCount,
-		"max_hosted_replays": st.MaxHostedReplays,
-	})
 }

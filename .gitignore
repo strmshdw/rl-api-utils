@@ -10,7 +10,7 @@ replays
 # Binaries and build artifacts
 *.exe
 *.exe~
-rl-sync
+/rl-sync
 /dist/
 web/dist/
 !internal/web/dist/

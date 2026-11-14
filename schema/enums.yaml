@@ -1,0 +1,122 @@
+enums:
+  match_status:
+    - const: MatchStatusPending
+      ts_const: PENDING
+      value: PENDING
+    - const: MatchStatusDownloaded
+      ts_const: DOWNLOADED
+      value: DOWNLOADED
+    - const: MatchStatusSynced
+      ts_const: SYNCED
+      value: SYNCED
+    - const: MatchStatusFailed
+      ts_const: FAILED
+      value: FAILED
+
+  replay_stats_status:
+    - const: ReplayStatsPending
+      ts_const: PENDING
+      value: pending
+    - const: ReplayStatsFetched
+      ts_const: FETCHED
+      value: fetched
+    - const: ReplayStatsExpired
+      ts_const: EXPIRED
+      value: expired
+    - const: ReplayStatsFailed
+      ts_const: FAILED
+      value: failed
+    - const: ReplayStatsUnavailable
+      ts_const: UNAVAILABLE
+      value: unavailable
+
+  player_classification:
+    - const: ClassificationSelf
+      ts_const: SELF
+      value: self
+    - const: ClassificationTeammate
+      ts_const: TEAMMATE
+      value: teammate
+    - const: ClassificationOpponent
+      ts_const: OPPONENT
+      value: opponent
+    - const: ClassificationBot
+      ts_const: BOT
+      value: bot
+    - const: ClassificationSpectator
+      ts_const: SPECTATOR
+      value: spectator
+
+  sync_mode:
+    - const: SyncModeAuto
+      ts_const: AUTO
+      value: auto
+    - const: SyncModeManual
+      ts_const: MANUAL
+      value: manual
+    - const: SyncModeStartup
+      ts_const: STARTUP
+      value: startup
+
+  sse_event_type:
+    - const: EventMatchUpdate
+      ts_const: MATCH_UPDATE
+      value: match_update
+    - const: EventMatchEnded
+      ts_const: MATCH_ENDED
+      value: match_ended
+    - const: EventClockUpdated
+      ts_const: CLOCK_UPDATED
+      value: clock_updated
+    - const: EventSessionUpdate
+      ts_const: SESSION_UPDATE
+      value: session_update
+    - const: EventSyncProgress
+      ts_const: SYNC_PROGRESS
+      value: sync_progress
+
+tiers:
+  - { id: 0,  name: "Unranked",           short_live: "UNRANKED",  short_storage: "UNRANKED" }
+  - { id: 1,  name: "Bronze I",           short_live: "BRZ I",     short_storage: "BRZ I" }
+  - { id: 2,  name: "Bronze II",          short_live: "BRZ II",    short_storage: "BRZ II" }
+  - { id: 3,  name: "Bronze III",         short_live: "BRZ III",   short_storage: "BRZ III" }
+  - { id: 4,  name: "Silver I",           short_live: "SLV I",     short_storage: "SLV I" }
+  - { id: 5,  name: "Silver II",          short_live: "SLV II",    short_storage: "SLV II" }
+  - { id: 6,  name: "Silver III",         short_live: "SLV III",   short_storage: "SLV III" }
+  - { id: 7,  name: "Gold I",             short_live: "GLD I",     short_storage: "GOLD I" }
+  - { id: 8,  name: "Gold II",            short_live: "GLD II",    short_storage: "GOLD II" }
+  - { id: 9,  name: "Gold III",           short_live: "GLD III",   short_storage: "GOLD III" }
+  - { id: 10, name: "Platinum I",         short_live: "PLAT I",    short_storage: "PLAT I" }
+  - { id: 11, name: "Platinum II",        short_live: "PLAT II",   short_storage: "PLAT II" }
+  - { id: 12, name: "Platinum III",       short_live: "PLAT III",  short_storage: "PLAT III" }
+  - { id: 13, name: "Diamond I",          short_live: "DIA I",     short_storage: "DIA I" }
+  - { id: 14, name: "Diamond II",         short_live: "DIA II",    short_storage: "DIA II" }
+  - { id: 15, name: "Diamond III",        short_live: "DIA III",   short_storage: "DIA III" }
+  - { id: 16, name: "Champion I",         short_live: "CHAMP I",   short_storage: "CHAMP I" }
+  - { id: 17, name: "Champion II",        short_live: "CHAMP II",  short_storage: "CHAMP II" }
+  - { id: 18, name: "Champion III",       short_live: "CHAMP III", short_storage: "CHAMP III" }
+  - { id: 19, name: "Grand Champion I",   short_live: "GC I",      short_storage: "GC I" }
+  - { id: 20, name: "Grand Champion II",  short_live: "GC II",     short_storage: "GC II" }
+  - { id: 21, name: "Grand Champion III", short_live: "GC III",    short_storage: "GC III" }
+  - { id: 22, name: "Supersonic Legend",  short_live: "SSL",       short_storage: "SSL" }
+
+divisions:
+  zero_based: ["Division I", "Division II", "Division III", "Division IV"]
+  zero_based_short: ["DIV I", "DIV II", "DIV III", "DIV IV"]
+  one_based_storage: ["Div I", "Div II", "Div III", "Div IV"]
+  one_based_short: ["DIV I", "DIV II", "DIV III", "DIV IV"]
+
+playlists:
+  - { id: 1,  name: "Casual Duel (1v1)",          storage_name: "Casual Duel 1v1",          is_ranked: false, is_extra_mode: false, slugs: ["unranked-duels", "casual-duel"] }
+  - { id: 2,  name: "Casual Doubles (2v2)",       storage_name: "Casual Doubles 2v2",       is_ranked: false, is_extra_mode: false, slugs: ["unranked-doubles", "casual-doubles"] }
+  - { id: 3,  name: "Casual Standard (3v3)",      storage_name: "Casual Standard 3v3",      is_ranked: false, is_extra_mode: false, slugs: ["unranked-standard", "casual-standard"] }
+  - { id: 4,  name: "Casual Chaos (4v4)",         storage_name: "Casual Chaos 4v4",         is_ranked: false, is_extra_mode: false, slugs: ["unranked-chaos", "casual-chaos"] }
+  - { id: 10, name: "Ranked Duel (1v1)",          storage_name: "Ranked Duel 1v1",          is_ranked: true,  is_extra_mode: false, slugs: ["ranked-duels", "duels"] }
+  - { id: 11, name: "Ranked Doubles (2v2)",       storage_name: "Ranked Doubles 2v2",       is_ranked: true,  is_extra_mode: false, slugs: ["ranked-doubles", "doubles"] }
+  - { id: 12, name: "Ranked Solo Standard (3v3)", storage_name: "Ranked Solo Standard 3v3", is_ranked: true,  is_extra_mode: false, slugs: ["ranked-solo-standard"] }
+  - { id: 13, name: "Ranked Standard (3v3)",      storage_name: "Ranked Standard 3v3",      is_ranked: true,  is_extra_mode: false, slugs: ["ranked-standard", "standard"] }
+  - { id: 27, name: "Ranked Hoops",               storage_name: "Hoops",                    is_ranked: true,  is_extra_mode: true,  slugs: ["hoops", "ranked-hoops"] }
+  - { id: 28, name: "Ranked Rumble",              storage_name: "Rumble",                   is_ranked: true,  is_extra_mode: true,  slugs: ["rumble", "ranked-rumble"] }
+  - { id: 29, name: "Ranked Dropshot",            storage_name: "Dropshot",                 is_ranked: true,  is_extra_mode: true,  slugs: ["dropshot", "ranked-dropshot"] }
+  - { id: 30, name: "Ranked Snow Day",            storage_name: "Snow Day",                 is_ranked: true,  is_extra_mode: true,  slugs: ["snowday", "snow-day", "ranked-snow-day"] }
+  - { id: 34, name: "Competitive Tournaments",    storage_name: "Tournament",               is_ranked: true,  is_extra_mode: false, slugs: ["tournament", "tournaments"] }

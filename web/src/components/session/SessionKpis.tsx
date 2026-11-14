@@ -3,12 +3,14 @@ import { MMRHistoryEntry, PlaylistSessionStats, SessionResponse } from '../../ty
 import {
   SessionKpi,
   deltaInk,
+  emptyRoleStats,
   formatMmr,
   formatRecord,
   formatSigned,
+  hasSyncedRoleTelemetry,
   playlistLabels,
-  synthesizeRoleStats,
 } from '../../utils/broadcast';
+import { PlayerRoleStatsSummary } from '../../types/api';
 import { PANEL_LABEL, RecordCells } from '../common/ui';
 import { Sparkline } from '../common/Sparkline';
 import { useDashboard } from '../../context/DashboardContext';
@@ -149,42 +151,70 @@ export const SessionForAgainstTable: React.FC<{
   const wins = session?.total_wins ?? 0;
   const losses = session?.total_losses ?? 0;
 
-  const forStats =
-    session?.for_stats ??
-    synthesizeRoleStats(games, wins, losses, {
-      avg_score: 486,
-      avg_goals: 1.9,
-      avg_assists: 1.1,
-      avg_saves: 2.0,
-      avg_shots: 4.5,
-      shooting_pct: 42,
-      avg_demos_inflicted: 1.6,
-      avg_bpm: 432,
-      avg_boost: 48,
-      avg_supersonic_pct: 19.4,
-    });
+  const forStats = session?.for_stats ?? emptyRoleStats(games, wins, losses);
+  const againstStats = session?.against_stats ?? emptyRoleStats(games, losses, wins);
 
-  const againstStats =
-    session?.against_stats ??
-    synthesizeRoleStats(games, losses, wins, {
-      avg_score: 382,
-      avg_goals: 1.2,
-      avg_assists: 0.7,
-      avg_saves: 1.7,
-      avg_shots: 3.6,
-      shooting_pct: 33,
-      avg_demos_inflicted: 1.1,
-      avg_bpm: 398,
-      avg_boost: 44,
-      avg_supersonic_pct: 16.8,
-    });
-
-  const fmtVal = (avgVal: number, totVal: number, decimals = 1) => {
-    if (games === 0) return '—';
+  const fmtVal = (synced: boolean, avgVal: number, totVal: number, decimals = 1) => {
+    if (games === 0 || !synced) return '—';
     if (isAvg) {
       return decimals === 0 ? Math.round(avgVal).toString() : avgVal.toFixed(decimals);
     }
     return Math.round(totVal).toString();
+  };
+
+  const renderSplitRow = (
+    rowLabel: string,
+    labelColor: string,
+    goalsColor: string,
+    tailColor: string,
+    s: PlayerRoleStatsSummary,
+    borderBottom: boolean
+  ) => {
+    const synced = games > 0 && hasSyncedRoleTelemetry(s);
+    return (
+      <div
+        className={`grid grid-cols-12 px-4 py-2 ${
+          borderBottom ? 'border-b t-border border-line ' : ''
+        }items-center text-base t-font-mono t-hover-panel`}
+      >
+        <div className={`col-span-2 t-font-display font-extrabold text-sm uppercase tracking-wider ${labelColor}`}>
+          {rowLabel}
+        </div>
+        <div className="col-span-1 text-right font-bold t-text-ink2">{s.games}G</div>
+        {!synced ? (
+          <div className="col-span-9 flex items-center justify-between gap-2 pl-4 text-xs t-font-display t-text-faint">
+            <span>{games === 0 ? 'No matches recorded yet' : 'No synced role telemetry'}</span>
+            <span className="t-font-mono">— · — · — · — · — · — · — · — · —</span>
+          </div>
+        ) : (
+          <>
+            <div className="col-span-1 text-right font-bold t-text-strong">
+              {fmtVal(synced, s.avg_score, s.total_score, 0)}
+            </div>
+            <div className={`col-span-1 text-right font-bold ${goalsColor}`}>
+              {fmtVal(synced, s.avg_goals, s.total_goals, 1)}
+            </div>
+            <div className="col-span-1 text-right t-text-ink">
+              {fmtVal(synced, s.avg_assists, s.total_assists, 1)}
+            </div>
+            <div className="col-span-1 text-right t-text-ink">
+              {fmtVal(synced, s.avg_saves, s.total_saves, 1)}
+            </div>
+            <div className="col-span-1 text-right t-text-ink2">
+              {`${Math.round(s.shooting_pct)}%`}
+            </div>
+            <div className="col-span-1 text-right font-bold t-text-orange">
+              {fmtVal(synced, s.avg_demos_inflicted, s.total_demos_inflicted, 1)}
+            </div>
+            <div className="col-span-1 text-right t-text-ink2">{Math.round(s.avg_bpm)}</div>
+            <div className="col-span-1 text-right t-text-muted">{Math.round(s.avg_boost)}</div>
+            <div className={`col-span-1 text-right ${tailColor}`}>
+              {`${s.avg_supersonic_pct.toFixed(1)}%`}
+            </div>
+          </>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -227,75 +257,8 @@ export const SessionForAgainstTable: React.FC<{
         <div className="col-span-1 text-right">SUPER %</div>
       </div>
 
-      {/* Row 1: YOUR STATS (FOR) */}
-      <div className="grid grid-cols-12 px-4 py-2 border-b t-border border-line items-center text-base t-font-mono t-hover-panel">
-        <div className="col-span-2 t-font-display font-extrabold text-sm uppercase tracking-wider t-text-blue">
-          YOUR STATS (FOR)
-        </div>
-        <div className="col-span-1 text-right font-bold t-text-ink2">{forStats.games}G</div>
-        <div className="col-span-1 text-right font-bold t-text-strong">
-          {fmtVal(forStats.avg_score, forStats.total_score, 0)}
-        </div>
-        <div className="col-span-1 text-right font-bold t-text-win">
-          {fmtVal(forStats.avg_goals, forStats.total_goals, 1)}
-        </div>
-        <div className="col-span-1 text-right t-text-ink">
-          {fmtVal(forStats.avg_assists, forStats.total_assists, 1)}
-        </div>
-        <div className="col-span-1 text-right t-text-ink">
-          {fmtVal(forStats.avg_saves, forStats.total_saves, 1)}
-        </div>
-        <div className="col-span-1 text-right t-text-ink2">
-          {games > 0 ? `${Math.round(forStats.shooting_pct)}%` : '—'}
-        </div>
-        <div className="col-span-1 text-right font-bold t-text-orange">
-          {fmtVal(forStats.avg_demos_inflicted, forStats.total_demos_inflicted, 1)}
-        </div>
-        <div className="col-span-1 text-right t-text-ink2">
-          {games > 0 ? Math.round(forStats.avg_bpm) : '—'}
-        </div>
-        <div className="col-span-1 text-right t-text-muted">
-          {games > 0 ? Math.round(forStats.avg_boost) : '—'}
-        </div>
-        <div className="col-span-1 text-right t-text-blue">
-          {games > 0 ? `${forStats.avg_supersonic_pct.toFixed(1)}%` : '—'}
-        </div>
-      </div>
-
-      {/* Row 2: OPPONENTS (AGAINST) */}
-      <div className="grid grid-cols-12 px-4 py-2 items-center text-base t-font-mono t-hover-panel">
-        <div className="col-span-2 t-font-display font-extrabold text-sm uppercase tracking-wider t-text-orange">
-          OPPONENTS (AGAINST)
-        </div>
-        <div className="col-span-1 text-right font-bold t-text-ink2">{againstStats.games}G</div>
-        <div className="col-span-1 text-right font-bold t-text-strong">
-          {fmtVal(againstStats.avg_score, againstStats.total_score, 0)}
-        </div>
-        <div className="col-span-1 text-right font-bold t-text-loss">
-          {fmtVal(againstStats.avg_goals, againstStats.total_goals, 1)}
-        </div>
-        <div className="col-span-1 text-right t-text-ink">
-          {fmtVal(againstStats.avg_assists, againstStats.total_assists, 1)}
-        </div>
-        <div className="col-span-1 text-right t-text-ink">
-          {fmtVal(againstStats.avg_saves, againstStats.total_saves, 1)}
-        </div>
-        <div className="col-span-1 text-right t-text-ink2">
-          {games > 0 ? `${Math.round(againstStats.shooting_pct)}%` : '—'}
-        </div>
-        <div className="col-span-1 text-right font-bold t-text-orange">
-          {fmtVal(againstStats.avg_demos_inflicted, againstStats.total_demos_inflicted, 1)}
-        </div>
-        <div className="col-span-1 text-right t-text-ink2">
-          {games > 0 ? Math.round(againstStats.avg_bpm) : '—'}
-        </div>
-        <div className="col-span-1 text-right t-text-muted">
-          {games > 0 ? Math.round(againstStats.avg_boost) : '—'}
-        </div>
-        <div className="col-span-1 text-right t-text-orange">
-          {games > 0 ? `${againstStats.avg_supersonic_pct.toFixed(1)}%` : '—'}
-        </div>
-      </div>
+      {renderSplitRow('YOUR STATS (FOR)', 't-text-blue', 't-text-win', 't-text-blue', forStats, true)}
+      {renderSplitRow('OPPONENTS (AGAINST)', 't-text-orange', 't-text-loss', 't-text-orange', againstStats, false)}
     </div>
   );
 };

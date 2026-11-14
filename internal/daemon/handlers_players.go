@@ -1,25 +1,22 @@
 package daemon
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/dank/rl-api-utils/internal/playertrack"
 	"github.com/dank/rl-api-utils/internal/storage"
 )
 
 // PlayerSearchResponse represents the paginated envelope returned by GET /api/players.
 type PlayerSearchResponse struct {
-	Players    []*storage.PlayerSummary `json:"players"`
-	Total      int                      `json:"total"`
-	Limit      int                      `json:"limit"`
-	Offset     int                      `json:"offset"`
+	Players    []*storage.PlayerSummary  `json:"players"`
+	Total      int                       `json:"total"`
+	Limit      int                       `json:"limit"`
+	Offset     int                       `json:"offset"`
 	Spotlights *storage.GlobalSpotlights `json:"spotlights,omitempty"`
 }
 
@@ -31,151 +28,98 @@ type PlayerMatchesResponse struct {
 	Offset  int                          `json:"offset"`
 }
 
-// handleCurrentMatch handles GET /current-match and GET /api/current-match.
-func (d *Daemon) handleCurrentMatch(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var resp *playertrack.CurrentMatchResponse
-	if d.playerTracker != nil {
-		resp = d.playerTracker.GetCurrentMatch()
-	}
-
-	if resp == nil {
-		resp = &playertrack.CurrentMatchResponse{
-			ActiveMatch: false,
-			Teammates:   make([]playertrack.LobbyPlayer, 0),
-			Opponents:   make([]playertrack.LobbyPlayer, 0),
-			Spectators:  make([]playertrack.LobbyPlayer, 0),
-			UpdatedAt:   time.Now().UTC(),
-		}
-	} else {
-		if resp.Teammates == nil {
-			resp.Teammates = make([]playertrack.LobbyPlayer, 0)
-		}
-		if resp.Opponents == nil {
-			resp.Opponents = make([]playertrack.LobbyPlayer, 0)
-		}
-		if resp.Spectators == nil {
-			resp.Spectators = make([]playertrack.LobbyPlayer, 0)
+func firstQueryParam(q url.Values, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(q.Get(k)); v != "" {
+			return v
 		}
 	}
+	return ""
+}
 
-	if len(resp.LocalPlayerIDs) == 0 {
-		if d.playerTracker != nil {
-			resp.LocalPlayerIDs = d.playerTracker.GetLocalPlayerIDs(r.Context())
-		}
-		if len(resp.LocalPlayerIDs) == 0 && d.sessionTracker != nil {
-			resp.LocalPlayerIDs = d.sessionTracker.GetLocalPlayerIDs()
-		}
-		if len(resp.LocalPlayerIDs) == 0 && d.stateStore != nil {
-			if ids, err := d.stateStore.GetLocalPlayerIDs(r.Context()); err == nil {
-				resp.LocalPlayerIDs = ids
-			}
-		}
+func (d *Daemon) resolvePlayerRouteID(w http.ResponseWriter, r *http.Request, rawID string, strictUnescape bool) (string, bool) {
+	rawID = strings.Trim(rawID, "/")
+	if rawID == "" {
+		writeJSONError(w, http.StatusNotFound, "player not found")
+		return "", false
 	}
 
-	d.writeJSONResponse(w, r, http.StatusOK, resp, "error encoding current-match response")
+	playerID, err := url.PathUnescape(rawID)
+	if err != nil {
+		if strictUnescape {
+			writeJSONError(w, http.StatusBadRequest, "invalid player id")
+			return "", false
+		}
+		playerID = rawID
+	}
+
+	playerID = strings.TrimSpace(playerID)
+	if playerID == "" {
+		writeJSONError(w, http.StatusNotFound, "player not found")
+		return "", false
+	}
+
+	if d.cfg != nil && strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID) != "" {
+		if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
+			playerID = strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID)
+		}
+	}
+	return playerID, true
 }
 
 // handleListPlayers handles GET /players and GET /api/players.
 func (d *Daemon) handleListPlayers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	isAPIRoute := strings.HasPrefix(r.URL.Path, "/api/")
-
-	limit := 50
-	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
-		if parsed, err := strconv.Atoi(rawLimit); err == nil {
-			if parsed < 1 {
-				limit = 1
-			} else if parsed > 100 {
-				limit = 100
-			} else {
-				limit = parsed
-			}
-		}
-	}
-
-	offset := 0
-	if rawOffset := r.URL.Query().Get("offset"); rawOffset != "" {
-		if parsed, err := strconv.Atoi(rawOffset); err == nil {
-			if parsed < 0 {
-				offset = 0
-			} else {
-				offset = parsed
-			}
-		}
-	}
+	q := r.URL.Query()
+	limit, offset := parseLimitOffset(q, 50, 100)
 
 	if d.stateStore == nil {
-		w.WriteHeader(http.StatusOK)
 		if isAPIRoute {
-			_ = json.NewEncoder(w).Encode(PlayerSearchResponse{
+			d.writeJSONResponse(w, r, http.StatusOK, PlayerSearchResponse{
 				Players: make([]*storage.PlayerSummary, 0),
 				Total:   0,
 				Limit:   limit,
 				Offset:  offset,
-			})
+			}, "error encoding empty player search response")
 		} else {
-			w.Write([]byte("[]\n"))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("[]\n"))
 		}
 		return
 	}
 
-	q := r.URL.Query()
-	query := strings.TrimSpace(q.Get("query"))
-	if query == "" {
-		query = strings.TrimSpace(q.Get("q"))
-	}
-	if query == "" {
-		query = strings.TrimSpace(q.Get("search"))
-	}
-	platform := strings.TrimSpace(q.Get("platform"))
-	role := strings.TrimSpace(q.Get("role"))
-	playlist := strings.TrimSpace(q.Get("playlist"))
-	sortBy := strings.TrimSpace(q.Get("sort_by"))
-	if sortBy == "" {
-		sortBy = strings.TrimSpace(q.Get("sort"))
-	}
-	sortDir := strings.TrimSpace(q.Get("sort_dir"))
-	if sortDir == "" {
-		sortDir = strings.TrimSpace(q.Get("order"))
-	}
-
-	fromUnix := storage.ParseDateFilter(q.Get("from"), false)
-	toUnix := storage.ParseDateFilter(q.Get("to"), true)
-
 	minMatches := 2
-	if rawMinMatches := strings.TrimSpace(q.Get("min_matches")); rawMinMatches != "" {
-		if parsed, err := strconv.Atoi(rawMinMatches); err == nil && parsed > 0 {
+	if rawMin := strings.TrimSpace(q.Get("min_matches")); rawMin != "" {
+		if parsed, err := strconv.Atoi(rawMin); err == nil && parsed > 0 {
 			minMatches = parsed
 		}
 	}
 	minSynergyGames := 1
-	if rawMinSynGames := strings.TrimSpace(q.Get("min_synergy_games")); rawMinSynGames != "" {
-		if parsed, err := strconv.Atoi(rawMinSynGames); err == nil && parsed > 0 {
+	if rawMinSyn := strings.TrimSpace(q.Get("min_synergy_games")); rawMinSyn != "" {
+		if parsed, err := strconv.Atoi(rawMinSyn); err == nil && parsed > 0 {
 			minSynergyGames = parsed
 		}
 	}
 	minSynergyWR := 50.0
-	if rawMinSynWR := strings.TrimSpace(q.Get("min_synergy_wr")); rawMinSynWR != "" {
-		if parsed, err := strconv.ParseFloat(rawMinSynWR, 64); err == nil && parsed > 0 {
+	if rawMinWR := strings.TrimSpace(q.Get("min_synergy_wr")); rawMinWR != "" {
+		if parsed, err := strconv.ParseFloat(rawMinWR, 64); err == nil && parsed > 0 {
 			minSynergyWR = parsed
 		}
 	}
 
 	filter := storage.PlayerDirectoryFilter{
-		Query:           query,
-		Platform:        platform,
-		Role:            role,
-		Playlist:        playlist,
-		FromUnix:        fromUnix,
-		ToUnix:          toUnix,
+		Query:           firstQueryParam(q, "query", "q", "search"),
+		Platform:        strings.TrimSpace(q.Get("platform")),
+		Role:            strings.TrimSpace(q.Get("role")),
+		Playlist:        strings.TrimSpace(q.Get("playlist")),
+		FromUnix:        storage.ParseDateFilter(q.Get("from"), false),
+		ToUnix:          storage.ParseDateFilter(q.Get("to"), true),
 		MinMatches:      minMatches,
 		MinSynergyGames: minSynergyGames,
 		MinSynergyWR:    minSynergyWR,
-		Sort:            sortBy,
-		Order:           sortDir,
+		Sort:            firstQueryParam(q, "sort_by", "sort"),
+		Order:           firstQueryParam(q, "sort_dir", "order"),
 		Limit:           limit,
 		Offset:          offset,
 	}
@@ -187,15 +131,13 @@ func (d *Daemon) handleListPlayers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.logger.Error("failed to query player summaries", slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query players"})
+		writeJSONError(w, http.StatusInternalServerError, "failed to query players")
 		return
 	}
 
 	if summaries == nil {
 		summaries = make([]*storage.PlayerSummary, 0)
 	}
-
 	if isClientDisconnect(r.Context(), nil) {
 		return
 	}
@@ -220,308 +162,26 @@ func (d *Daemon) handleListPlayers(w http.ResponseWriter, r *http.Request) {
 			Offset:     offset,
 			Spotlights: spotlights,
 		}, "error encoding player search response")
-	} else {
-		d.writeJSONResponse(w, r, http.StatusOK, summaries, "error encoding player summaries response")
-	}
-}
-
-// handleGetPlayer handles GET /players/{id} and GET /api/players/{id}.
-func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	rawID := r.PathValue("id")
-	if rawID == "" {
-		rawID = strings.TrimPrefix(r.URL.Path, "/api/players/")
-		rawID = strings.TrimPrefix(rawID, "/players/")
-	}
-	rawID = strings.Trim(rawID, "/")
-
-	if rawID == "" {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
 		return
 	}
-
-	playerID, err := url.PathUnescape(rawID)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid player id"})
-		return
-	}
-	playerID = strings.TrimSpace(playerID)
-	if playerID == "" {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
-		return
-	}
-	if d.cfg != nil && strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID) != "" {
-		if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
-			playerID = strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID)
-		}
-	}
-
-	if d.stateStore == nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
-		return
-	}
-
-	var (
-		player        *storage.PlayerRecord
-		localMatchups []*storage.PlayerMatchup
-		isLocalPlayer bool
-	)
-	player, err = d.stateStore.GetPlayer(r.Context(), playerID)
-	if err != nil {
-		if errors.Is(err, storage.ErrPlayerNotFound) {
-			if sqlStore, ok := d.stateStore.(*storage.SQLiteStore); ok {
-				if lp, lMatchups, lErr := sqlStore.GetLocalPlayerProfile(r.Context(), playerID); lErr == nil && lp != nil {
-					player = lp
-					localMatchups = lMatchups
-					playerID = lp.PlayerID
-					isLocalPlayer = true
-				}
-			} else if jsonStore, ok := d.stateStore.(*storage.JSONStore); ok {
-				if lp, lMatchups, lErr := jsonStore.GetLocalPlayerProfile(r.Context(), playerID); lErr == nil && lp != nil {
-					player = lp
-					localMatchups = lMatchups
-					playerID = lp.PlayerID
-					isLocalPlayer = true
-				}
-			}
-			if player == nil {
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
-				return
-			}
-		} else {
-			if isClientDisconnect(r.Context(), err) {
-				d.logger.Debug("player detail query canceled by client", slog.String("player_id", playerID), slog.Any("error", err))
-				return
-			}
-			d.logger.Error("failed to query player", slog.String("player_id", playerID), slog.Any("error", err))
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query player"})
-			return
-		}
-	}
-	if player == nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
-		return
-	}
-	if !isLocalPlayer {
-		if localIDs, lErr := d.stateStore.GetLocalPlayerIDs(r.Context()); lErr == nil {
-			for _, lid := range localIDs {
-				if strings.EqualFold(lid, player.PlayerID) || strings.EqualFold(lid, playerID) {
-					isLocalPlayer = true
-					if sqlStore, ok := d.stateStore.(*storage.SQLiteStore); ok {
-						if _, lMatchups, mErr := sqlStore.GetLocalPlayerProfile(r.Context(), player.PlayerID); mErr == nil {
-							localMatchups = lMatchups
-						}
-					} else if jsonStore, ok := d.stateStore.(*storage.JSONStore); ok {
-						if _, lMatchups, mErr := jsonStore.GetLocalPlayerProfile(r.Context(), player.PlayerID); mErr == nil {
-							localMatchups = lMatchups
-						}
-					}
-					break
-				}
-			}
-		}
-	}
-	if isLocalPlayer && d.cfg != nil {
-		if cfgID := strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID); cfgID != "" {
-			player.PlayerID = cfgID
-			playerID = cfgID
-			if strings.Contains(cfgID, "|") {
-				if parts := strings.Split(cfgID, "|"); strings.TrimSpace(parts[0]) != "" {
-					player.Platform = strings.TrimSpace(parts[0])
-				}
-			}
-		}
-		if cfgName := strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerName); cfgName != "" && (player.PlayerName == "" || strings.EqualFold(player.PlayerName, "You")) {
-			player.PlayerName = cfgName
-		}
-	}
-
-	q := r.URL.Query()
-	playlist := strings.TrimSpace(q.Get("playlist"))
-	fromUnix := storage.ParseDateFilter(q.Get("from"), false)
-	toUnix := storage.ParseDateFilter(q.Get("to"), true)
-	hasDateFilter := fromUnix > 0 || toUnix > 0
-	hasPlaylistFilter := playlist != "" && strings.ToLower(playlist) != "all"
-
-	var matchups []*storage.PlayerMatchup
-	if isLocalPlayer {
-		matchups = localMatchups
-	} else {
-		matchups, err = d.stateStore.GetPlayerMatchups(r.Context(), playerID)
-		if err != nil {
-			d.logger.Warn("failed to query player matchups; using empty slice",
-				slog.String("player_id", playerID),
-				slog.Any("error", err),
-			)
-			matchups = make([]*storage.PlayerMatchup, 0)
-		}
-	}
-	if matchups == nil {
-		matchups = make([]*storage.PlayerMatchup, 0)
-	}
-
-	pids := storage.ParsePlaylistFilter(playlist)
-	filteredMatchups := matchups
-	if hasPlaylistFilter && len(pids) > 0 {
-		pidSet := make(map[int]bool, len(pids))
-		for _, id := range pids {
-			pidSet[id] = true
-		}
-		filteredMatchups = make([]*storage.PlayerMatchup, 0, len(matchups))
-		for _, mu := range matchups {
-			if pidSet[mu.PlaylistID] {
-				filteredMatchups = append(filteredMatchups, mu)
-			}
-		}
-	}
-
-	var fbTmWins, fbTmLosses, fbOppWins, fbOppLosses, encountersCount int
-	if !hasDateFilter {
-		for _, mu := range filteredMatchups {
-			fbTmWins += mu.WinsAsTeammate
-			fbTmLosses += mu.LossesAsTeammate
-			fbOppWins += mu.WinsAsOpponent
-			fbOppLosses += mu.LossesAsOpponent
-			encountersCount += mu.TotalMatches
-		}
-	}
-
-	var withYouStats, againstYouStats *storage.PlayerRoleStatsSummary
-	if sqlStore, ok := d.stateStore.(*storage.SQLiteStore); ok {
-		withYouStats, againstYouStats = sqlStore.ComputePlayerSplitStats(
-			r.Context(), playerID, player.PlayerName, pids, fromUnix, toUnix,
-			fbTmWins, fbTmLosses, fbOppWins, fbOppLosses,
-		)
-	} else if jsonStore, ok := d.stateStore.(*storage.JSONStore); ok {
-		withYouStats, againstYouStats = jsonStore.ComputePlayerSplitStats(
-			r.Context(), playerID, player.PlayerName, pids, fromUnix, toUnix,
-			fbTmWins, fbTmLosses, fbOppWins, fbOppLosses,
-		)
-	}
-	if withYouStats == nil {
-		withYouStats = &storage.PlayerRoleStatsSummary{}
-	}
-	if againstYouStats == nil {
-		againstYouStats = &storage.PlayerRoleStatsSummary{}
-	}
-
-	tmWins := withYouStats.Wins
-	tmLosses := withYouStats.Losses
-	oppWins := againstYouStats.Wins
-	oppLosses := againstYouStats.Losses
-	totalFromSplit := withYouStats.Games + againstYouStats.Games
-	if hasDateFilter || totalFromSplit > encountersCount {
-		encountersCount = totalFromSplit
-	}
-
-	recentMatches, _, err := d.stateStore.ListPlayerMatches(r.Context(), playerID, storage.PlayerMatchFilter{
-		PlaylistFilter:   playlist,
-		FromUnix:         fromUnix,
-		ToUnix:           toUnix,
-		LocalPerspective: true,
-		Limit:            5,
-	})
-	if err != nil {
-		d.logger.Warn("failed to query player recent matches; using empty slice",
-			slog.String("player_id", playerID),
-			slog.Any("error", err),
-		)
-		recentMatches = make([]*storage.PlayerMatchDetail, 0)
-	}
-	if recentMatches == nil {
-		recentMatches = make([]*storage.PlayerMatchDetail, 0)
-	}
-
-	playerCopy := *player
-
-	relTag := storage.ComputeRelationshipTag(tmWins, tmLosses, oppWins, oppLosses)
-	if isLocalPlayer {
-		relTag = "YOU"
-	}
-
-	resp := PlayerDetailResponse{
-		PlayerRecord:    &playerCopy,
-		EncountersCount: encountersCount,
-		TeammateWins:    tmWins,
-		TeammateLosses:  tmLosses,
-		OpponentWins:    oppWins,
-		OpponentLosses:  oppLosses,
-		RelationshipTag: relTag,
-		WithYouStats:    withYouStats,
-		AgainstYouStats: againstYouStats,
-		Matchups:        filteredMatchups,
-		RecentMatches:   recentMatches,
-	}
-
-	d.writeJSONResponse(w, r, http.StatusOK, resp, "error encoding player detail response")
+	d.writeJSONResponse(w, r, http.StatusOK, summaries, "error encoding player summaries response")
 }
 
 // handleGetPlayerMatches handles GET /players/{id}/matches and GET /api/players/{id}/matches.
 func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	rawID := r.PathValue("id")
 	if rawID == "" {
 		p := strings.TrimPrefix(r.URL.Path, "/api/players/")
 		p = strings.TrimPrefix(p, "/players/")
 		rawID = strings.TrimSuffix(p, "/matches")
 	}
-	rawID = strings.Trim(rawID, "/")
-
-	if rawID == "" {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
+	playerID, ok := d.resolvePlayerRouteID(w, r, rawID, false)
+	if !ok {
 		return
-	}
-
-	playerID, err := url.PathUnescape(rawID)
-	if err != nil {
-		playerID = rawID
-	}
-	playerID = strings.TrimSpace(playerID)
-	if playerID == "" {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
-		return
-	}
-	if d.cfg != nil && strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID) != "" {
-		if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
-			playerID = strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID)
-		}
 	}
 
 	q := r.URL.Query()
-	limit := 50
-	if rawLimit := q.Get("limit"); rawLimit != "" {
-		if parsed, err := strconv.Atoi(rawLimit); err == nil {
-			if parsed < 1 {
-				limit = 1
-			} else if parsed > 100 {
-				limit = 100
-			} else {
-				limit = parsed
-			}
-		}
-	}
-
-	offset := 0
-	if rawOffset := q.Get("offset"); rawOffset != "" {
-		if parsed, err := strconv.Atoi(rawOffset); err == nil {
-			if parsed < 0 {
-				offset = 0
-			} else {
-				offset = parsed
-			}
-		}
-	}
+	limit, offset := parseLimitOffset(q, 50, 100)
 
 	var playlist int
 	rawPlaylist := strings.TrimSpace(q.Get("playlist"))
@@ -531,49 +191,27 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	role := strings.TrimSpace(q.Get("role"))
-	result := strings.TrimSpace(q.Get("result"))
-	status := strings.TrimSpace(q.Get("status"))
-	search := strings.TrimSpace(q.Get("search"))
-	if search == "" {
-		search = strings.TrimSpace(q.Get("query"))
-	}
-	if search == "" {
-		search = strings.TrimSpace(q.Get("q"))
-	}
-	sortBy := strings.TrimSpace(q.Get("sort_by"))
-	if sortBy == "" {
-		sortBy = strings.TrimSpace(q.Get("sort"))
-	}
-	sortDir := strings.TrimSpace(q.Get("sort_dir"))
-	if sortDir == "" {
-		sortDir = strings.TrimSpace(q.Get("order"))
-	}
-	fromUnix := storage.ParseDateFilter(q.Get("from"), false)
-	toUnix := storage.ParseDateFilter(q.Get("to"), true)
-
 	if d.stateStore == nil {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(PlayerMatchesResponse{
+		d.writeJSONResponse(w, r, http.StatusOK, PlayerMatchesResponse{
 			Matches: make([]*storage.PlayerMatchDetail, 0),
 			Total:   0,
 			Limit:   limit,
 			Offset:  offset,
-		})
+		}, "error encoding empty player matches response")
 		return
 	}
 
 	filter := storage.PlayerMatchFilter{
-		Role:             role,
+		Role:             strings.TrimSpace(q.Get("role")),
 		Playlist:         playlist,
 		PlaylistFilter:   rawPlaylist,
-		FromUnix:         fromUnix,
-		ToUnix:           toUnix,
-		Status:           status,
-		Result:           result,
-		Search:           search,
-		SortBy:           sortBy,
-		SortDir:          sortDir,
+		FromUnix:         storage.ParseDateFilter(q.Get("from"), false),
+		ToUnix:           storage.ParseDateFilter(q.Get("to"), true),
+		Status:           strings.TrimSpace(q.Get("status")),
+		Result:           strings.TrimSpace(q.Get("result")),
+		Search:           firstQueryParam(q, "search", "query", "q"),
+		SortBy:           firstQueryParam(q, "sort_by", "sort"),
+		SortDir:          firstQueryParam(q, "sort_dir", "order"),
 		LocalPerspective: true,
 		Limit:            limit,
 		Offset:           offset,
@@ -586,8 +224,7 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		d.logger.Error("failed to query player matches", slog.String("player_id", playerID), slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query player matches"})
+		writeJSONError(w, http.StatusInternalServerError, "failed to query player matches")
 		return
 	}
 
@@ -605,11 +242,8 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 
 // handlePatchPlayer handles PATCH /players/{id...} and PATCH /api/players/{id...}.
 func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	if !isAllowedMutatingOrigin(r) {
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
+		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 
@@ -618,46 +252,24 @@ func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
 		rawID = strings.TrimPrefix(r.URL.Path, "/api/players/")
 		rawID = strings.TrimPrefix(rawID, "/players/")
 	}
-	rawID = strings.Trim(rawID, "/")
-
-	if rawID == "" {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
+	playerID, ok := d.resolvePlayerRouteID(w, r, rawID, false)
+	if !ok {
 		return
-	}
-
-	playerID, err := url.PathUnescape(rawID)
-	if err != nil {
-		playerID = rawID
-	}
-	playerID = strings.TrimSpace(playerID)
-	if playerID == "" {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
-		return
-	}
-	if d.cfg != nil && strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID) != "" {
-		if strings.EqualFold(playerID, "me") || strings.EqualFold(playerID, "you") {
-			playerID = strings.TrimSpace(d.cfg.PlayerTracking.LocalPlayerID)
-		}
 	}
 
 	if d.stateStore == nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
+		writeJSONError(w, http.StatusNotFound, "player not found")
 		return
 	}
 
 	existing, err := d.stateStore.GetPlayer(r.Context(), playerID)
 	if err != nil {
 		if errors.Is(err, storage.ErrPlayerNotFound) {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
+			writeJSONError(w, http.StatusNotFound, "player not found")
 			return
 		}
 		d.logger.Error("failed to query player for update", slog.String("player_id", playerID), slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query player"})
+		writeJSONError(w, http.StatusInternalServerError, "failed to query player")
 		return
 	}
 
@@ -665,9 +277,7 @@ func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
 		Notes *string   `json:"notes"`
 		Tags  *[]string `json:"tags"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+	if !decodeJSONBody(w, r, &payload, false) {
 		return
 	}
 
@@ -675,7 +285,6 @@ func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
 	if payload.Notes != nil {
 		newNotes = *payload.Notes
 	}
-
 	newTags := existing.Tags
 	if payload.Tags != nil {
 		newTags = *payload.Tags
@@ -686,13 +295,11 @@ func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
 
 	if err := d.stateStore.UpdatePlayerNotesAndTags(r.Context(), playerID, newNotes, newTags); err != nil {
 		if errors.Is(err, storage.ErrPlayerNotFound) {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "player not found"})
+			writeJSONError(w, http.StatusNotFound, "player not found")
 			return
 		}
 		d.logger.Error("failed to update player notes/tags", slog.String("player_id", playerID), slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update player"})
+		writeJSONError(w, http.StatusInternalServerError, "failed to update player")
 		return
 	}
 
@@ -703,7 +310,7 @@ func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
 		updated.Tags = newTags
 	}
 
-	d.writeJSONResponse(w, r, http.StatusOK, map[string]interface{}{
+	d.writeJSONResponse(w, r, http.StatusOK, map[string]any{
 		"status": "ok",
 		"player": updated,
 	}, "error encoding patch player response")

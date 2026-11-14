@@ -1,4 +1,6 @@
-import { DashboardTab } from '../components/layout/TopBar';
+import type { DashboardTab } from '../types/matchTypes';
+
+export type { DashboardTab };
 
 export interface PlayerNavTarget {
   id: string;

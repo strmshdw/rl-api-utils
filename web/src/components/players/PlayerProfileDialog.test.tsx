@@ -257,5 +257,118 @@ describe('PlayerProfileDialog', () => {
     expect(matchRow?.textContent).toContain('WIN');
     expect(matchRow?.textContent).toContain('VS YOU');
   });
+
+  it('preserves relationship tag and live threat badges in modal kicker when drilling into stacked profiles', async () => {
+    const rivalProfile = {
+      ...MOCK_PROFILE,
+      player_id: 'rival-player-02',
+      player_name: 'RivalAce',
+      matchups: [
+        {
+          player_id: 'rival-player-02',
+          playlist_id: 11,
+          wins_as_teammate: 0,
+          losses_as_teammate: 0,
+          wins_as_opponent: 1,
+          losses_as_opponent: 6,
+          total_matches: 7,
+          last_played_at: '2026-10-15T18:00:00Z',
+        },
+      ],
+    };
+
+    const matchesWithRival = {
+      ...MOCK_MATCHES_RESPONSE,
+      matches: [
+        {
+          ...MOCK_MATCHES_RESPONSE.matches[0],
+          stats: {
+            date: '2026-10-15T18:00:00Z',
+            players: [
+              ...MOCK_MATCHES_RESPONSE.matches[0].players,
+              {
+                name: 'RivalAce',
+                platform: 'Steam',
+                online_id: 'rival-player-02',
+                team: 1,
+                score: 520,
+                goals: 2,
+                assists: 0,
+                saves: 2,
+                shots: 5,
+                demos: 2,
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/players/rival-player-02/matches')) {
+          return { ok: true, status: 200, json: async () => ({ matches: [], total: 0, limit: 10, offset: 0 }) } as Response;
+        }
+        if (url.includes('/api/players/rival-player-02')) {
+          return { ok: true, status: 200, json: async () => rivalProfile } as Response;
+        }
+        if (url.includes('/api/players/player-test-01/matches')) {
+          return { ok: true, status: 200, json: async () => matchesWithRival } as Response;
+        }
+        return { ok: true, status: 200, json: async () => MOCK_PROFILE } as Response;
+      }),
+    );
+
+    const liveMatch = {
+      active_match: true,
+      playlist_id: 11,
+      playlist_name: 'Ranked Doubles',
+      local_player: {
+        player_id: 'local-player-id',
+        name: 'You',
+        platform: 'Steam',
+        team_num: 0,
+        is_local: true,
+        is_bot: false,
+        current_rank: { playlist_id: 11, playlist_name: 'Ranked Doubles', tier: 16, division: 2, rank_name: 'GC I', mmr: 1515, matches_played: 100 },
+      },
+      teammates: [],
+      opponents: [
+        {
+          player_id: 'rival-player-02',
+          name: 'RivalAce',
+          platform: 'Steam',
+          team_num: 1,
+          is_local: false,
+          is_bot: false,
+          current_rank: { playlist_id: 11, playlist_name: 'Ranked Doubles', tier: 18, division: 1, rank_name: 'GC II', mmr: 1615, matches_played: 120 },
+        },
+      ],
+    } as any;
+
+    const { container } = await mount(
+      <PlayerProfileDialog
+        playerId="player-test-01"
+        playerName="TargetPlayer"
+        onClose={vi.fn()}
+        localPlayerIds={new Set(['local-player-id'])}
+        liveMatch={liveMatch}
+      />,
+    );
+    await flush(10);
+
+    // Expand match box score and click RivalAce to push onto historyStack
+    const matchRow = container.querySelector('[data-testid="profile-match-row"]') as HTMLElement;
+    await act(async () => matchRow.click());
+    await clickText(container, 'RivalAce');
+    await flush(10);
+
+    const dialog = container.querySelector('dialog')!;
+    expect(dialog.textContent).toContain('← BACK TO TargetPlayer');
+    expect(dialog.textContent).toContain('NEMESIS');
+    expect(dialog.textContent).toContain('◆ HIGHER MMR (+100 VS YOU)');
+  });
 });
 

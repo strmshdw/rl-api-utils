@@ -216,11 +216,11 @@ func TestAdversarialSession_ConcurrentDisconnectsAndConcludes(t *testing.T) {
 			}
 			isDrop := (rng.Intn(2) == 0)
 			snap := &playertrack.CurrentMatchResponse{
-				ActiveMatch:  true,
-				MatchGUID:    fmt.Sprintf("guid-race-%d", i%5),
-				PlaylistID:   11,
-				LocalTeam:    &localTeam,
-				UpdatedAt:    time.Now().UTC(),
+				ActiveMatch: true,
+				MatchGUID:   fmt.Sprintf("guid-race-%d", i%5),
+				PlaylistID:  11,
+				LocalTeam:   &localTeam,
+				UpdatedAt:   time.Now().UTC(),
 				Teammates: []playertrack.LobbyPlayer{
 					{
 						PlayerID:       "Steam|churn_tm|0",
@@ -247,14 +247,14 @@ func TestAdversarialSession_ConcurrentDisconnectsAndConcludes(t *testing.T) {
 			default:
 			}
 			match := &playertrack.CurrentMatchResponse{
-				ActiveMatch:  false,
-				MatchEnded:   true,
-				MatchGUID:    fmt.Sprintf("conclude-race-%d", i),
-				PlaylistID:   11,
-				LocalTeam:    &localTeam,
-				WinnerTeam:   &winnerTeam,
-				Result:       "victory",
-				UpdatedAt:    time.Now().UTC(),
+				ActiveMatch: false,
+				MatchEnded:  true,
+				MatchGUID:   fmt.Sprintf("conclude-race-%d", i),
+				PlaylistID:  11,
+				LocalTeam:   &localTeam,
+				WinnerTeam:  &winnerTeam,
+				Result:      "victory",
+				UpdatedAt:   time.Now().UTC(),
 				Teammates: []playertrack.LobbyPlayer{
 					{
 						PlayerID:       "Steam|churn_tm|0",

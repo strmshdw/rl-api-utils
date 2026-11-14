@@ -3,11 +3,24 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/dank/rl-api-utils/internal/contracts"
 	"github.com/dank/rl-api-utils/internal/playertrack"
 	"github.com/dank/rl-api-utils/internal/storage"
+)
+
+// DefaultContinueWindow is the default maximum elapsed time since the last match
+// of a previous session during which that session can be continued.
+const DefaultContinueWindow = 2 * time.Hour
+
+// Sentinel errors for session continuation.
+var (
+	ErrNoContinuableSession  = errors.New("no continuable session available")
+	ErrContinueWindowExpired = errors.New("session continuation window has expired")
 )
 
 // EventType defines valid Server-Sent Events identifiers.
@@ -15,15 +28,15 @@ type EventType = string
 
 const (
 	// EventMatchUpdate is emitted when active match telemetry, rosters, or stats change.
-	EventMatchUpdate EventType = "match_update"
+	EventMatchUpdate EventType = string(contracts.EventMatchUpdate)
 	// EventMatchEnded is emitted when a match concludes and final scores are recorded.
-	EventMatchEnded EventType = "match_ended"
+	EventMatchEnded EventType = string(contracts.EventMatchEnded)
 	// EventClockUpdated is emitted when live game clock or overtime status changes.
-	EventClockUpdated EventType = "clock_updated"
+	EventClockUpdated EventType = string(contracts.EventClockUpdated)
 	// EventSessionUpdate is emitted when session-level statistics or history update.
-	EventSessionUpdate EventType = "session_update"
+	EventSessionUpdate EventType = string(contracts.EventSessionUpdate)
 	// EventSyncProgress is emitted when background replay/Ballchasing sync starts, progresses, or completes.
-	EventSyncProgress EventType = "sync_progress"
+	EventSyncProgress EventType = string(contracts.EventSyncProgress)
 )
 
 // MostPlayedPlaylistSummary summarizes the most-played playlist in a session.
@@ -261,3 +274,66 @@ func (r *SessionResponse) DeepClone() *SessionResponse {
 	return &clone
 }
 
+// Option configures SessionTracker.
+type Option func(*SessionTracker)
+
+// WithLogger sets the structured logger for SessionTracker.
+func WithLogger(logger *slog.Logger) Option {
+	return func(s *SessionTracker) {
+		if logger != nil {
+			s.logger = logger
+		}
+	}
+}
+
+// WithBroadcaster injects an EventBroadcaster.
+func WithBroadcaster(b *EventBroadcaster) Option {
+	return func(s *SessionTracker) {
+		if b != nil {
+			s.broadcaster = b
+		}
+	}
+}
+
+// WithStateStore attaches persistent storage for session history and continuation.
+func WithStateStore(store storage.StateStore) Option {
+	return func(s *SessionTracker) {
+		if store != nil {
+			s.store = store
+		}
+	}
+}
+
+// WithContinueWindow configures the maximum time since the last match of a previous
+// session during which that session can be continued (0 disables continuation).
+func WithContinueWindow(d time.Duration) Option {
+	return func(s *SessionTracker) {
+		if d < 0 {
+			d = 0
+		}
+		s.continueWindow = d
+		s.continueWindowExplicit = true
+	}
+}
+
+// WithClock injects a custom time source for deterministic testing.
+func WithClock(nowFn func() time.Time) Option {
+	return func(s *SessionTracker) {
+		if nowFn != nil {
+			s.nowFunc = nowFn
+		}
+	}
+}
+
+// WithNowFunc is an alias for WithClock for flexible configuration naming.
+func WithNowFunc(nowFn func() time.Time) Option {
+	return WithClock(nowFn)
+}
+
+// WithSummaryEnricher configures a callback applied to SessionResponse snapshots before
+// returning or broadcasting session updates.
+func WithSummaryEnricher(fn func(*SessionResponse) *SessionResponse) Option {
+	return func(s *SessionTracker) {
+		s.summaryEnricher = fn
+	}
+}

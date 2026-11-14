@@ -347,4 +347,3 @@ func TestPostMatchMMRPoller_DelayedPsyNetCommitReconcilesSessionAndStore(t *test
 		t.Errorf("expected mmr_history MMR=1210 MMRChange=10 MatchGUID=%q, got %+v", matchGUID, hist[0])
 	}
 }
-
