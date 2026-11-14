@@ -2,45 +2,11 @@ package replay
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-	"time"
 )
-
-// ReplayPlayerStats contains per-player statistics extracted from a .replay file.
-type ReplayPlayerStats struct {
-	Name     string `json:"name"`
-	Platform string `json:"platform"`
-	OnlineID string `json:"online_id"`
-	Team     int    `json:"team"` // 0 = Blue, 1 = Orange
-	Score    int    `json:"score"`
-	Goals    int    `json:"goals"`
-	Assists  int    `json:"assists"`
-	Saves    int    `json:"saves"`
-	Shots    int    `json:"shots"`
-	Demos    int    `json:"demos,omitempty"`
-	IsBot    bool   `json:"is_bot"`
-}
-
-// ReplayMetadata contains game-level metadata and box scores extracted from a .replay file.
-type ReplayMetadata struct {
-	MatchGUID    string              `json:"match_guid"`
-	MapName      string              `json:"map_name"`
-	Team0Score   int                 `json:"team0_score"` // Blue
-	Team1Score   int                 `json:"team1_score"` // Orange
-	WinnerTeam   *int                `json:"winner_team,omitempty"`
-	TeamSize     int                 `json:"team_size"`
-	TotalSeconds float32             `json:"total_seconds"`
-	Forfeit      bool                `json:"forfeit"`
-	Overtime     bool                `json:"overtime"`
-	Date         string              `json:"date"`
-	Players      []ReplayPlayerStats `json:"players"`
-	LocalTeam    *int                `json:"local_team,omitempty"`
-	PlayerName   string              `json:"player_name,omitempty"` // Local player name in replay
-}
 
 // ParseReplayFile reads and parses the header of a Rocket League .replay file from disk.
 func ParseReplayFile(filePath string) (*ReplayMetadata, error) {
@@ -48,54 +14,27 @@ func ParseReplayFile(filePath string) (*ReplayMetadata, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open replay: %w", err)
 	}
-
 	return ParseReplay(bytes.NewReader(data))
 }
 
 // ParseReplay reads and parses the header properties from an io.ReadSeeker.
 func ParseReplay(r io.ReadSeeker) (*ReplayMetadata, error) {
-	var headerLen, crc, engVer, licVer int32
-	if err := binary.Read(r, binary.LittleEndian, &headerLen); err != nil {
-		return nil, fmt.Errorf("read headerLen: %w", err)
-	}
-	if headerLen <= 0 || headerLen > 32*1024*1024 {
-		return nil, fmt.Errorf("invalid headerLen: %d", headerLen)
-	}
-	if err := binary.Read(r, binary.LittleEndian, &crc); err != nil {
-		return nil, fmt.Errorf("read crc: %w", err)
-	}
-	if err := binary.Read(r, binary.LittleEndian, &engVer); err != nil {
-		return nil, fmt.Errorf("read engineVersion: %w", err)
-	}
-	if err := binary.Read(r, binary.LittleEndian, &licVer); err != nil {
-		return nil, fmt.Errorf("read licenseeVersion: %w", err)
-	}
-
-	if engVer >= 868 && licVer >= 18 {
-		var netVer int32
-		if err := binary.Read(r, binary.LittleEndian, &netVer); err != nil {
-			return nil, fmt.Errorf("read netVersion: %w", err)
-		}
-	}
-
-	className, err := readFString(r)
+	br, err := newBoundedReader(r)
 	if err != nil {
-		return nil, fmt.Errorf("read className: %w", err)
+		return nil, fmt.Errorf("init replay reader: %w", err)
 	}
-	if !strings.HasPrefix(className, "TAGame.") {
-		return nil, fmt.Errorf("unrecognized replay class %q", className)
+	if err := parseHeader(br); err != nil {
+		return nil, err
 	}
 
-	meta := &ReplayMetadata{}
-
-	props, err := parsePropertyMap(r)
+	props, err := parsePropertyMap(br)
 	if err != nil {
 		return nil, fmt.Errorf("parse property map: %w", err)
 	}
 
+	meta := &ReplayMetadata{}
 	populateMetadata(meta, props)
 
-	// Determine winner
 	if meta.Team0Score > meta.Team1Score {
 		w := 0
 		meta.WinnerTeam = &w
@@ -103,69 +42,56 @@ func ParseReplay(r io.ReadSeeker) (*ReplayMetadata, error) {
 		w := 1
 		meta.WinnerTeam = &w
 	}
-
 	return meta, nil
 }
 
-func readFString(r io.Reader) (string, error) {
-	var length int32
-	if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
-		return "", err
+func parseHeader(br *boundedReader) error {
+	headerLen, err := br.readInt32()
+	if err != nil {
+		return fmt.Errorf("read headerLen: %w", err)
 	}
-	if length == 0 {
-		return "", nil
+	if headerLen <= 0 || headerLen > maxHeaderLen {
+		return fmt.Errorf("invalid headerLen: %d", headerLen)
 	}
-
-	const maxStrLen = 65536
-	if length > maxStrLen || length < -maxStrLen {
-		return "", fmt.Errorf("invalid fstring length %d (exceeds max %d)", length, maxStrLen)
+	if _, err := br.readInt32(); err != nil {
+		return fmt.Errorf("read crc: %w", err)
 	}
-
-	if length > 0 {
-		buf := make([]byte, length)
-		if _, err := io.ReadFull(r, buf); err != nil {
-			return "", err
+	engVer, err := br.readInt32()
+	if err != nil {
+		return fmt.Errorf("read engineVersion: %w", err)
+	}
+	licVer, err := br.readInt32()
+	if err != nil {
+		return fmt.Errorf("read licenseeVersion: %w", err)
+	}
+	if engVer >= netVersionEngineThreshold && licVer >= netVersionLicenseeThreshold {
+		if _, err := br.readInt32(); err != nil {
+			return fmt.Errorf("read netVersion: %w", err)
 		}
-		// String is null terminated
-		return strings.TrimRight(string(buf), "\x00"), nil
 	}
 
-	// Negative length indicates UTF-16LE
-	utfLen := -length * 2
-	buf := make([]byte, utfLen)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return "", err
+	className, err := br.readFString()
+	if err != nil {
+		return fmt.Errorf("read className: %w", err)
 	}
-	// Decode UTF-16LE to string
-	u16 := make([]uint16, -length)
-	for i := 0; i < len(u16); i++ {
-		u16[i] = binary.LittleEndian.Uint16(buf[i*2 : (i+1)*2])
+	if !strings.HasPrefix(className, "TAGame.") {
+		return fmt.Errorf("unrecognized replay class %q", className)
 	}
-	runes := make([]rune, 0, len(u16))
-	for _, v := range u16 {
-		if v == 0 {
-			break
-		}
-		runes = append(runes, rune(v))
-	}
-	return string(runes), nil
+	return nil
 }
 
-type propertyValue struct {
-	typeName string
-	intVal   int
-	strVal   string
-	floatVal float32
-	boolVal  bool
-	int64Val int64
-	subProps []map[string]*propertyValue
+func parsePropertyMap(br *boundedReader) (map[string]*propertyValue, error) {
+	return parsePropertyMapWithDepth(br, 0)
 }
 
-func parsePropertyMap(r io.ReadSeeker) (map[string]*propertyValue, error) {
+func parsePropertyMapWithDepth(br *boundedReader, depth int) (map[string]*propertyValue, error) {
+	if depth > maxPropertyDepth {
+		return nil, fmt.Errorf("property nesting depth %d exceeds max %d", depth, maxPropertyDepth)
+	}
 	props := make(map[string]*propertyValue)
 
 	for {
-		name, err := readFString(r)
+		name, err := br.readFString()
 		if err != nil {
 			return nil, err
 		}
@@ -174,308 +100,127 @@ func parsePropertyMap(r io.ReadSeeker) (map[string]*propertyValue, error) {
 			break
 		}
 
-		typeName, err := readFString(r)
+		typeName, err := br.readFString()
 		if err != nil {
 			return nil, err
 		}
 		typeName = strings.TrimSpace(typeName)
 
-		var dataSize int64
-		if err := binary.Read(r, binary.LittleEndian, &dataSize); err != nil {
+		dataSize, err := br.readInt64()
+		if err != nil {
 			return nil, err
 		}
-		if dataSize < 0 || dataSize > 16*1024*1024 {
+		if dataSize < 0 || dataSize > maxPropertyDataSize {
 			return nil, fmt.Errorf("invalid property dataSize %d", dataSize)
 		}
 
-		pv := &propertyValue{typeName: typeName}
-
-		switch typeName {
-		case "IntProperty":
-			var v int32
-			if err := binary.Read(r, binary.LittleEndian, &v); err != nil {
-				return nil, err
-			}
-			pv.intVal = int(v)
-
-		case "StrProperty", "NameProperty":
-			s, err := readFString(r)
-			if err != nil {
-				return nil, err
-			}
-			pv.strVal = s
-
-		case "FloatProperty":
-			var v float32
-			if err := binary.Read(r, binary.LittleEndian, &v); err != nil {
-				return nil, err
-			}
-			pv.floatVal = v
-
-		case "BoolProperty":
-			var b byte
-			if err := binary.Read(r, binary.LittleEndian, &b); err != nil {
-				return nil, err
-			}
-			pv.boolVal = (b != 0)
-
-		case "QWordProperty":
-			var v int64
-			if err := binary.Read(r, binary.LittleEndian, &v); err != nil {
-				return nil, err
-			}
-			pv.int64Val = v
-
-		case "ByteProperty":
-			enumType, err := readFString(r)
-			if err != nil {
-				return nil, err
-			}
-			if dataSize > 0 {
-				if enumType != "" && enumType != "None" {
-					enumVal, _ := readFString(r)
-					pv.strVal = enumVal
-				} else {
-					if dataSize > 1024*1024 {
-						return nil, fmt.Errorf("invalid byte property dataSize %d", dataSize)
-					}
-					buf := make([]byte, dataSize)
-					io.ReadFull(r, buf)
-					if len(buf) > 0 {
-						pv.intVal = int(buf[0])
-					}
-				}
-			}
-
-		case "ArrayProperty":
-			var count int32
-			if err := binary.Read(r, binary.LittleEndian, &count); err != nil {
-				return nil, err
-			}
-			if count < 0 || count > 1000 {
-				return nil, fmt.Errorf("invalid array count %d", count)
-			}
-			if name == "PlayerStats" {
-				for i := int32(0); i < count; i++ {
-					sub, err := parsePropertyMap(r)
-					if err != nil {
-						break
-					}
-					pv.subProps = append(pv.subProps, sub)
-				}
-			} else {
-				rem := dataSize - 4
-				if rem > 0 {
-					r.Seek(rem, io.SeekCurrent)
-				}
-			}
-
-		case "StructProperty":
-			structType, err := readFString(r)
-			if err != nil {
-				return nil, err
-			}
-			if structType == "UniqueNetId" {
-				startPos, _ := r.Seek(0, io.SeekCurrent)
-				innerProps, err := parsePropertyMap(r)
-				if err == nil {
-					pv.subProps = []map[string]*propertyValue{innerProps}
-				}
-				r.Seek(startPos+dataSize, io.SeekStart)
-			} else {
-				if dataSize > 0 {
-					r.Seek(dataSize, io.SeekCurrent)
-				}
-			}
-
-		default:
-			if dataSize > 0 {
-				r.Seek(dataSize, io.SeekCurrent)
-			}
+		pv, err := parsePropertyValue(br, name, typeName, dataSize, depth)
+		if err != nil {
+			return nil, err
 		}
-
 		props[name] = pv
 	}
 
 	return props, nil
 }
 
-func populateMetadata(meta *ReplayMetadata, props map[string]*propertyValue) {
-	if v, ok := props["Id"]; ok {
-		meta.MatchGUID = v.strVal
-	}
-	if v, ok := props["MapName"]; ok {
-		meta.MapName = v.strVal
-	}
-	if v, ok := props["Team0Score"]; ok {
-		meta.Team0Score = v.intVal
-	}
-	if v, ok := props["Team1Score"]; ok {
-		meta.Team1Score = v.intVal
-	}
-	if v, ok := props["TeamSize"]; ok {
-		meta.TeamSize = v.intVal
-	}
-	if v, ok := props["TotalSecondsPlayed"]; ok {
-		meta.TotalSeconds = v.floatVal
-	}
-	if v, ok := props["bForfeit"]; ok {
-		meta.Forfeit = v.boolVal
-	}
-	meta.Overtime = extractOvertime(meta, props)
-	if v, ok := props["Date"]; ok && strings.TrimSpace(v.strVal) != "" {
-		meta.Date = normalizeReplayDate(v.strVal)
-	} else if v, ok := props["MatchStartEpoch"]; ok && v.int64Val > 0 {
-		meta.Date = time.Unix(v.int64Val, 0).UTC().Format(time.RFC3339)
-	}
-	if v, ok := props["PrimaryPlayerTeam"]; ok {
-		t := v.intVal
-		meta.LocalTeam = &t
-	}
-	if v, ok := props["PlayerName"]; ok {
-		meta.PlayerName = v.strVal
-	}
+func parsePropertyValue(br *boundedReader, name, typeName string, dataSize int64, depth int) (*propertyValue, error) {
+	pv := &propertyValue{typeName: typeName}
 
-	if ps, ok := props["PlayerStats"]; ok && len(ps.subProps) > 0 {
-		for _, sp := range ps.subProps {
-			p := ReplayPlayerStats{}
-			if n, ok := sp["Name"]; ok {
-				p.Name = n.strVal
-			}
-			if sc, ok := sp["Score"]; ok {
-				p.Score = sc.intVal
-			}
-			if g, ok := sp["Goals"]; ok {
-				p.Goals = g.intVal
-			}
-			if a, ok := sp["Assists"]; ok {
-				p.Assists = a.intVal
-			}
-			if s, ok := sp["Saves"]; ok {
-				p.Saves = s.intVal
-			}
-			if sh, ok := sp["Shots"]; ok {
-				p.Shots = sh.intVal
-			}
-			for _, key := range []string{"Demos", "Demolitions", "Demolition", "demos"} {
-				if d, ok := sp[key]; ok {
-					p.Demos = d.intVal
-					break
-				}
-			}
-			if tm, ok := sp["Team"]; ok {
-				p.Team = tm.intVal
-			}
-			if bot, ok := sp["bBot"]; ok {
-				p.IsBot = bot.boolVal
-			}
-			if plat, ok := sp["Platform"]; ok {
-				p.Platform = cleanPlatformName(plat.strVal)
-			}
-			if pid, ok := sp["PlayerID"]; ok && len(pid.subProps) > 0 {
-				inner := pid.subProps[0]
-				if uid, ok := inner["Uid"]; ok && uid.int64Val != 0 {
-					p.OnlineID = fmt.Sprintf("%d", uid.int64Val)
-					if p.Platform == "" {
-						p.Platform = "Steam"
-					}
-				}
-				if epicID, ok := inner["EpicAccountId"]; ok && epicID.strVal != "" {
-					p.OnlineID = epicID.strVal
-					p.Platform = "Epic"
-				}
-				if plat, ok := inner["Platform"]; ok && plat.strVal != "" {
-					p.Platform = cleanPlatformName(plat.strVal)
-				}
-			}
-			if oid, ok := sp["OnlineID"]; ok {
-				if oid.int64Val != 0 && p.OnlineID == "" {
-					p.OnlineID = fmt.Sprintf("%d", oid.int64Val)
-				} else if oid.strVal != "" && p.OnlineID == "" {
-					p.OnlineID = oid.strVal
-				}
-			}
-
-			if p.Platform == "" {
-				p.Platform = "Unknown"
-			}
-
-			meta.Players = append(meta.Players, p)
+	switch typeName {
+	case "IntProperty":
+		v, err := br.readInt32()
+		if err != nil {
+			return nil, err
 		}
-	}
-}
+		pv.intVal = int(v)
 
-func cleanPlatformName(raw string) string {
-	raw = strings.TrimPrefix(raw, "OnlinePlatform_")
-	switch strings.ToLower(raw) {
-	case "steam":
-		return "Steam"
-	case "epic", "eos":
-		return "Epic"
-	case "ps4", "ps5", "playstation", "psn":
-		return "PlayStation"
-	case "dingo", "xbox", "xboxone", "xboxseries":
-		return "Xbox"
-	case "switch", "nintendo":
-		return "Switch"
+	case "StrProperty", "NameProperty":
+		s, err := br.readFString()
+		if err != nil {
+			return nil, err
+		}
+		pv.strVal = s
+
+	case "FloatProperty":
+		v, err := br.readFloat32()
+		if err != nil {
+			return nil, err
+		}
+		pv.floatVal = v
+
+	case "BoolProperty":
+		b, err := br.readBool()
+		if err != nil {
+			return nil, err
+		}
+		pv.boolVal = b
+
+	case "QWordProperty":
+		v, err := br.readInt64()
+		if err != nil {
+			return nil, err
+		}
+		pv.int64Val = v
+
+	case "ByteProperty":
+		strVal, intVal, err := br.readBytePropertyValue(dataSize)
+		if err != nil {
+			return nil, err
+		}
+		pv.strVal = strVal
+		pv.intVal = intVal
+
+	case "ArrayProperty":
+		count, err := br.readInt32()
+		if err != nil {
+			return nil, err
+		}
+		if count < 0 || count > maxArrayCount {
+			return nil, fmt.Errorf("invalid array count %d", count)
+		}
+		if name == "PlayerStats" {
+			const minPropMapBytes = 4
+			if int64(count)*minPropMapBytes > br.remaining() {
+				return nil, fmt.Errorf("player stats count %d exceeds remaining %d: %w", count, br.remaining(), io.ErrUnexpectedEOF)
+			}
+			for i := int32(0); i < count; i++ {
+				sub, subErr := parsePropertyMapWithDepth(br, depth+1)
+				if subErr != nil {
+					return nil, subErr
+				}
+				pv.subProps = append(pv.subProps, sub)
+			}
+		} else if err := br.skipArrayPropertyPayload(dataSize); err != nil {
+			return nil, err
+		}
+
+	case "StructProperty":
+		structType, err := br.readFString()
+		if err != nil {
+			return nil, err
+		}
+		if structType == "UniqueNetId" {
+			var innerProps map[string]*propertyValue
+			var innerErr error
+			if err := br.withBound(dataSize, func() error {
+				innerProps, innerErr = parsePropertyMapWithDepth(br, depth+1)
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+			if innerErr == nil {
+				pv.subProps = []map[string]*propertyValue{innerProps}
+			}
+		} else if err := br.skipPropertyPayload(dataSize); err != nil {
+			return nil, err
+		}
+
 	default:
-		return raw
-	}
-}
-
-// normalizeReplayDate parses various Rocket League replay header date layouts
-// and normalizes them into canonical UTC RFC3339 format.
-func normalizeReplayDate(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	layouts := []string{
-		"2006-01-02 15-04-05", // Standard Psyonix replay header format
-		"2006-01-02:15-04",    // Older / PsyNet match history format
-		"2006-01-02 15:04:05", // Standard space-separated datetime
-		"2006-01-02T15:04:05", // ISO-8601 without offset
-		time.RFC3339,          // Canonical RFC3339
-		time.RFC3339Nano,      // RFC3339 with nanoseconds
-		"2006-01-02",          // Date-only fallback
-	}
-	for _, l := range layouts {
-		if t, err := time.Parse(l, raw); err == nil {
-			return t.UTC().Format(time.RFC3339)
-		}
-	}
-	return raw // Defensive fallback: retain raw string if unrecognized
-}
-
-// extractOvertime determines whether a match went into overtime based on explicit
-// header properties or telemetry indicator heuristics.
-func extractOvertime(meta *ReplayMetadata, props map[string]*propertyValue) bool {
-	// 1. Explicit boolean properties
-	for _, key := range []string{"bOvertime", "bOverTime", "Overtime", "overtime"} {
-		if v, ok := props[key]; ok {
-			return v.boolVal
+		if err := br.skipPropertyPayload(dataSize); err != nil {
+			return nil, err
 		}
 	}
 
-	// 2. Explicit OvertimeSeconds property
-	if v, ok := props["OvertimeSeconds"]; ok {
-		if v.intVal > 0 || v.floatVal > 0 {
-			return true
-		}
-	}
-
-	// 3. Telemetry indicator heuristic
-	// Regulation is 300s. Zero-second play can extend duration up to ~310s.
-	// Overtime is sudden death, requiring score difference of exactly 1 and no forfeit.
-	scoreDiff := meta.Team0Score - meta.Team1Score
-	if scoreDiff < 0 {
-		scoreDiff = -scoreDiff
-	}
-
-	if meta.TotalSeconds >= 315.0 && !meta.Forfeit && scoreDiff == 1 {
-		return true
-	}
-
-	return false
+	return pv, nil
 }
-
