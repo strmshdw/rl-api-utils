@@ -12,6 +12,10 @@ import (
 	"github.com/dank/rlapi"
 )
 
+// defaultExpiryBuffer is the proactive safety window applied by IsExpired so tokens
+// are refreshed before hitting upstream expiration mid-request.
+const defaultExpiryBuffer = 5 * time.Minute
+
 // Sentinel errors for the authentication layer.
 var (
 	ErrMissingCredentials  = errors.New("missing authentication credentials")
@@ -35,11 +39,35 @@ type TokenInfo struct {
 	TokenType     string                  `json:"token_type"`
 	ExpiresAt     time.Time               `json:"expires_at"`
 	RawEOS        *rlapi.EOSTokenResponse `json:"raw_eos,omitempty"`
+
+	nowFn func() time.Time
 }
 
-// IsExpired checks if the access token is expired, applying a default 30-second safety buffer.
+// SetClock injects a custom clock function used by IsExpired and IsExpiredWithBuffer.
+func (t *TokenInfo) SetClock(fn func() time.Time) {
+	if t != nil {
+		t.nowFn = fn
+	}
+}
+
+func (t *TokenInfo) now() time.Time {
+	if t != nil && t.nowFn != nil {
+		return t.nowFn()
+	}
+	return time.Now()
+}
+
+func (t *TokenInfo) clone() *TokenInfo {
+	if t == nil {
+		return nil
+	}
+	cp := *t
+	return &cp
+}
+
+// IsExpired checks if the access token is expired, applying the default 5-minute safety buffer.
 func (t *TokenInfo) IsExpired() bool {
-	return t.IsExpiredWithBuffer(30 * time.Second)
+	return t.IsExpiredWithBuffer(defaultExpiryBuffer)
 }
 
 // IsExpiredWithBuffer checks if the access token expires within the given buffer duration.
@@ -50,7 +78,7 @@ func (t *TokenInfo) IsExpiredWithBuffer(buffer time.Duration) bool {
 	if t.ExpiresAt.IsZero() {
 		return false
 	}
-	return time.Now().Add(buffer).After(t.ExpiresAt)
+	return t.now().Add(buffer).After(t.ExpiresAt)
 }
 
 // Valid returns true if the token is non-nil, has an access token, and is not expired.
@@ -152,6 +180,13 @@ func defaultOptions() *providerOptions {
 	}
 }
 
+func computeTokenExpiry(now time.Time, expiresIn int) time.Time {
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	return now.Add(time.Duration(expiresIn) * time.Second)
+}
+
 // NewProvider is a factory that instantiates an AuthProvider based on AuthConfig.Provider.
 func NewProvider(cfg config.AuthConfig, store storage.StateStore, opts ...Option) (AuthProvider, error) {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
@@ -179,8 +214,7 @@ func NewPollingProvider(cfg config.PollingAuthConfig, opts ...Option) (AuthProvi
 		Epic:     cfg.Epic,
 		Steam:    cfg.Steam,
 	}
-	// Prepend WithAccountRole(RolePolling) so caller options can still customize it
+	// Prepend WithAccountRole(RolePolling) so caller options can still customize it.
 	combinedOpts := append([]Option{WithAccountRole(RolePolling)}, opts...)
 	return NewProvider(authCfg, nil, combinedOpts...)
 }
-

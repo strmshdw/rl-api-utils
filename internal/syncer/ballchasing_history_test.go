@@ -286,3 +286,73 @@ func TestBallchasingHistorySyncer_Cancellation(t *testing.T) {
 	}
 }
 
+
+func TestBallchasingHistorySyncer_SharedRateLimiterAndNotFoundSkip(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/replays/replay-404" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+			return
+		}
+		if r.URL.Path == "/replays/replay-ok" {
+			_ = json.NewEncoder(w).Encode(ballchasing.ReplayItem{
+				ID:        "replay-ok",
+				MatchGUID: "guid-ok",
+				Status:    "ok",
+				Date:      "2026-10-16T18:00:00Z",
+				Blue:      ballchasing.ReplayTeam{Goals: 2},
+				Orange:    ballchasing.ReplayTeam{Goals: 1},
+			})
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/replays") {
+			_ = json.NewEncoder(w).Encode(ballchasing.ReplayListResponse{
+				Count: 2,
+				List: []ballchasing.ReplayItem{
+					{ID: "replay-404", MatchGUID: "guid-404"},
+					{ID: "replay-ok", MatchGUID: "guid-ok"},
+				},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(ballchasing.PingResponse{Name: "Hero", SteamID: "123"})
+	}))
+	defer server.Close()
+
+	sharedRL := ballchasing.NewRateLimiter(1 * time.Millisecond)
+	client, err := ballchasing.NewClient(ballchasing.ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-key",
+		MaxRetries:  1,
+		RateLimiter: sharedRL,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	store, err := storage.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	hs := NewBallchasingHistorySyncer(client, store, "", "", nil)
+	if hs.RateLimiter() != sharedRL {
+		t.Fatalf("expected default RateLimiter() to reuse client.RateLimiter()")
+	}
+
+	customRL := ballchasing.NewRateLimiter(2 * time.Millisecond)
+	hs.SetRateLimiter(customRL)
+	if hs.RateLimiter() != customRL {
+		t.Fatalf("expected SetRateLimiter to update rate limiter")
+	}
+
+	prog, err := hs.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+	if prog.SyncedMatches != 1 {
+		t.Fatalf("expected 1 synced match (404 skipped), got %d", prog.SyncedMatches)
+	}
+}

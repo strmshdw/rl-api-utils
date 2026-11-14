@@ -2,11 +2,12 @@ package ballchasing
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dank/rl-api-utils/internal/domain"
 )
 
 // Sentinel errors returned by the Ballchasing client.
@@ -146,11 +147,8 @@ type TeamStats struct {
 	Demo        *DemoStats        `json:"demo,omitempty"`
 }
 
-// BallStats measures ball possession and territorial occupation.
-type BallStats struct {
-	PossessionTime float64 `json:"possession_time"` // Time in seconds team held ball possession
-	TimeInSide     float64 `json:"time_in_side"`     // Time in seconds ball stayed in team's defensive half
-}
+// BallStats aliases domain.BallStats as canonical SSoT.
+type BallStats = domain.BallStats
 
 // ReplayPlayer represents a player in a Ballchasing replay team.
 // Supports both flat list representation and comprehensive nested telemetry.
@@ -196,135 +194,23 @@ type PlayerTelemetry struct {
 	Ball        *BallStats        `json:"ball,omitempty"`
 }
 
-// CoreStats represents traditional and advanced mechanics counters.
-type CoreStats struct {
-	Shots              int     `json:"shots"`
-	ShotsAgainst       int     `json:"shots_against"`
-	Goals              int     `json:"goals"`
-	GoalsAgainst       int     `json:"goals_against"`
-	Saves              int     `json:"saves"`
-	Assists            int     `json:"assists"`
-	Score              int     `json:"score"`
-	MVP                bool    `json:"mvp"`
-	ShootingPercentage float64 `json:"shooting_percentage"`
+// CoreStats aliases domain.CoreStats as canonical SSoT.
+type CoreStats = domain.CoreStats
 
-	// Extended in-game mechanics
-	EpicSaves    int `json:"epic_saves"`
-	Clears       int `json:"clears"`
-	Centers      int `json:"centers"`
-	AerialHits   int `json:"aerial_hits"`
-	FirstTouches int `json:"first_touches"`
-	FlipResets   int `json:"flip_resets"`
-	CrossbarHits int `json:"crossbar_hits"`
-	BicycleHits  int `json:"bicycle_hits"`
-	JuggleHits   int `json:"juggle_hits"`
-}
+// BoostStats aliases domain.BoostStats as canonical SSoT.
+type BoostStats = domain.BoostStats
 
-// BoostStats captures boost economy, steals, and distribution metrics.
-type BoostStats struct {
-	BPM                       float64 `json:"bpm"`
-	BCPM                      float64 `json:"bcpm"`
-	AvgAmount                 float64 `json:"avg_amount"`
-	AmountCollected           int     `json:"amount_collected"`
-	AmountStolen              int     `json:"amount_stolen"`
-	AmountCollectedBig        int     `json:"amount_collected_big"`
-	AmountStolenBig           int     `json:"amount_stolen_big"`
-	AmountCollectedSmall      int     `json:"amount_collected_small"`
-	AmountStolenSmall         int     `json:"amount_stolen_small"`
-	CountCollectedBig         int     `json:"count_collected_big"`
-	CountStolenBig            int     `json:"count_stolen_big"`
-	CountCollectedSmall       int     `json:"count_collected_small"`
-	CountStolenSmall          int     `json:"count_stolen_small"`
-	AmountOverfill            int     `json:"amount_overfill"`
-	AmountOverfillStolen      int     `json:"amount_overfill_stolen"`
-	AmountUsedWhileSupersonic int     `json:"amount_used_while_supersonic"`
-	TimeZeroBoost             float64 `json:"time_zero_boost"`
-	PercentZeroBoost          float64 `json:"percent_zero_boost"`
-	TimeFullBoost             float64 `json:"time_full_boost"`
-	PercentFullBoost          float64 `json:"percent_full_boost"`
-	TimeBoost0To25            float64 `json:"time_boost_0_25"`
-	TimeBoost25To50           float64 `json:"time_boost_25_50"`
-	TimeBoost50To75           float64 `json:"time_boost_50_75"`
-	TimeBoost75To100          float64 `json:"time_boost_75_100"`
-	PercentBoost0To25         float64 `json:"percent_boost_0_25"`
-	PercentBoost25To50        float64 `json:"percent_boost_25_50"`
-	PercentBoost50To75        float64 `json:"percent_boost_50_75"`
-	PercentBoost75To100       float64 `json:"percent_boost_75_100"`
-}
+// MovementStats aliases domain.MovementStats as canonical SSoT.
+type MovementStats = domain.MovementStats
 
-// MovementStats measures speed, distance, elevation, and powerslide mechanics.
-type MovementStats struct {
-	AvgSpeed              float64 `json:"avg_speed"`
-	TotalDistance         float64 `json:"total_distance"`
-	TimeSupersonicSpeed   float64 `json:"time_supersonic_speed"`
-	TimeBoostSpeed        float64 `json:"time_boost_speed"`
-	TimeSlowSpeed         float64 `json:"time_slow_speed"`
-	TimeGround            float64 `json:"time_ground"`
-	TimeLowAir            float64 `json:"time_low_air"`
-	TimeHighAir           float64 `json:"time_high_air"`
-	TimePowerslide        float64 `json:"time_powerslide"`
-	CountPowerslide       int     `json:"count_powerslide"`
-	AvgPowerslideDuration float64 `json:"avg_powerslide_duration"`
-	AvgSpeedPercentage    float64 `json:"avg_speed_percentage"`
-	PercentSlowSpeed      float64 `json:"percent_slow_speed"`
-	PercentBoostSpeed     float64 `json:"percent_boost_speed"`
-	PercentSupersonic     float64 `json:"percent_supersonic_speed"`
-	PercentGround         float64 `json:"percent_ground"`
-	PercentLowAir         float64 `json:"percent_low_air"`
-	PercentHighAir        float64 `json:"percent_high_air"`
-}
+// PositioningStats aliases domain.PositioningStats as canonical SSoT.
+type PositioningStats = domain.PositioningStats
 
-// PositioningStats quantifies field positioning, spacing, and third/half allocations.
-type PositioningStats struct {
-	AvgDistanceToBall             float64 `json:"avg_distance_to_ball"`
-	AvgDistanceToBallPossession   float64 `json:"avg_distance_to_ball_possession"`
-	AvgDistanceToBallNoPossession float64 `json:"avg_distance_to_ball_no_possession"`
-	AvgDistanceToMates            float64 `json:"avg_distance_to_mates"`
-	TimeDefensiveThird            float64 `json:"time_defensive_third"`
-	TimeNeutralThird              float64 `json:"time_neutral_third"`
-	TimeOffensiveThird            float64 `json:"time_offensive_third"`
-	TimeDefensiveHalf             float64 `json:"time_defensive_half"`
-	TimeOffensiveHalf             float64 `json:"time_offensive_half"`
-	TimeBehindBall                float64 `json:"time_behind_ball"`
-	TimeInFrontOfBall             float64 `json:"time_infront_ball"`
-	TimeMostBack                  float64 `json:"time_most_back"`
-	TimeMostForward               float64 `json:"time_most_forward"`
-	GoalsAgainstWhileLastDefender int     `json:"goals_against_while_last_defender"`
-	TimeClosestToBall             float64 `json:"time_closest_to_ball"`
-	TimeFarthestFromBall          float64 `json:"time_farthest_from_ball"`
-	PercentDefensiveThird         float64 `json:"percent_defensive_third"`
-	PercentOffensiveThird         float64 `json:"percent_offensive_third"`
-	PercentNeutralThird           float64 `json:"percent_neutral_third"`
-	PercentDefensiveHalf          float64 `json:"percent_defensive_half"`
-	PercentOffensiveHalf          float64 `json:"percent_offensive_half"`
-	PercentBehindBall             float64 `json:"percent_behind_ball"`
-	PercentInFrontOfBall          float64 `json:"percent_infront_ball"`
-	PercentMostBack               float64 `json:"percent_most_back"`
-	PercentMostForward            float64 `json:"percent_most_forward"`
-	PercentClosestToBall          float64 `json:"percent_closest_to_ball"`
-	PercentFarthestFromBall       float64 `json:"percent_farthest_from_ball"`
-}
+// DemoStats aliases domain.DemoStats as canonical SSoT.
+type DemoStats = domain.DemoStats
 
-// DemoStats details inflicted and taken demolitions with field-half splits.
-type DemoStats struct {
-	Inflicted                int `json:"inflicted"`
-	InflictedInDefensiveHalf int `json:"inflicted_in_defensive_half"`
-	InflictedInOffensiveHalf int `json:"inflicted_in_offensive_half"`
-	Taken                    int `json:"taken"`
-	TakenInDefensiveHalf     int `json:"taken_in_defensive_half"`
-	TakenInOffensiveHalf     int `json:"taken_in_offensive_half"`
-}
-
-// CameraSettings stores player camera configuration settings.
-type CameraSettings struct {
-	FOV             int     `json:"fov"`
-	Height          int     `json:"height"`
-	Pitch           int     `json:"pitch"`
-	Distance        int     `json:"distance"`
-	Stiffness       float64 `json:"stiffness"`
-	SwivelSpeed     float64 `json:"swivel_speed"`
-	TransitionSpeed float64 `json:"transition_speed"`
-}
+// CameraSettings aliases domain.CameraSettings as canonical SSoT.
+type CameraSettings = domain.CameraSettings
 
 // PlayerIdentity contains player platform and platform account ID.
 type PlayerIdentity struct {
@@ -341,15 +227,8 @@ type PlayerDemos struct {
 	Taken     int `json:"taken"`
 }
 
-// PlayerRank represents rank and tier information.
-type PlayerRank struct {
-	ID        string  `json:"id,omitempty"`
-	Tier      int     `json:"tier,omitempty"`
-	Division  int     `json:"division,omitempty"`
-	Name      string  `json:"name,omitempty"`
-	ShortRank string  `json:"short_rank,omitempty"`
-	MMR       float64 `json:"mmr,omitempty"`
-}
+// PlayerRank aliases domain.PlayerRank as canonical SSoT.
+type PlayerRank = domain.PlayerRank
 
 // RankInfo aliases PlayerRank for min_rank / max_rank contract compatibility.
 type RankInfo = PlayerRank
@@ -374,203 +253,28 @@ type GroupInfo struct {
 	Link string `json:"link"`
 }
 
-// UnmarshalJSON bridges flat list and nested detail formats seamlessly.
-func (p *ReplayPlayer) UnmarshalJSON(data []byte) error {
-	type Alias ReplayPlayer
-	aux := &struct {
-		*Alias
-	}{
-		Alias: (*Alias)(p),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// 1. If nested Stats is present (Detail response), bridge to top-level pointers & flat fields
-	if p.Stats != nil {
-		if p.Stats.Core != nil {
-			if p.Core == nil {
-				p.Core = p.Stats.Core
-			}
-			if p.Score == 0 {
-				p.Score = p.Stats.Core.Score
-			}
-			if p.Goals == 0 {
-				p.Goals = p.Stats.Core.Goals
-			}
-			if p.Assists == 0 {
-				p.Assists = p.Stats.Core.Assists
-			}
-			if p.Saves == 0 {
-				p.Saves = p.Stats.Core.Saves
-			}
-			if p.Shots == 0 {
-				p.Shots = p.Stats.Core.Shots
-			}
-			if !p.MVP && p.Stats.Core.MVP {
-				p.MVP = true
-			}
-		}
-		if p.Stats.Boost != nil && p.Boost == nil {
-			p.Boost = p.Stats.Boost
-		}
-		if p.Stats.Movement != nil && p.Movement == nil {
-			p.Movement = p.Stats.Movement
-		}
-		if p.Stats.Positioning != nil && p.Positioning == nil {
-			p.Positioning = p.Stats.Positioning
-		}
-		if p.Stats.Demo != nil {
-			if p.Demo == nil {
-				p.Demo = p.Stats.Demo
-			}
-			if p.Demos.Inflicted == 0 {
-				p.Demos.Inflicted = p.Stats.Demo.Inflicted
-			}
-			if p.Demos.Taken == 0 {
-				p.Demos.Taken = p.Stats.Demo.Taken
-			}
-		}
-		if p.Stats.Ball != nil && p.Ball == nil {
-			p.Ball = p.Stats.Ball
-		}
-	} else {
-		// 2. If nested Stats is missing, check if direct category pointers or flat fields exist
-		hasPointers := p.Core != nil || p.Boost != nil || p.Movement != nil || p.Positioning != nil || p.Demo != nil || p.Ball != nil
-		if hasPointers {
-			p.Stats = &PlayerTelemetry{
-				Core:        p.Core,
-				Boost:       p.Boost,
-				Movement:    p.Movement,
-				Positioning: p.Positioning,
-				Demo:        p.Demo,
-				Ball:        p.Ball,
-			}
-		} else if p.Score > 0 || p.Goals > 0 || p.Assists > 0 || p.Saves > 0 || p.Shots > 0 {
-			// Synthesize Core from flat fields so callers accessing p.Stats.Core or p.Core never get nil
-			p.Core = &CoreStats{
-				Score:   p.Score,
-				Goals:   p.Goals,
-				Assists: p.Assists,
-				Saves:   p.Saves,
-				Shots:   p.Shots,
-				MVP:     p.MVP,
-			}
-			p.Stats = &PlayerTelemetry{Core: p.Core}
-		}
-		if p.Demo == nil && (p.Demos.Inflicted > 0 || p.Demos.Taken > 0) {
-			p.Demo = &DemoStats{
-				Inflicted: p.Demos.Inflicted,
-				Taken:     p.Demos.Taken,
-			}
-			if p.Stats == nil {
-				p.Stats = &PlayerTelemetry{}
-			}
-			p.Stats.Demo = p.Demo
-		}
-	}
-
-	return nil
-}
-
-// UnmarshalJSON implements json.Unmarshaler for ReplayTeam, hydrating top-level
-// Goals from nested stats.core.goals or the sum of player goals when top-level
-// goals is omitted (as in Ballchasing's single replay detail endpoint).
-func (t *ReplayTeam) UnmarshalJSON(data []byte) error {
-	type Alias ReplayTeam
-	aux := &struct {
-		*Alias
-	}{
-		Alias: (*Alias)(t),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	if t.Goals == 0 && t.Stats != nil && t.Stats.Core != nil && t.Stats.Core.Goals > 0 {
-		t.Goals = t.Stats.Core.Goals
-	}
-	if t.Goals == 0 && len(t.Players) > 0 {
-		sum := 0
-		for _, p := range t.Players {
-			sum += p.Goals
-		}
-		if sum > 0 {
-			t.Goals = sum
-		}
-	}
-	return nil
-}
-
-// UnmarshalJSON bridges field differences between list and detail replay objects.
-func (r *ReplayItem) UnmarshalJSON(data []byte) error {
-	type Alias ReplayItem
-	aux := &struct {
-		*Alias
-	}{
-		Alias: (*Alias)(r),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// Synchronize Title and ReplayTitle across list and detail schemas
-	if r.Title == "" && r.ReplayTitle != "" {
-		r.Title = r.ReplayTitle
-	} else if r.ReplayTitle == "" && r.Title != "" {
-		r.ReplayTitle = r.Title
-	}
-
-	// Synchronize RocketLeagueID and MatchGUID
-	if r.MatchGUID == "" && r.RocketLeagueID != "" {
-		r.MatchGUID = r.RocketLeagueID
-	} else if r.RocketLeagueID == "" && r.MatchGUID != "" {
-		r.RocketLeagueID = r.MatchGUID
-	}
-
-	// Cross-check team goals from opponent's goals_against if still zero
-	if r.Blue.Goals == 0 && r.Orange.Stats != nil && r.Orange.Stats.Core != nil && r.Orange.Stats.Core.GoalsAgainst > 0 {
-		r.Blue.Goals = r.Orange.Stats.Core.GoalsAgainst
-	}
-	if r.Orange.Goals == 0 && r.Blue.Stats != nil && r.Blue.Stats.Core != nil && r.Blue.Stats.Core.GoalsAgainst > 0 {
-		r.Orange.Goals = r.Blue.Stats.Core.GoalsAgainst
-	}
-
-	return nil
-}
-
 // MapPlaylistSlugToID maps Ballchasing playlist slugs or string IDs to numeric Rocket League playlist IDs.
 func MapPlaylistSlugToID(slug string) int {
-	slug = strings.TrimSpace(strings.ToLower(slug))
-	switch slug {
-	case "ranked-duels", "ranked-duel", "1v1", "10":
+	if id := domain.MapPlaylistSlugToID(slug); id > 0 {
+		return id
+	}
+	normalized := strings.TrimSpace(strings.ToLower(slug))
+	switch normalized {
+	case "ranked-duel", "1v1":
 		return 10
-	case "ranked-doubles", "ranked-double", "2v2", "11":
+	case "ranked-double", "2v2":
 		return 11
-	case "ranked-solo-standard", "solo-standard", "12":
+	case "solo-standard":
 		return 12
-	case "ranked-standard", "3v3", "13":
+	case "3v3":
 		return 13
-	case "ranked-hoops", "hoops", "27":
-		return 27
-	case "ranked-rumble", "rumble", "28":
-		return 28
-	case "ranked-dropshot", "dropshot", "29":
-		return 29
-	case "ranked-snowday", "snowday", "30":
+	case "ranked-snowday":
 		return 30
-	case "tournament", "tournaments", "34":
-		return 34
-	case "casual-standard", "unranked-standard", "3":
-		return 3
-	case "casual-doubles", "unranked-doubles", "2":
-		return 2
-	case "casual-duels", "casual-duel", "unranked-duels", "unranked-duel", "1":
+	case "casual-duels", "unranked-duel", "unranked-duels":
 		return 1
-	case "casual-chaos", "unranked-chaos", "4":
-		return 4
 	default:
-		// Attempt numeric parse if already an integer string (e.g. "11", "22")
-		if id, err := strconv.Atoi(slug); err == nil && id > 0 {
+		// Attempt numeric parse if already an integer string (e.g. "22", "100")
+		if id, err := strconv.Atoi(normalized); err == nil && id > 0 {
 			return id
 		}
 		return 0
@@ -588,4 +292,5 @@ type ClientConfig struct {
 	BaseBackoff  time.Duration
 	MaxBackoff   time.Duration
 	StreamUpload bool // true enables zero-RAM streaming via io.MultiReader with exact Content-Length
+	RateLimiter  *RateLimiter
 }

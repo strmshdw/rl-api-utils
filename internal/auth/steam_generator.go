@@ -70,9 +70,7 @@ func (g *NodeSteamTicketGenerator) GenerateTicket(ctx context.Context, opts Stea
 		return nil, fmt.Errorf("locating steam-auth.js: %w", err)
 	}
 
-	args := []string{
-		absScriptPath,
-	}
+	args := []string{absScriptPath}
 	if opts.Username != "" {
 		args = append(args, "--username", opts.Username)
 	}
@@ -87,24 +85,9 @@ func (g *NodeSteamTicketGenerator) GenerateTicket(ctx context.Context, opts Stea
 
 	cmd := exec.CommandContext(ctx, nodeBin, args...)
 	cmd.Dir = filepath.Dir(absScriptPath)
+	cmd.Env = buildSteamAuthEnv(os.Environ(), opts)
 
-	// Inject credentials safely via process environment variables rather than CLI flags (SPEC-06)
-	env := os.Environ()
-	if opts.Username != "" {
-		env = append(env, "STEAM_USERNAME="+opts.Username)
-	}
-	if opts.Password != "" {
-		env = append(env, "STEAM_PASSWORD="+opts.Password)
-	}
-	if opts.LoginKey != "" {
-		env = append(env, "STEAM_LOGIN_KEY="+opts.LoginKey)
-	}
-	if opts.AccountLabel != "" {
-		env = append(env, "STEAM_ACCOUNT_TYPE="+opts.AccountLabel)
-	}
-	cmd.Env = env
-
-	// Attach stdin and stderr for interactive Steam Guard prompts
+	// Attach stdin and stderr for interactive Steam Guard prompts.
 	cmd.Stdin = os.Stdin
 	cmd.Stderr = os.Stderr
 
@@ -121,7 +104,7 @@ func (g *NodeSteamTicketGenerator) GenerateTicket(ctx context.Context, opts Stea
 		return nil, errors.New("steam authenticator produced empty output")
 	}
 
-	// The last line of stdout is our JSON output
+	// The last line of stdout is our JSON output.
 	lines := strings.Split(stdoutStr, "\n")
 	lastLine := strings.TrimSpace(lines[len(lines)-1])
 
@@ -144,10 +127,37 @@ func (g *NodeSteamTicketGenerator) GenerateTicket(ctx context.Context, opts Stea
 	return &res, nil
 }
 
+func buildSteamAuthEnv(baseEnv []string, opts SteamTicketOptions) []string {
+	managed := map[string]string{
+		"STEAM_USERNAME":     opts.Username,
+		"STEAM_PASSWORD":     opts.Password,
+		"STEAM_LOGIN_KEY":    opts.LoginKey,
+		"STEAM_ACCOUNT_TYPE": opts.AccountLabel,
+	}
+
+	env := make([]string, 0, len(baseEnv)+len(managed))
+	for _, entry := range baseEnv {
+		key, _, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		if _, isManaged := managed[strings.ToUpper(key)]; isManaged {
+			continue
+		}
+		env = append(env, entry)
+	}
+
+	for key, val := range managed {
+		if val != "" {
+			env = append(env, key+"="+val)
+		}
+	}
+	return env
+}
+
 // findSteamAuthScript searches for steam-auth.js across configured directory,
 // working directory ancestry, and executable directory ancestry.
 func findSteamAuthScript(scriptDir string) (string, error) {
-	// 1. Check explicitly specified scriptDir
 	if scriptDir != "" {
 		candidates := []string{
 			filepath.Join(scriptDir, "steam-auth.js"),
@@ -155,53 +165,48 @@ func findSteamAuthScript(scriptDir string) (string, error) {
 		}
 		for _, cand := range candidates {
 			if abs, err := filepath.Abs(cand); err == nil {
-				if stat, err := os.Stat(abs); err == nil && !stat.IsDir() {
+				if isRegularFile(abs) {
 					return abs, nil
 				}
 			}
 		}
 	}
 
-	// 2. Search upward from current working directory
 	if cwd, err := os.Getwd(); err == nil {
-		curr := cwd
-		for {
-			target := filepath.Join(curr, "steam", "steam-auth.js")
-			if stat, err := os.Stat(target); err == nil && !stat.IsDir() {
-				return target, nil
-			}
-			targetDirect := filepath.Join(curr, "steam-auth.js")
-			if stat, err := os.Stat(targetDirect); err == nil && !stat.IsDir() {
-				return targetDirect, nil
-			}
-			parent := filepath.Dir(curr)
-			if parent == curr {
-				break
-			}
-			curr = parent
+		if found := searchParentsForScript(cwd); found != "" {
+			return found, nil
 		}
 	}
 
-	// 3. Search upward from executable directory
 	if exe, err := os.Executable(); err == nil {
-		curr := filepath.Dir(exe)
-		for {
-			target := filepath.Join(curr, "steam", "steam-auth.js")
-			if stat, err := os.Stat(target); err == nil && !stat.IsDir() {
-				return target, nil
-			}
-			targetDirect := filepath.Join(curr, "steam-auth.js")
-			if stat, err := os.Stat(targetDirect); err == nil && !stat.IsDir() {
-				return targetDirect, nil
-			}
-			parent := filepath.Dir(curr)
-			if parent == curr {
-				break
-			}
-			curr = parent
+		if found := searchParentsForScript(filepath.Dir(exe)); found != "" {
+			return found, nil
 		}
 	}
 
 	return "", errors.New("steam-auth.js not found in working directory, executable directory, or parents")
 }
 
+func searchParentsForScript(startDir string) string {
+	curr := startDir
+	for {
+		for _, cand := range []string{
+			filepath.Join(curr, "steam", "steam-auth.js"),
+			filepath.Join(curr, "steam-auth.js"),
+		} {
+			if isRegularFile(cand) {
+				return cand
+			}
+		}
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			return ""
+		}
+		curr = parent
+	}
+}
+
+func isRegularFile(path string) bool {
+	stat, err := os.Stat(path)
+	return err == nil && !stat.IsDir()
+}

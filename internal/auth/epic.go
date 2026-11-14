@@ -14,7 +14,7 @@ import (
 
 // EpicAuthProvider implements AuthProvider for Epic Games Store accounts.
 type EpicAuthProvider struct {
-	cfg         config.EpicConfig
+	cfg         config.EpicConfig // immutable after construction
 	store       storage.StateStore
 	egsClient   EGSClient
 	clock       func() time.Time
@@ -22,6 +22,7 @@ type EpicAuthProvider struct {
 	prompter    CodePrompter
 	tokenSaver  ConfigTokenSaver
 
+	refreshMu sync.Mutex
 	mu        sync.RWMutex
 	tokenInfo *TokenInfo
 }
@@ -38,12 +39,16 @@ func NewEpicProvider(cfg config.EpicConfig, store storage.StateStore, opts ...Op
 	if role == "" {
 		role = RolePrimary
 	}
+	clock := options.clock
+	if clock == nil {
+		clock = time.Now
+	}
 
 	return &EpicAuthProvider{
 		cfg:         cfg,
 		store:       options.store,
 		egsClient:   options.egsClient,
-		clock:       options.clock,
+		clock:       clock,
 		accountRole: role,
 		prompter:    options.prompter,
 		tokenSaver:  options.tokenSaver,
@@ -73,175 +78,141 @@ func (p *EpicAuthProvider) Validate() error {
 	return fmt.Errorf("%w: epic provider requires either 'refresh_token' or 'auth_code'", ErrMissingCredentials)
 }
 
+// TokenInfo returns a safe copy of the current cached TokenInfo, or nil if not authenticated.
+func (p *EpicAuthProvider) TokenInfo() *TokenInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.tokenInfo.clone()
+}
+
+func (p *EpicAuthProvider) validCachedToken() *TokenInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.tokenInfo != nil && !p.tokenInfo.IsExpired() {
+		return p.tokenInfo.clone()
+	}
+	return nil
+}
+
 // Authenticate executes the full Epic Games OAuth and EOS token exchange sequence.
-// If refresh tokens are missing or invalid, it triggers interactive authorization if a prompter is available.
+// Concurrent callers are serialized via refreshMu with double-checked locking so parallel
+// callers reuse the refreshed token instead of triggering competing refresh token rotations.
 func (p *EpicAuthProvider) Authenticate(ctx context.Context) (*TokenInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if cached := p.validCachedToken(); cached != nil {
+		return cached, nil
+	}
 
-	// 1. Resolve credentials: check config, then check persistent StateStore fallback
-	refreshToken := strings.TrimSpace(p.cfg.RefreshToken)
+	p.refreshMu.Lock()
+	defer p.refreshMu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if cached := p.validCachedToken(); cached != nil {
+		return cached, nil
+	}
+
+	return p.authenticateLocked(ctx)
+}
+
+func (p *EpicAuthProvider) authenticateLocked(ctx context.Context) (*TokenInfo, error) {
+	storeKey := p.accountRole.StoreKey("epic")
+	refreshCandidates := p.collectRefreshCandidates(ctx, storeKey)
 	authCode := strings.TrimSpace(p.cfg.AuthCode)
 
-	storeKey := p.accountRole.StoreKey("epic")
-	if refreshToken == "" && authCode == "" && p.store != nil {
-		storedToken, _, _, err := p.store.GetAuthState(ctx, storeKey)
-		if err == nil && strings.TrimSpace(storedToken) != "" {
-			refreshToken = strings.TrimSpace(storedToken)
+	var tokenResp *rlapi.TokenResponse
+	var usedRefreshToken string
+	var oauthErr error
+
+	// 1. Prefer refresh tokens (cached -> StateStore -> config) even when a stale auth_code is present.
+	for _, rt := range refreshCandidates {
+		resp, err := p.egsClient.AuthenticateWithRefreshToken(rt)
+		if err == nil && resp != nil {
+			tokenResp = resp
+			usedRefreshToken = rt
+			oauthErr = nil
+			break
+		}
+		if err != nil {
+			oauthErr = err
 		}
 	}
 
-	// If no credentials found in config or store, prompt interactively if prompter is available
-	if refreshToken == "" && authCode == "" {
+	// 2. Fallback to one-time authorization code if refresh tokens were absent or rejected.
+	if tokenResp == nil && authCode != "" {
+		resp, err := p.egsClient.AuthenticateWithCode(authCode)
+		if err == nil && resp != nil {
+			tokenResp = resp
+			oauthErr = nil
+		} else if err != nil {
+			oauthErr = err
+		}
+	}
+
+	// 3. Fallback to interactive CodePrompter if available.
+	if tokenResp == nil {
 		if p.prompter != nil {
-			authURL := p.egsClient.GetAuthURL()
-			code, err := p.prompter.PromptForCode(ctx, p.accountRole.Label(), authURL)
-			if err != nil {
-				return nil, fmt.Errorf("%w: interactive login prompt failed: %v", ErrAuthFailed, err)
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
-			authCode = strings.TrimSpace(code)
-		} else {
+			authURL := p.egsClient.GetAuthURL()
+			code, promptErr := p.prompter.PromptForCode(ctx, p.accountRole.Label(), authURL)
+			if promptErr != nil {
+				return nil, fmt.Errorf("%w: interactive login prompt failed: %w", ErrAuthFailed, promptErr)
+			}
+			trimmedCode := strings.TrimSpace(code)
+			if trimmedCode == "" {
+				return nil, fmt.Errorf("%w: authorization code cannot be empty", ErrAuthFailed)
+			}
+			resp, err := p.egsClient.AuthenticateWithCode(trimmedCode)
+			if err != nil {
+				return nil, fmt.Errorf("%w: epic oauth failed: %v", ErrAuthFailed, err)
+			}
+			tokenResp = resp
+			oauthErr = nil
+		} else if len(refreshCandidates) == 0 && authCode == "" {
 			return nil, fmt.Errorf("%w: epic provider requires either 'refresh_token' or 'auth_code'", ErrMissingCredentials)
 		}
 	}
 
-	// 2. Perform EGS OAuth token grant
-	var tokenResp *rlapi.TokenResponse
-	var err error
-
-	if refreshToken != "" {
-		tokenResp, err = p.egsClient.AuthenticateWithRefreshToken(refreshToken)
-		if err != nil && authCode != "" {
-			// Fallback to auth code if refresh token failed but auth code is present
-			tokenResp, err = p.egsClient.AuthenticateWithCode(authCode)
-		} else if err != nil && p.prompter != nil {
-			// Stored or configured refresh token was revoked/expired; prompt interactively
-			authURL := p.egsClient.GetAuthURL()
-			code, promptErr := p.prompter.PromptForCode(ctx, p.accountRole.Label(), authURL)
-			if promptErr == nil && strings.TrimSpace(code) != "" {
-				tokenResp, err = p.egsClient.AuthenticateWithCode(strings.TrimSpace(code))
-			}
-		}
-	} else {
-		tokenResp, err = p.egsClient.AuthenticateWithCode(authCode)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("%w: epic oauth failed: %v", ErrAuthFailed, err)
+	if oauthErr != nil {
+		return nil, fmt.Errorf("%w: epic oauth failed: %v", ErrAuthFailed, oauthErr)
 	}
 	if tokenResp == nil {
 		return nil, fmt.Errorf("%w: received nil token response from epic", ErrAuthFailed)
 	}
 
-	// 3. Acquire short-lived exchange code
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	exchangeCode, err := p.egsClient.GetExchangeCode(tokenResp.AccessToken)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to obtain exchange code: %v", ErrExchangeFailed, err)
-	}
-
-	// 4. Exchange for Rocket League scoped EOS access token
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	eosResp, err := p.egsClient.ExchangeEOSToken(exchangeCode)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to exchange EOS token: %v", ErrExchangeFailed, err)
-	}
-	if eosResp == nil {
-		return nil, fmt.Errorf("%w: received nil EOS token response", ErrExchangeFailed)
-	}
-
-	// 5. Build TokenInfo
-	now := p.clock()
-	expiresIn := eosResp.ExpiresIn
-	if expiresIn <= 0 {
-		expiresIn = 3600
-	}
-	expiresAt := now.Add(time.Duration(expiresIn) * time.Second)
-
-	accountID := tokenResp.AccountID
-	if accountID == "" {
-		accountID = eosResp.AccountID
-	}
-	displayName := tokenResp.DisplayName
-	if displayName == "" {
-		displayName = p.cfg.DisplayName
-	}
-
-	newRefreshToken := tokenResp.RefreshToken
-	if newRefreshToken == "" {
-		newRefreshToken = refreshToken
-	}
-
-	info := &TokenInfo{
-		Provider:      "epic",
-		AccessToken:   eosResp.AccessToken,
-		RefreshToken:  newRefreshToken,
-		AccountID:     accountID,
-		EpicAccountID: accountID,
-		DisplayName:   displayName,
-		TokenType:     eosResp.TokenType,
-		ExpiresAt:     expiresAt,
-		RawEOS:        eosResp,
-	}
-
-	// 6. Persist to StateStore if configured using role-isolated storeKey
-	if p.store != nil && newRefreshToken != "" {
-		_ = p.store.SaveAuthState(ctx, storeKey, newRefreshToken, accountID, displayName)
-	}
-
-	// 7. Auto-save tokens to configuration file if configured
-	if p.tokenSaver != nil && newRefreshToken != "" {
-		_ = p.tokenSaver(BuildEpicTokenUpdate(p.accountRole, newRefreshToken))
-	}
-
-	p.mu.Lock()
-	p.tokenInfo = info
-	p.mu.Unlock()
-
-	return info, nil
+	return p.exchangeAndPersistLocked(ctx, storeKey, usedRefreshToken, tokenResp)
 }
 
-// Refresh renews the EOS session token using the provided or cached refresh token.
-// If the refresh token is expired or revoked, it initiates interactive prompt if a prompter is available.
+// Refresh renews the EOS session token using the provided, cached, stored, or configured refresh token.
+// All refresh calls are serialized via refreshMu so parallel refreshes cannot invalidate each other.
 func (p *EpicAuthProvider) Refresh(ctx context.Context, refreshToken string) (*TokenInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
+	p.refreshMu.Lock()
+	defer p.refreshMu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	storeKey := p.accountRole.StoreKey("epic")
-	tokenToUse := strings.TrimSpace(refreshToken)
-	if tokenToUse == "" {
-		p.mu.RLock()
-		if p.tokenInfo != nil && p.tokenInfo.RefreshToken != "" {
-			tokenToUse = p.tokenInfo.RefreshToken
-		}
-		p.mu.RUnlock()
-	}
-	if tokenToUse == "" && p.store != nil {
-		storedToken, _, _, err := p.store.GetAuthState(ctx, storeKey)
-		if err == nil && strings.TrimSpace(storedToken) != "" {
-			tokenToUse = strings.TrimSpace(storedToken)
-		}
-	}
-	if tokenToUse == "" {
-		tokenToUse = strings.TrimSpace(p.cfg.RefreshToken)
-	}
+	tokenToUse := p.resolveTokenForRefresh(ctx, storeKey, refreshToken)
 
 	var tokenResp *rlapi.TokenResponse
 	var err error
 
 	if tokenToUse != "" {
-		// 1. Authenticate with refresh token
 		tokenResp, err = p.egsClient.AuthenticateWithRefreshToken(tokenToUse)
 	}
 
 	if tokenToUse == "" || err != nil {
-		// If refresh failed or was empty, attempt interactive prompt if prompter is present
 		if p.prompter != nil {
 			authURL := p.egsClient.GetAuthURL()
 			code, promptErr := p.prompter.PromptForCode(ctx, p.accountRole.Label(), authURL)
@@ -249,7 +220,7 @@ func (p *EpicAuthProvider) Refresh(ctx context.Context, refreshToken string) (*T
 				if err != nil {
 					return nil, fmt.Errorf("%w: egs refresh failed: %v", ErrRefreshFailed, err)
 				}
-				return nil, fmt.Errorf("%w: interactive prompt failed: %v", ErrRefreshFailed, promptErr)
+				return nil, fmt.Errorf("%w: interactive prompt failed: %w", ErrRefreshFailed, promptErr)
 			}
 			tokenResp, err = p.egsClient.AuthenticateWithCode(strings.TrimSpace(code))
 			if err != nil {
@@ -267,33 +238,93 @@ func (p *EpicAuthProvider) Refresh(ctx context.Context, refreshToken string) (*T
 		return nil, fmt.Errorf("%w: received nil token response during refresh", ErrRefreshFailed)
 	}
 
-	// 2. Obtain exchange code
+	return p.exchangeAndPersistLocked(ctx, storeKey, tokenToUse, tokenResp)
+}
+
+func (p *EpicAuthProvider) collectRefreshCandidates(ctx context.Context, storeKey string) []string {
+	var candidates []string
+	seen := make(map[string]struct{}, 3)
+	add := func(tok string) {
+		trimmed := strings.TrimSpace(tok)
+		if trimmed == "" {
+			return
+		}
+		if _, exists := seen[trimmed]; exists {
+			return
+		}
+		seen[trimmed] = struct{}{}
+		candidates = append(candidates, trimmed)
+	}
+
+	p.mu.RLock()
+	if p.tokenInfo != nil {
+		add(p.tokenInfo.RefreshToken)
+	}
+	p.mu.RUnlock()
+
+	if p.store != nil {
+		if storedToken, _, _, err := p.store.GetAuthState(ctx, storeKey); err == nil {
+			add(storedToken)
+		}
+	}
+
+	add(p.cfg.RefreshToken)
+	return candidates
+}
+
+func (p *EpicAuthProvider) resolveTokenForRefresh(ctx context.Context, storeKey, explicit string) string {
+	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
+		return trimmed
+	}
+
+	p.mu.RLock()
+	var cached string
+	if p.tokenInfo != nil {
+		cached = strings.TrimSpace(p.tokenInfo.RefreshToken)
+	}
+	p.mu.RUnlock()
+	if cached != "" {
+		return cached
+	}
+
+	if p.store != nil {
+		if storedToken, _, _, err := p.store.GetAuthState(ctx, storeKey); err == nil {
+			if trimmed := strings.TrimSpace(storedToken); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+
+	return strings.TrimSpace(p.cfg.RefreshToken)
+}
+
+func (p *EpicAuthProvider) exchangeAndPersistLocked(
+	ctx context.Context,
+	storeKey string,
+	usedRefreshToken string,
+	tokenResp *rlapi.TokenResponse,
+) (*TokenInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	exchangeCode, err := p.egsClient.GetExchangeCode(tokenResp.AccessToken)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to obtain exchange code during refresh: %v", ErrExchangeFailed, err)
+		return nil, fmt.Errorf("%w: failed to obtain exchange code: %v", ErrExchangeFailed, err)
 	}
 
-	// 3. Exchange for fresh EOS token
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	eosResp, err := p.egsClient.ExchangeEOSToken(exchangeCode)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to exchange EOS token during refresh: %v", ErrExchangeFailed, err)
+		return nil, fmt.Errorf("%w: failed to exchange EOS token: %v", ErrExchangeFailed, err)
 	}
 	if eosResp == nil {
-		return nil, fmt.Errorf("%w: received nil EOS token response during refresh", ErrExchangeFailed)
+		return nil, fmt.Errorf("%w: received nil EOS token response", ErrExchangeFailed)
 	}
 
 	now := p.clock()
-	expiresIn := eosResp.ExpiresIn
-	if expiresIn <= 0 {
-		expiresIn = 3600
-	}
-	expiresAt := now.Add(time.Duration(expiresIn) * time.Second)
+	expiresAt := computeTokenExpiry(now, eosResp.ExpiresIn)
 
 	accountID := tokenResp.AccountID
 	if accountID == "" {
@@ -303,9 +334,10 @@ func (p *EpicAuthProvider) Refresh(ctx context.Context, refreshToken string) (*T
 	if displayName == "" {
 		displayName = p.cfg.DisplayName
 	}
+
 	newRefreshToken := tokenResp.RefreshToken
 	if newRefreshToken == "" {
-		newRefreshToken = tokenToUse
+		newRefreshToken = usedRefreshToken
 	}
 
 	info := &TokenInfo{
@@ -318,30 +350,21 @@ func (p *EpicAuthProvider) Refresh(ctx context.Context, refreshToken string) (*T
 		TokenType:     eosResp.TokenType,
 		ExpiresAt:     expiresAt,
 		RawEOS:        eosResp,
+		nowFn:         p.clock,
 	}
 
+	// Persist under refreshMu so StateStore, ConfigTokenSaver, and cached TokenInfo stay consistent.
 	if p.store != nil && newRefreshToken != "" {
 		_ = p.store.SaveAuthState(ctx, storeKey, newRefreshToken, accountID, displayName)
 	}
-
 	if p.tokenSaver != nil && newRefreshToken != "" {
 		_ = p.tokenSaver(BuildEpicTokenUpdate(p.accountRole, newRefreshToken))
 	}
 
 	p.mu.Lock()
 	p.tokenInfo = info
+	cp := info.clone()
 	p.mu.Unlock()
 
-	return info, nil
-}
-
-// TokenInfo returns the current cached TokenInfo, or nil if not authenticated.
-func (p *EpicAuthProvider) TokenInfo() *TokenInfo {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if p.tokenInfo == nil {
-		return nil
-	}
-	cp := *p.tokenInfo
-	return &cp
+	return cp, nil
 }
