@@ -3,11 +3,10 @@ package statsapi
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"strconv"
-	"strings"
-	"time"
+
+	"github.com/dank/rl-api-utils/internal/contracts"
+	"github.com/dank/rl-api-utils/internal/domain"
 )
 
 // EventMessage represents a JSON message broadcast by Rocket League's MatchStatsExporter_TA.
@@ -80,31 +79,14 @@ type ParsedPlayerID struct {
 // For example: "Steam|76561198012345678|0" or "Epic|34a02cf8f4414e29b15921876da36f9a|0".
 // AI bots are indicated by platform "Unknown" or account ID "0" (e.g. "Unknown|0|0").
 func ParsePrimaryID(raw string) (ParsedPlayerID, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ParsedPlayerID{}, errors.New("empty primary ID")
-	}
-
-	parts := strings.Split(trimmed, "|")
-	if len(parts) != 3 {
-		return ParsedPlayerID{Raw: trimmed}, fmt.Errorf("invalid PrimaryId format %q: expected 3 pipe-separated segments", raw)
-	}
-
-	platform := strings.TrimSpace(parts[0])
-	accountID := strings.TrimSpace(parts[1])
-	splitscreen, err := strconv.Atoi(strings.TrimSpace(parts[2]))
-	if err != nil {
-		return ParsedPlayerID{Raw: trimmed, Platform: platform, AccountID: accountID}, fmt.Errorf("invalid splitscreen index in %q: %w", raw, err)
-	}
-
-	isBot := strings.EqualFold(platform, "Unknown") || accountID == "0"
+	p, err := domain.ParsePrimaryID(raw)
 	return ParsedPlayerID{
-		Platform:    platform,
-		AccountID:   accountID,
-		Splitscreen: splitscreen,
-		Raw:         trimmed,
-		IsBot:       isBot,
-	}, nil
+		Platform:    p.Platform,
+		AccountID:   p.AccountID,
+		Splitscreen: p.Splitscreen,
+		Raw:         p.Raw,
+		IsBot:       p.IsBot,
+	}, err
 }
 
 // ParseID parses this player's PrimaryId into structured components.
@@ -114,11 +96,7 @@ func (p StatsPlayer) ParseID() (ParsedPlayerID, error) {
 
 // IsBot returns true if this player represents an AI bot.
 func (p StatsPlayer) IsBot() bool {
-	parsed, err := ParsePrimaryID(p.PrimaryId)
-	if err != nil {
-		return strings.EqualFold(p.PrimaryId, "Unknown|0|0")
-	}
-	return parsed.IsBot
+	return domain.IsBotID(p.PrimaryId)
 }
 
 // GetPlaylist returns the playlist ID, resolving from Game.PlaylistId if top-level Playlist is 0.
@@ -172,19 +150,7 @@ func (ed *EventData) UnmarshalJSON(data []byte) error {
 const MaxHostedReplays = 20
 
 // PendingMatch tracks an online match detected via Stats API that has not yet been downloaded/persisted.
-type PendingMatch struct {
-	MatchGUID  string    `json:"match_guid"`
-	DetectedAt time.Time `json:"detected_at"`
-}
+type PendingMatch = contracts.PendingMatch
 
 // Status represents the current operational status of the Stats API tracking module.
-type Status struct {
-	Enabled            bool           `json:"enabled"`
-	GameConnected      bool           `json:"game_connected"`
-	PendingCount       int            `json:"pending_count"`
-	TriggerThreshold   int            `json:"trigger_threshold"`
-	ForceSyncOnTrigger bool           `json:"force_sync_on_trigger"`
-	EnableToast        bool           `json:"enable_toast"`
-	MaxHostedReplays   int            `json:"max_hosted_replays"`
-	PendingMatches     []PendingMatch `json:"pending_matches"`
-}
+type Status = contracts.StatsAPIStatus

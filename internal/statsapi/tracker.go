@@ -125,17 +125,13 @@ func (t *Tracker) RecordMatch(ctx context.Context, matchGUID string) (isNewPendi
 
 	// 1. Check if the match is already downloaded/uploaded in the persistent store
 	existing, err := t.store.GetMatch(ctx, matchGUID)
-	if err == nil && existing != nil {
+	if err == nil && isMatchPersisted(existing) {
 		// If already successfully downloaded or uploaded, it is not at risk of being lost
-		if existing.DownloadStatus == storage.DownloadDownloaded ||
-			existing.UploadStatus == storage.UploadUploaded ||
-			existing.UploadStatus == storage.UploadDuplicate {
-			t.mu.Lock()
-			delete(t.pendingMatches, matchGUID)
-			count := len(t.pendingMatches)
-			t.mu.Unlock()
-			return false, count, nil
-		}
+		t.mu.Lock()
+		delete(t.pendingMatches, matchGUID)
+		count := len(t.pendingMatches)
+		t.mu.Unlock()
+		return false, count, nil
 	} else if err != nil && !errors.Is(err, storage.ErrMatchNotFound) {
 		t.logger.Warn("error querying state store for match",
 			slog.String("match_guid", matchGUID),
@@ -153,6 +149,7 @@ func (t *Tracker) RecordMatch(ctx context.Context, matchGUID string) (isNewPendi
 	pendingCount = len(t.pendingMatches)
 	threshold := t.cfg.TriggerThreshold
 	forceSync := t.cfg.ForceSyncOnTrigger
+	triggerFn := t.triggerFn
 	enableToast := t.cfg.EnableToast
 	shouldToast := enableToast && (time.Since(t.lastToastTime) >= t.cfg.ToastCooldown)
 	if shouldToast && pendingCount >= threshold {
@@ -183,15 +180,9 @@ func (t *Tracker) RecordMatch(ctx context.Context, matchGUID string) (isNewPendi
 			}
 		}
 
-		if forceSync && t.triggerFn != nil {
+		if forceSync && triggerFn != nil {
 			t.logger.Info("force_sync_on_trigger enabled: triggering immediate replay sync")
-			go func() {
-				syncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-				defer cancel()
-				if syncErr := t.triggerFn(syncCtx, fmt.Sprintf("threshold_%d_reached", pendingCount)); syncErr != nil {
-					t.logger.Error("forced sync trigger failed", slog.Any("error", syncErr))
-				}
-			}()
+			t.dispatchAsyncSync(triggerFn, fmt.Sprintf("threshold_%d_reached", pendingCount), "forced sync trigger failed")
 		}
 	}
 
@@ -209,18 +200,28 @@ func (t *Tracker) ClearMatches(matchGUIDs []string) {
 
 // RefreshPending reconciles the pending queue against the store, removing matches that are now downloaded/uploaded.
 func (t *Tracker) RefreshPending(ctx context.Context) {
+	t.mu.RLock()
+	guids := make([]string, 0, len(t.pendingMatches))
+	for guid := range t.pendingMatches {
+		guids = append(guids, guid)
+	}
+	t.mu.RUnlock()
+
+	var resolved []string
+	for _, guid := range guids {
+		match, err := t.store.GetMatch(ctx, guid)
+		if err == nil && isMatchPersisted(match) {
+			resolved = append(resolved, guid)
+		}
+	}
+	if len(resolved) == 0 {
+		return
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	for guid := range t.pendingMatches {
-		match, err := t.store.GetMatch(ctx, guid)
-		if err == nil && match != nil {
-			if match.DownloadStatus == storage.DownloadDownloaded ||
-				match.UploadStatus == storage.UploadUploaded ||
-				match.UploadStatus == storage.UploadDuplicate {
-				delete(t.pendingMatches, guid)
-			}
-		}
+	for _, guid := range resolved {
+		delete(t.pendingMatches, guid)
 	}
 }
 
@@ -272,14 +273,27 @@ func (t *Tracker) UpdateConfig(triggerThreshold int, forceSyncOnTrigger *bool, e
 	t.mu.Unlock()
 
 	if forceSync && pendingCount >= threshold && pendingCount > 0 && triggerFn != nil {
-		go func() {
-			syncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-			if syncErr := triggerFn(syncCtx, fmt.Sprintf("config_threshold_%d_reached", pendingCount)); syncErr != nil {
-				t.logger.Error("forced sync trigger on config update failed", slog.Any("error", syncErr))
-			}
-		}()
+		t.dispatchAsyncSync(triggerFn, fmt.Sprintf("config_threshold_%d_reached", pendingCount), "forced sync trigger on config update failed")
 	}
+}
+
+func isMatchPersisted(match *storage.MatchRecord) bool {
+	if match == nil {
+		return false
+	}
+	return match.DownloadStatus == storage.DownloadDownloaded ||
+		match.UploadStatus == storage.UploadUploaded ||
+		match.UploadStatus == storage.UploadDuplicate
+}
+
+func (t *Tracker) dispatchAsyncSync(triggerFn SyncTriggerFunc, reason, errLogMsg string) {
+	go func() {
+		syncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if syncErr := triggerFn(syncCtx, reason); syncErr != nil {
+			t.logger.Error(errLogMsg, slog.Any("error", syncErr))
+		}
+	}()
 }
 
 // ClearPending clears all pending matches (e.g., when a manual sync is completed).

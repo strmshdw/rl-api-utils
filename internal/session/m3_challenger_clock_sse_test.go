@@ -78,13 +78,13 @@ func TestM3_SSEClockDelivery_RapidBurstsAndChurn(t *testing.T) {
 
 		team0 := 0
 		match := &playertrack.CurrentMatchResponse{
-			ActiveMatch:   true,
-			MatchGUID:     "clock-stress-guid",
-			PlaylistID:    13,
-			PlaylistName:  "Ranked Standard",
-			TimeRemaining: timeRemaining,
-			IsOvertime:    isOT,
-			LocalTeam:     &team0,
+			ActiveMatch:    true,
+			MatchGUID:      "clock-stress-guid",
+			PlaylistID:     13,
+			PlaylistName:   "Ranked Standard",
+			TimeRemaining:  timeRemaining,
+			IsOvertime:     isOT,
+			LocalTeam:      &team0,
 			LocalPlayerIDs: []string{"Steam|76561198000000001|0"},
 			LocalPlayer: &playertrack.LobbyPlayer{
 				PlayerID: "Steam|76561198000000001|0",
@@ -138,12 +138,12 @@ func TestM3_SSEClockDelivery_JSONDecodability(t *testing.T) {
 
 	team0 := 0
 	match := &playertrack.CurrentMatchResponse{
-		ActiveMatch:   true,
-		MatchGUID:     "clock-json-guid",
-		PlaylistID:    13,
-		TimeRemaining: -10, // uninitialized / countdown
-		IsOvertime:    true,
-		LocalTeam:     &team0,
+		ActiveMatch:    true,
+		MatchGUID:      "clock-json-guid",
+		PlaylistID:     13,
+		TimeRemaining:  -10, // uninitialized / countdown
+		IsOvertime:     true,
+		LocalTeam:      &team0,
 		LocalPlayerIDs: []string{"Epic|test-epic-id|0"},
 	}
 

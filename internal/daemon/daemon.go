@@ -2,15 +2,10 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
-	"math"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,8 +19,6 @@ import (
 	"github.com/dank/rl-api-utils/internal/statsapi"
 	"github.com/dank/rl-api-utils/internal/storage"
 	"github.com/dank/rl-api-utils/internal/syncer"
-	"github.com/dank/rl-api-utils/internal/version"
-	"github.com/dank/rl-api-utils/internal/web"
 )
 
 // Syncer represents the domain orchestrator interface required by the daemon.
@@ -38,46 +31,6 @@ type Syncer interface {
 // independently of full PsyNet discovery cycles (safe to run while Rocket League is active).
 type StatsPoller interface {
 	PollAndSyncPendingStats(ctx context.Context) error
-}
-
-// PlayerDetailResponse represents the composite response for GET /players/{id}.
-type PlayerDetailResponse struct {
-	*storage.PlayerRecord
-	EncountersCount int                             `json:"encounters_count"`
-	TeammateWins    int                             `json:"teammate_wins"`
-	TeammateLosses  int                             `json:"teammate_losses"`
-	OpponentWins    int                             `json:"opponent_wins"`
-	OpponentLosses  int                             `json:"opponent_losses"`
-	RelationshipTag string                          `json:"relationship_tag,omitempty"`
-	WithYouStats    *storage.PlayerRoleStatsSummary `json:"with_you_stats,omitempty"`
-	AgainstYouStats *storage.PlayerRoleStatsSummary `json:"against_you_stats,omitempty"`
-	Matchups        []*storage.PlayerMatchup        `json:"matchups"`
-	RecentMatches   []*storage.PlayerMatchDetail    `json:"recent_matches"`
-}
-
-// DaemonStatusResponse represents the composite payload returned by GET /status.
-type DaemonStatusResponse struct {
-	Status             string                  `json:"status"`
-	Version            string                  `json:"version,omitempty"`
-	Commit             string                  `json:"commit,omitempty"`
-	BuildMode          string                  `json:"build_mode,omitempty"`
-	Enabled            bool                    `json:"enabled"`
-	GameConnected      bool                    `json:"game_connected"`
-	PendingCount       int                     `json:"pending_count"`
-	TriggerThreshold   int                     `json:"trigger_threshold"`
-	ForceSyncOnTrigger bool                    `json:"force_sync_on_trigger"`
-	EnableToast        bool                    `json:"enable_toast"`
-	AutoSyncOnExit     bool                    `json:"auto_sync_on_exit"`
-	MaxHostedReplays   int                     `json:"max_hosted_replays"`
-	PendingMatches     []statsapi.PendingMatch `json:"pending_matches,omitempty"`
-	StatsAPIReady      bool                    `json:"stats_api_ready"`
-	RankAPIReady       bool                    `json:"rank_api_ready"`
-	MMRPollerState     string                  `json:"mmr_poller_state"`
-	MMRSyncLatencyMs   int64                   `json:"mmr_sync_latency_ms,omitempty"`
-	ReplayCount        int                     `json:"replay_count"`
-	ReplayLimit        int                     `json:"replay_limit"`
-	ReplayUsagePct     float64                 `json:"replay_usage_pct"`
-	ReplayLimitStatus  string                  `json:"replay_limit_status"`
 }
 
 // Daemon coordinates the periodic execution of the synchronization engine.
@@ -206,7 +159,6 @@ func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
 		d.logger = NewLogger(cfg.Logging, os.Stderr)
 	}
 
-	// Instantiate SessionTracker if not explicitly provided via WithSessionTracker
 	if d.sessionTracker == nil {
 		d.sessionTracker = session.NewSessionTracker(
 			session.WithLogger(d.logger),
@@ -222,12 +174,10 @@ func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
 		}
 	}
 
-	// Wire playerTracker -> sessionTracker observer listener
 	if d.playerTracker != nil && d.sessionTracker != nil {
 		d.playerTracker.SetMatchStateListener(d.sessionTracker)
 	}
 
-	// Ensure statsTracker can trigger immediate replay syncs when force_sync_on_trigger fires
 	if d.statsTracker != nil {
 		d.statsTracker.SetSyncTrigger(d.TriggerSync)
 	}
@@ -299,7 +249,6 @@ func (d *Daemon) Start(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	// Trap OS termination signals (SIGINT, SIGTERM) combined with incoming context.
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -321,7 +270,6 @@ func (d *Daemon) Start(ctx context.Context) error {
 		slog.Bool("force_sync_on_trigger", d.cfg.StatsAPI.ForceSyncOnTrigger),
 	)
 
-	// Step 1: Immediate execution on startup
 	if err := d.executeCycle(ctx); err != nil {
 		if d.cfg.Sync.Once {
 			d.logger.Error("single-run mode sync cycle failed", slog.Any("error", err))
@@ -334,306 +282,15 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.logger.Error("initial sync cycle failed; continuing to ticker schedule", slog.Any("error", err))
 	}
 
-	// Step 2: Exit early if single-run mode
 	if d.cfg.Sync.Once {
 		d.logger.Info("single-run mode completed successfully")
 		return nil
 	}
 
-	// Step 3: Start Stats API background listener if configured
-	if d.statsListener != nil && d.cfg.StatsAPI.Enabled {
-		d.wg.Add(1)
-		go func() {
-			defer d.wg.Done()
-			if err := d.statsListener.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				d.logger.Warn("Stats API listener stopped with error", slog.Any("error", err))
-			}
-		}()
-	}
+	d.startStatsListener(ctx)
+	d.startHTTPServer(ctx)
 
-	// Step 4: Start unified local HTTP server if configured and not in Once mode
-	if d.isHTTPEnabled() {
-		host := d.httpHost()
-		port := d.httpPort()
-		httpAddr := fmt.Sprintf("%s:%d", host, port)
-
-		lanIP, _ := DiscoverLANIPv4()
-		banner := FormatStartupBanner(host, port, lanIP)
-
-		handler := d.Handler(ctx)
-
-		httpSrv := &http.Server{
-			Addr:              httpAddr,
-			Handler:           handler,
-			BaseContext:       func(_ net.Listener) context.Context { return ctx },
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       10 * time.Second,
-			WriteTimeout:      0, // Disabled: required for persistent SSE connections
-			IdleTimeout:       60 * time.Second,
-		}
-
-		d.wg.Add(1)
-		go func() {
-			defer d.wg.Done()
-
-			// Check loopback availability on Windows to catch external port conflicts
-			probeLn, probeErr := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-			if probeErr != nil {
-				d.logger.Warn("local HTTP API server stopped with error", slog.Any("error", probeErr))
-				return
-			}
-			_ = probeLn.Close()
-
-			d.logger.Info(banner,
-				slog.String("addr", httpAddr),
-				slog.String("host", host),
-				slog.Int("port", port),
-				slog.String("local_url", fmt.Sprintf("http://localhost:%d", port)),
-				slog.String("network_url", fmt.Sprintf("http://%s:%d", lanIP, port)),
-				slog.String("overlay_url", fmt.Sprintf("http://localhost:%d/?mode=overlay", port)),
-			)
-			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				d.logger.Warn("local HTTP API server stopped with error", slog.Any("error", err))
-			}
-		}()
-
-		d.wg.Add(1)
-		go func() {
-			defer d.wg.Done()
-			<-ctx.Done()
-			if d.statsListener != nil {
-				d.statsListener.Stop()
-			}
-			if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-				d.sessionTracker.Broadcaster().Close()
-			}
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					d.logger.Warn("HTTP server shutdown encountered error", slog.Any("error", err))
-				}
-				_ = httpSrv.Close()
-			}
-		}()
-	}
-
-	// Step 5: Ticker and event loop
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	statusTicker := time.NewTicker(2 * time.Second)
-	defer statusTicker.Stop()
-	statsPollTicks := 0
-
-	drainAndStop := func() error {
-		d.logger.Info("shutdown signal received; awaiting in-flight drain",
-			slog.Any("reason", ctx.Err()),
-		)
-		if d.statsListener != nil {
-			d.statsListener.Stop()
-		}
-		if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-			d.sessionTracker.Broadcaster().Close()
-		}
-		d.wg.Wait()
-		d.logger.Info("graceful drain complete; daemon stopped")
-		return nil
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return drainAndStop()
-		default:
-		}
-
-		select {
-		case <-ctx.Done():
-			return drainAndStop()
-
-		case reason := <-d.manualTrigger:
-			d.logger.Info("executing on-demand sync cycle", slog.String("trigger_reason", reason))
-			if err := d.executeCycle(ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
-					return drainAndStop()
-				}
-				d.logger.Error("on-demand sync cycle failed", slog.Any("error", err))
-			}
-
-		case <-statusTicker.C:
-			// Monitor game connection state for AutoSyncOnExit
-			if d.statsListener != nil {
-				connected := d.statsListener.IsConnected()
-				if d.prevConnected && !connected {
-					// Game client just terminated or disconnected
-					if d.sessionTracker != nil {
-						d.sessionTracker.OnGameDisconnected()
-					}
-					if d.cfg.StatsAPI.AutoSyncOnExit && d.statsTracker != nil && d.statsTracker.PendingCount() > 0 {
-						d.logger.Info("Rocket League disconnected; auto-syncing pending replays upon game exit",
-							slog.Int("pending_matches", d.statsTracker.PendingCount()),
-						)
-						select {
-						case d.manualTrigger <- "game_exit_sync":
-						default:
-						}
-					}
-				}
-				d.prevConnected = connected
-			}
-
-			// Every 10 seconds (5 status ticks), poll Ballchasing for any uploaded replays whose
-			// online stats processing was still pending at upload time. This only talks to Ballchasing
-			// (never PsyNet), so it is safe while Rocket League is running.
-			statsPollTicks++
-			if statsPollTicks >= 5 {
-				statsPollTicks = 0
-				if poller, ok := d.syncer.(StatsPoller); ok {
-					if err := d.executeStatsPoll(ctx, poller); err != nil {
-						if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
-							return drainAndStop()
-						}
-					}
-				}
-			}
-
-		case <-ticker.C:
-			// Routine scheduled tick
-			if d.statsListener != nil && d.statsListener.IsConnected() {
-				// While game is running, avoid routine 5m PsyNet polling to prevent duplicate login kicks
-				d.logger.Debug("Rocket League is currently running; skipping routine 5m PsyNet polling to prevent duplicate login kicks (Stats API tracking active)")
-				continue
-			}
-
-			if err := d.executeCycle(ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
-					d.logger.Info("daemon stopped during scheduled cycle", slog.Any("reason", err))
-					return drainAndStop()
-				}
-				d.logger.Error("scheduled sync cycle failed", slog.Any("error", err))
-			}
-		}
-	}
-}
-
-func (d *Daemon) executeStatsPoll(ctx context.Context, poller StatsPoller) error {
-	d.mu.Lock()
-	if d.inFlight {
-		d.mu.Unlock()
-		return nil
-	}
-	d.inFlight = true
-	d.wg.Add(1)
-	d.mu.Unlock()
-
-	defer func() {
-		d.mu.Lock()
-		d.inFlight = false
-		d.wg.Done()
-		d.mu.Unlock()
-	}()
-
-	err := poller.PollAndSyncPendingStats(ctx)
-	if err == nil && d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-		summary := d.enrichSessionTelemetry(ctx, d.sessionTracker.GetSessionSummary())
-		d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
-			Event: session.EventSessionUpdate,
-			Data:  summary,
-		})
-	}
-	return err
-}
-
-// executeCycle runs a single synchronization cycle, tracking in-flight status,
-// recording execution duration, logging structured metrics, and reconciling pending matches.
-func (d *Daemon) executeCycle(ctx context.Context) error {
-	d.mu.Lock()
-	if d.inFlight {
-		d.mu.Unlock()
-		d.logger.Warn("previous sync cycle still in progress; skipping tick")
-		return nil
-	}
-	d.inFlight = true
-	d.wg.Add(1)
-	d.mu.Unlock()
-
-	defer func() {
-		d.mu.Lock()
-		d.inFlight = false
-		d.wg.Done()
-		d.mu.Unlock()
-	}()
-
-	start := time.Now()
-	d.logger.Debug("sync cycle starting")
-
-	stats, err := d.syncer.RunCycle(ctx)
-	duration := time.Since(start)
-
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			d.logger.Warn("sync cycle aborted due to context cancellation",
-				slog.Duration("duration", duration),
-				slog.Int64("duration_ms", duration.Milliseconds()),
-			)
-			return err
-		}
-		d.logger.Error("sync cycle encountered error",
-			slog.Any("error", err),
-			slog.Duration("duration", duration),
-			slog.Int64("duration_ms", duration.Milliseconds()),
-		)
-		return err
-	}
-
-	// Reconcile pending matches in stats tracker after successful cycle
-	if d.statsTracker != nil {
-		d.statsTracker.RefreshPending(ctx)
-	}
-
-	// Broadcast updated session & pending replay queue telemetry to connected SSE clients
-	if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
-		summary := d.enrichSessionTelemetry(ctx, d.sessionTracker.GetSessionSummary())
-		d.sessionTracker.Broadcaster().Broadcast(session.SessionEvent{
-			Event: session.EventSessionUpdate,
-			Data:  summary,
-		})
-	}
-
-	if stats != nil {
-		d.logger.Info("sync cycle completed",
-			slog.Int("discovered", stats.DiscoveredCount),
-			slog.Int("downloaded", stats.DownloadedCount),
-			slog.Int("uploaded", stats.UploadedCount),
-			slog.Int("duplicates", stats.DuplicateCount),
-			slog.Int("skipped", stats.SkippedCount),
-			slog.Int("failed", stats.FailedCount),
-			slog.Duration("duration", duration),
-			slog.Int64("duration_ms", duration.Milliseconds()),
-		)
-	} else {
-		d.logger.Info("sync cycle completed",
-			slog.Duration("duration", duration),
-			slog.Int64("duration_ms", duration.Milliseconds()),
-		)
-	}
-
-	return nil
-}
-
-// Handler constructs and returns an http.Handler wired with all active daemon routes and CORS middleware.
-// Intended for unit testing via httptest.NewServer or direct httptest.ResponseRecorder execution.
-func (d *Daemon) Handler(ctx context.Context) http.Handler {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	d.mu.Lock()
-	if d.ctx == nil {
-		d.ctx = ctx
-	}
-	d.mu.Unlock()
-	return corsMiddleware(d.setupRoutes(ctx))
+	return d.runEventLoop(ctx, pollInterval)
 }
 
 func (d *Daemon) daemonContext() context.Context {
@@ -669,86 +326,6 @@ func (d *Daemon) setReplayLimit(limit int) {
 	d.mu.Unlock()
 }
 
-func (d *Daemon) buildStatusResponse(ctx context.Context) DaemonStatusResponse {
-	defaultThreshold := 15
-	defaultForceSync := false
-	defaultToast := true
-	defaultAutoExit := true
-	if d.cfg != nil {
-		if d.cfg.StatsAPI.TriggerThreshold > 0 {
-			defaultThreshold = d.cfg.StatsAPI.TriggerThreshold
-		}
-		defaultForceSync = d.cfg.StatsAPI.ForceSyncOnTrigger
-		defaultToast = d.cfg.StatsAPI.EnableToast
-		defaultAutoExit = d.cfg.StatsAPI.AutoSyncOnExit
-	}
-
-	resp := DaemonStatusResponse{
-		Status:             "running",
-		Version:            version.Version,
-		Commit:             version.Commit,
-		BuildMode:          version.BuildMode,
-		MMRPollerState:     "idle",
-		TriggerThreshold:   defaultThreshold,
-		ForceSyncOnTrigger: defaultForceSync,
-		EnableToast:        defaultToast,
-		AutoSyncOnExit:     defaultAutoExit,
-		MaxHostedReplays:   statsapi.MaxHostedReplays,
-	}
-
-	if d.statsTracker != nil {
-		st := d.statsTracker.Status()
-		resp.Enabled = st.Enabled
-		resp.GameConnected = st.GameConnected
-		resp.PendingCount = st.PendingCount
-		resp.TriggerThreshold = st.TriggerThreshold
-		resp.ForceSyncOnTrigger = st.ForceSyncOnTrigger
-		resp.EnableToast = st.EnableToast
-		if st.MaxHostedReplays > 0 {
-			resp.MaxHostedReplays = st.MaxHostedReplays
-		}
-		resp.PendingMatches = st.PendingMatches
-	}
-
-	statsReady := resp.GameConnected
-	if !statsReady && d.statsListener != nil && d.statsListener.IsConnected() {
-		statsReady = true
-	}
-	resp.StatsAPIReady = statsReady
-
-	if d.playerTracker != nil {
-		resp.RankAPIReady = d.playerTracker.IsRankAPIReady()
-		resp.MMRPollerState = d.playerTracker.MMRPollerState()
-		resp.MMRSyncLatencyMs = d.playerTracker.LastMMRSyncLatencyMs()
-	}
-
-	replayLimit := d.getReplayLimit()
-	replayCount := 0
-	if d.stateStore != nil {
-		if _, total, err := d.stateStore.ListHistoricalMatches(ctx, storage.MatchFilter{Limit: 1}); err == nil {
-			replayCount = total
-		}
-	}
-
-	usagePct := 0.0
-	if replayLimit > 0 {
-		usagePct = math.Round((float64(replayCount)/float64(replayLimit))*1000.0) / 10.0
-	}
-	limitStatus := "ok"
-	if replayLimit > 0 && (replayCount >= replayLimit || usagePct >= 100.0) {
-		limitStatus = "exceeded"
-	} else if usagePct >= 85.0 {
-		limitStatus = "warning"
-	}
-
-	resp.ReplayCount = replayCount
-	resp.ReplayLimit = replayLimit
-	resp.ReplayUsagePct = usagePct
-	resp.ReplayLimitStatus = limitStatus
-
-	return resp
-}
-
 func (d *Daemon) httpHost() string {
 	if d.cfg.Web.Host != "" {
 		return d.cfg.Web.Host
@@ -773,158 +350,8 @@ func (d *Daemon) isHTTPEnabled() bool {
 	if d.cfg.Sync.Once {
 		return false
 	}
-	port := d.httpPort()
-	if port <= 0 {
+	if d.httpPort() <= 0 {
 		return false
 	}
 	return d.cfg.Web.Enabled || (d.cfg.StatsAPI.Enabled && d.cfg.StatsAPI.HTTPTriggerPort > 0) || d.cfg.PlayerTracking.Enabled
-}
-
-func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
-	mux := http.NewServeMux()
-
-	// Diagnostic & Health Endpoints
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"running"}`))
-	})
-
-	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(d.buildStatusResponse(r.Context()))
-	})
-
-	// Stats API Trigger Endpoint (Backward compatible)
-	mux.HandleFunc("/sync", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if !isAllowedMutatingOrigin(r) {
-			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: invalid origin"})
-			return
-		}
-		d.logger.Info("received manual trigger request via local HTTP endpoint", slog.String("remote", r.RemoteAddr))
-		if err := d.TriggerSync(ctx, "manual_http_request"); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(fmt.Sprintf(`{"error":%q}`, err.Error())))
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"sync_triggered"}`))
-	})
-
-	// REST API v1 Endpoints (Milestone M4)
-	mux.HandleFunc("GET /api/session", d.handleGetSession)
-	mux.HandleFunc("GET /api/session/state", d.handleGetSession)
-	mux.HandleFunc("/api/session/reset", d.handleResetSession)
-	mux.HandleFunc("/api/session/continue", d.handleContinueSession)
-	mux.HandleFunc("/api/session/dismiss", d.handleDismissContinueSession)
-	mux.HandleFunc("GET /api/sessions", d.handleListSessions)
-	mux.HandleFunc("GET /api/sessions/{id...}", d.handleGetHistoricalSession)
-	mux.HandleFunc("GET /api/current-match", d.handleCurrentMatch)
-	mux.HandleFunc("GET /api/players", d.handleListPlayers)
-	mux.HandleFunc("GET /api/players/{id}/matches", d.handleGetPlayerMatches)
-	mux.HandleFunc("GET /api/players/{id...}", d.handleGetPlayer)
-	mux.HandleFunc("PATCH /api/players/{id...}", d.handlePatchPlayer)
-	mux.HandleFunc("GET /api/matches", d.handleListMatches)
-	mux.HandleFunc("POST /api/matches/prune", d.handlePruneMatches)
-	mux.HandleFunc("POST /api/matches/{guid}/retry", d.handleRetryMatch)
-	mux.HandleFunc("GET /api/matches/{guid...}", d.handleGetMatch)
-	mux.HandleFunc("GET /api/historical-matches", d.handleListMatches)
-	mux.HandleFunc("GET /api/mmr-history", d.handleListMMRHistory)
-	mux.HandleFunc("POST /api/sync/ballchasing", d.handleTriggerBallchasingSync)
-	mux.HandleFunc("GET /api/sync/ballchasing/status", d.handleBallchasingSyncStatus)
-	mux.HandleFunc("GET /api/sync/config", d.handleGetSyncConfig)
-	mux.HandleFunc("POST /api/sync/config", d.handleUpdateSyncConfig)
-	mux.HandleFunc("POST /api/sync/now", d.handleManualSyncNow)
-	mux.HandleFunc("GET /api/events", d.handleEvents)
-
-	// Backward Compatible Player Tracking Aliases
-	mux.HandleFunc("GET /current-match", d.handleCurrentMatch)
-	mux.HandleFunc("GET /players", d.handleListPlayers)
-	mux.HandleFunc("GET /players/{id}/matches", d.handleGetPlayerMatches)
-	mux.HandleFunc("GET /players/{id...}", d.handleGetPlayer)
-	mux.HandleFunc("PATCH /players/{id...}", d.handlePatchPlayer)
-
-	// Embedded Static Frontend SPA (Fallback to index.html for non-API routes)
-	if d.webHandler != nil {
-		mux.Handle("/", d.webHandler)
-	} else {
-		mux.Handle("/", web.DistHandler())
-	}
-
-	return mux
-}
-
-func isAllowedMutatingOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true // non-browser clients (curl, go tests)
-	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	originHost := u.Hostname()
-	if strings.EqualFold(originHost, host) {
-		return true
-	}
-	if originHost == "localhost" || originHost == "127.0.0.1" || originHost == "::1" {
-		return true
-	}
-	return false
-}
-
-func isPathTraversal(r *http.Request) bool {
-	p := r.URL.Path
-	if strings.Contains(p, "..") || strings.HasPrefix(p, "//") || strings.Contains(p, "\\") {
-		return true
-	}
-	raw := r.URL.RawPath
-	if raw != "" {
-		if strings.Contains(raw, "..") || strings.HasPrefix(raw, "//") || strings.Contains(raw, "\\") {
-			return true
-		}
-	}
-	reqURI := r.RequestURI
-	if strings.Contains(reqURI, "..") || strings.HasPrefix(reqURI, "//") {
-		return true
-	}
-	lowerURI := strings.ToLower(reqURI)
-	if strings.Contains(lowerURI, "%2e") || strings.Contains(lowerURI, "%5c") {
-		return true
-	}
-	return false
-}
-
-// corsMiddleware provides standard Cross-Origin Resource Sharing headers for local development
-// and handles browser preflight OPTIONS requests.
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Reject path traversal attempts immediately before ServeMux canonicalization redirects
-		if isPathTraversal(r) {
-			http.NotFound(w, r)
-			return
-		}
-
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Origin, Accept")
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }

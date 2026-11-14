@@ -3,48 +3,16 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
-	"net"
 	"net/http"
-	"strings"
-	"syscall"
-)
 
-const (
-	// Windows Winsock error codes surfaced via os.SyscallError("wsasend", syscall.Errno(...))
-	// when a browser or local client aborts an in-flight HTTP connection.
-	winsockWSAECONNABORTED = syscall.Errno(10053)
-	winsockWSAECONNRESET   = syscall.Errno(10054)
+	"github.com/dank/rl-api-utils/internal/domain"
 )
 
 // isClientDisconnect reports whether err or ctx indicates that the HTTP client
 // closed or aborted the connection before the response finished transmitting.
 func isClientDisconnect(ctx context.Context, err error) bool {
-	if ctx != nil && errors.Is(ctx.Err(), context.Canceled) {
-		return true
-	}
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) ||
-		errors.Is(err, net.ErrClosed) ||
-		errors.Is(err, syscall.EPIPE) ||
-		errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, syscall.ECONNABORTED) ||
-		errors.Is(err, winsockWSAECONNABORTED) ||
-		errors.Is(err, winsockWSAECONNRESET) {
-		return true
-	}
-
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "an established connection was aborted by the software in your host machine") ||
-		strings.Contains(msg, "an existing connection was forcibly closed by the remote host") ||
-		strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "connection reset by peer") ||
-		strings.Contains(msg, "use of closed network connection") ||
-		strings.Contains(msg, "client disconnected") ||
-		strings.Contains(msg, "http2: stream closed")
+	return domain.IsDisconnectError(ctx, err)
 }
 
 // writeJSONResponse marshals payload prior to committing HTTP headers so genuine serialization

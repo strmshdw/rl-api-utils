@@ -281,11 +281,11 @@ func TestChallenger_GoalSummation_ExtremeAndEdgeCases(t *testing.T) {
 	win0 := 0
 	localTeam := 0
 	match := &playertrack.CurrentMatchResponse{
-		MatchGUID:   "edge-goals-1",
-		PlaylistID:  11,
-		LocalTeam:   &localTeam,
-		WinnerTeam:  &win0,
-		Result:      "victory",
+		MatchGUID:  "edge-goals-1",
+		PlaylistID: 11,
+		LocalTeam:  &localTeam,
+		WinnerTeam: &win0,
+		Result:     "victory",
 		LocalPlayer: &playertrack.LobbyPlayer{
 			PlayerID: "Steam|local|0", TeamNum: 0, IsLocal: true,
 			Stats: playertrack.PlayerStatsSummary{Goals: 2},
