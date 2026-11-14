@@ -103,16 +103,26 @@ func (t *Tracker) boundFailBackoffLocked() {
 }
 
 func (t *Tracker) boundMatchupCacheLocked() {
-	if len(t.matchupCache) <= maxMatchupCacheEntries {
-		return
+	if len(t.matchupCache) > maxMatchupCacheEntries {
+		toEvict := len(t.matchupCache) - maxMatchupCacheEntries
+		count := 0
+		for k := range t.matchupCache {
+			delete(t.matchupCache, k)
+			count++
+			if count >= toEvict {
+				break
+			}
+		}
 	}
-	toEvict := len(t.matchupCache) - maxMatchupCacheEntries
-	count := 0
-	for k := range t.matchupCache {
-		delete(t.matchupCache, k)
-		count++
-		if count >= toEvict {
-			break
+	if len(t.matchupsByPlaylistCache) > maxMatchupCacheEntries {
+		toEvict := len(t.matchupsByPlaylistCache) - maxMatchupCacheEntries
+		count := 0
+		for k := range t.matchupsByPlaylistCache {
+			delete(t.matchupsByPlaylistCache, k)
+			count++
+			if count >= toEvict {
+				break
+			}
 		}
 	}
 }

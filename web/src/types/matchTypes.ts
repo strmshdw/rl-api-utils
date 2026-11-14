@@ -47,6 +47,7 @@ export interface SessionMatchPlayer {
   won?: boolean;
   stats: PlayerStatsSummary;
   rank_name: string;
+  short_rank?: string;
   tier: number;
   division: number;
   mmr: number;

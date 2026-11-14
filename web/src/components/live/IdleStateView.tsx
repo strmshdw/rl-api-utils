@@ -4,6 +4,7 @@ import { SessionMatchDetail, SessionResponse } from '../../types/api';
 import {
   chronological,
   deltaInk,
+  filterSessionByPlaylist,
   findMvp,
   formatAgo,
   formatElapsed,
@@ -27,6 +28,8 @@ import { useDashboard } from '../../context/DashboardContext';
 
 interface IdleStateViewProps {
   session: SessionResponse | null;
+  scopedSession?: SessionResponse | null;
+  activePlaylist?: string;
   connection: ConnectionStatus;
   onShowSession: () => void;
   onContinueSession?: (sessionId?: string) => void;
@@ -129,6 +132,8 @@ const LastMatch: React.FC<{
 
 export const IdleStateView: React.FC<IdleStateViewProps> = ({
   session,
+  scopedSession,
+  activePlaylist,
   connection,
   onShowSession,
   onContinueSession,
@@ -139,7 +144,15 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
   const { setLiveModeOverride, isDevBuild, previewMode } = useDashboard();
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
   const [showAllModes, setShowAllModes] = useState(false);
-  const summary = useMemo(() => summarizeSession(session), [session]);
+
+  const effectiveScopedSession = useMemo(() => {
+    if (!session) return null;
+    if (!activePlaylist || activePlaylist === 'all') return session;
+    if (scopedSession) return scopedSession;
+    return filterSessionByPlaylist(session, activePlaylist);
+  }, [session, activePlaylist, scopedSession]);
+
+  const summary = useMemo(() => summarizeSession(effectiveScopedSession), [effectiveScopedSession]);
   const matches = chronological(session?.matches);
   const lastMatch = matches.length ? matches[matches.length - 1] : null;
   const playlists = session?.playlists ? Object.values(session.playlists) : [];
@@ -165,7 +178,7 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
       return {
         id: spec.id,
         label: spec.label,
-        shortRank: shortRank(rankName, div),
+        shortRank: shortRank(rankName, div, rInfo?.short_rank, rInfo?.tier),
         mmr: formatMmr(mmr),
         delta,
         games,
@@ -191,7 +204,7 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
         return {
           id: spec.id,
           label: spec.label,
-          rank: shortRank(rInfo?.rank_name || 'RANKED', rInfo?.division),
+          rank: shortRank(rInfo?.rank_name || 'RANKED', rInfo?.division, rInfo?.short_rank, rInfo?.tier),
           mmr: formatMmr(mmr),
         };
       }
@@ -256,13 +269,13 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
         />
       )}
 
-      {/* Shared Session KPI Strip + Shared-Header FOR / AGAINST Historical Split Table */}
+      {/* Mode-Scoped Session KPI Strip + Shared-Header FOR / AGAINST Split Table */}
       {session && (
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4">
             <div className="flex flex-col gap-2 min-w-0">
               <SectionLabel>THIS SESSION · {formatElapsed(session.started_at)}</SectionLabel>
-              <SessionKpiStrip kpis={summary.kpis} variant="idle" session={session} />
+              <SessionKpiStrip kpis={summary.kpis} variant="idle" session={effectiveScopedSession} />
             </div>
             {playlists.length > 0 && (
               <div className="flex flex-col gap-2 min-w-0">
@@ -271,7 +284,7 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
               </div>
             )}
           </div>
-          <SessionForAgainstTable session={session} />
+          <SessionForAgainstTable session={effectiveScopedSession} />
 
           {/* Top-3 Core Playlist Rank Cards (3v3, 2v2, 1v1) + ALL 8 MODES Drawer */}
           <div data-testid="idle-core-ranks" className="surface-plaque border border-outline p-4 flex flex-col gap-3">
@@ -347,4 +360,3 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
     </div>
   );
 };
-

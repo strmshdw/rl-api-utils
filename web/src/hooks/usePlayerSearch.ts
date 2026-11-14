@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type SetStateAction } from 'react';
 import { PlayerSummary, PlayerSearchResponse, GlobalSpotlights } from '../types/api';
 import { useDashboard } from '../context/DashboardContext';
+import { playlistFilterToParam } from '../utils/broadcast';
 import { isDemoMode, SAMPLE_PLAYERS } from '../utils/sampleData';
 
 export type PlayerSortField =
@@ -25,11 +26,31 @@ export interface UsePlayerSearchOptions {
 }
 
 export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
-  const { dateRangeQueryParams } = useDashboard();
+  const { activePlaylist, setActivePlaylist, dateRangeQueryParams } = useDashboard();
+  const contextPlaylist = playlistFilterToParam(activePlaylist) || 'all';
+
   const [query, setQuery] = useState<string>('');
   const [debouncedQuery, setDebouncedQuery] = useState<string>('');
   const [platform, setPlatform] = useState<string>('all');
-  const [playlist, setPlaylist] = useState<string>('all');
+  const [playlistState, setPlaylistState] = useState<{ source: string; value: string }>({
+    source: contextPlaylist,
+    value: contextPlaylist,
+  });
+  if (playlistState.source !== contextPlaylist) {
+    setPlaylistState({ source: contextPlaylist, value: contextPlaylist });
+  }
+  const playlist =
+    playlistState.source === contextPlaylist ? playlistState.value : contextPlaylist;
+
+  const setPlaylist = useCallback(
+    (next: string) => {
+      const normalized = playlistFilterToParam(next) || 'all';
+      setPlaylistState({ source: contextPlaylist, value: normalized });
+      setActivePlaylist(normalized);
+    },
+    [contextPlaylist, setActivePlaylist],
+  );
+
   const [role, setRole] = useState<RoleFilter>(options.initialRole ?? 'all');
   const [sort, setSort] = useState<PlayerSortField>(options.initialSort ?? 'last_seen');
   const [order, setOrder] = useState<SortOrder>(options.initialOrder ?? 'desc');
@@ -122,7 +143,6 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
 
         const data = await res.json();
         if (Array.isArray(data)) {
-          // Backward-compatible fallback if daemon returned raw array
           if (data.length === 0 && isDemoMode() && !debouncedQuery.trim() && platform === 'all') {
             setPlayers(SAMPLE_PLAYERS);
             setTotal(SAMPLE_PLAYERS.length);
@@ -130,17 +150,22 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
             setPlayers(data);
             setTotal(data.length);
           }
+          setSpotlights(null);
         } else {
           const resp = data as PlayerSearchResponse;
-          if ((!resp.players || resp.players.length === 0) && isDemoMode() && !debouncedQuery.trim() && platform === 'all') {
+          if (
+            (!resp.players || resp.players.length === 0) &&
+            isDemoMode() &&
+            !debouncedQuery.trim() &&
+            platform === 'all'
+          ) {
             setPlayers(SAMPLE_PLAYERS);
             setTotal(SAMPLE_PLAYERS.length);
+            setSpotlights(null);
           } else {
             setPlayers(resp.players || []);
             setTotal(resp.total || 0);
-            if (resp.spotlights) {
-              setSpotlights(resp.spotlights);
-            }
+            setSpotlights(resp.spotlights ?? null);
           }
         }
       } catch (err) {
@@ -208,4 +233,3 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
     totalPages: Math.max(1, Math.ceil(total / limit)),
   };
 }
-

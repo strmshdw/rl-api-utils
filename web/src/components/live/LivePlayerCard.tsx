@@ -8,7 +8,9 @@ import {
   formatRecord,
   formatSigned,
   hasSyncedRoleTelemetry,
+  matchesPlaylistFilter,
   platformLabel,
+  playlistFilterToParam,
   recordInk,
   shortRank,
 } from '../../utils/broadcast';
@@ -49,7 +51,7 @@ interface LivePlayerCardProps {
   isTeammate: boolean;
   leaders: StatLeaders;
   columns: ColumnConfig;
-  /** Session W–L, shown on the local player's own card. */
+  /** Playlist-scoped Session W–L, shown on the local player's own card. */
   sessionRecord: { wins: number; losses: number; netMmr?: number };
   localPlayer?: LobbyPlayer | null;
   opposingTeamPlayers?: LobbyPlayer[];
@@ -74,38 +76,41 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
   const { statMode, showLiveHistData } = useDashboard();
   const isAvg = statMode === 'avg';
 
-  const scopedPlaylistId =
-    playlistScope === '2v2' || playlistScope === '11'
-      ? 11
-      : playlistScope === '3v3' || playlistScope === '13'
-      ? 13
-      : playlistScope === '1v1' || playlistScope === '10'
-      ? 10
-      : 0;
+  const param = playlistFilterToParam(playlistScope);
+  const parsedId = Number(param);
+  const scopedPlaylistId = Number.isInteger(parsedId) && parsedId > 0 ? parsedId : 0;
+  const nonNumericMismatch =
+    scopedPlaylistId === 0 &&
+    Boolean(playlistScope) &&
+    playlistScope !== 'all' &&
+    !matchesPlaylistFilter(activePlaylistId, playlistScope);
 
   const stats = player.stats || EMPTY_STATS;
-  const rank =
-    scopedPlaylistId > 0
-      ? player.ranks?.[String(scopedPlaylistId)] ??
-        (player.current_rank?.playlist_id === scopedPlaylistId ? player.current_rank : undefined)
-      : player.current_rank;
+  const rank = nonNumericMismatch
+    ? undefined
+    : scopedPlaylistId > 0
+    ? player.ranks?.[String(scopedPlaylistId)] ??
+      (player.current_rank?.playlist_id === scopedPlaylistId ? player.current_rank : undefined)
+    : player.current_rank;
 
-  const playlistApplies =
-    scopedPlaylistId === 0 ||
-    scopedPlaylistId === activePlaylistId ||
-    player.matchup_record?.playlist_id === scopedPlaylistId;
+  const scopedMatchup = nonNumericMismatch
+    ? undefined
+    : scopedPlaylistId > 0
+    ? player.matchups_by_playlist?.[String(scopedPlaylistId)] ??
+      (player.matchup_record?.playlist_id === scopedPlaylistId ? player.matchup_record : undefined)
+    : player.matchup_record;
 
   let h2hLabel = 'VS YOU';
-  let wins = playlistApplies ? player.matchup_record?.wins_as_opponent ?? 0 : 0;
-  let losses = playlistApplies ? player.matchup_record?.losses_as_opponent ?? 0 : 0;
+  let wins = scopedMatchup?.wins_as_opponent ?? 0;
+  let losses = scopedMatchup?.losses_as_opponent ?? 0;
   if (isLocal) {
     h2hLabel = 'THIS SESSION';
-    wins = playlistApplies ? sessionRecord.wins : 0;
-    losses = playlistApplies ? sessionRecord.losses : 0;
+    wins = sessionRecord.wins;
+    losses = sessionRecord.losses;
   } else if (isTeammate) {
     h2hLabel = 'WITH YOU';
-    wins = playlistApplies ? player.matchup_record?.wins_as_teammate ?? 0 : 0;
-    losses = playlistApplies ? player.matchup_record?.losses_as_teammate ?? 0 : 0;
+    wins = scopedMatchup?.wins_as_teammate ?? 0;
+    losses = scopedMatchup?.losses_as_teammate ?? 0;
   }
   const recordColor = isLocal && wins + losses > 0 ? 'text-ink' : recordInk(wins, losses);
 
@@ -125,7 +130,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         title="Player disconnected early; stats and match outcomes are preserved"
       >
         DISCONNECTED
-      </span>
+      </span>,
     );
   }
 
@@ -136,31 +141,45 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
     player,
     localPlayer,
     opposingTeamPlayers,
-    scopedPlaylistId > 0 ? scopedPlaylistId : activePlaylistId
+    scopedPlaylistId > 0 ? scopedPlaylistId : activePlaylistId,
   );
 
-  // Build historical split rows without fabricated telemetry fallbacks
-  const tw = playlistApplies ? player.matchup_record?.wins_as_teammate ?? 0 : 0;
-  const tl = playlistApplies ? player.matchup_record?.losses_as_teammate ?? 0 : 0;
-  const ow = playlistApplies ? player.matchup_record?.wins_as_opponent ?? 0 : 0;
-  const ol = playlistApplies ? player.matchup_record?.losses_as_opponent ?? 0 : 0;
+  // Build historical split rows without fabricated cross-playlist telemetry fallbacks
+  const tw = scopedMatchup?.wins_as_teammate ?? 0;
+  const tl = scopedMatchup?.losses_as_teammate ?? 0;
+  const ow = scopedMatchup?.wins_as_opponent ?? 0;
+  const ol = scopedMatchup?.losses_as_opponent ?? 0;
 
-  const withStats: PlayerRoleStatsSummary = !playlistApplies
-    ? emptyRoleStats(0, 0, 0)
-    : isLocal
-    ? player.in_wins_stats ?? emptyRoleStats(Math.max(0, sessionRecord.wins), sessionRecord.wins, 0)
-    : player.with_you_stats ?? emptyRoleStats(tw + tl, tw, tl);
+  const canUseLocalRoleStats =
+    !nonNumericMismatch && (scopedPlaylistId === 0 || scopedPlaylistId === activePlaylistId);
 
-  const againstStats: PlayerRoleStatsSummary = !playlistApplies
-    ? emptyRoleStats(0, 0, 0)
-    : isLocal
-    ? player.in_losses_stats ?? emptyRoleStats(Math.max(0, sessionRecord.losses), 0, sessionRecord.losses)
-    : player.against_you_stats ?? emptyRoleStats(ow + ol, ow, ol);
+  const canUsePlayerRoleStats =
+    !nonNumericMismatch &&
+    (scopedPlaylistId === 0 ||
+      (scopedPlaylistId === activePlaylistId &&
+        Boolean(scopedMatchup) &&
+        scopedMatchup?.playlist_id === activePlaylistId));
+
+  const withStats: PlayerRoleStatsSummary = isLocal
+    ? canUseLocalRoleStats && player.in_wins_stats
+      ? player.in_wins_stats
+      : emptyRoleStats(Math.max(0, sessionRecord.wins), sessionRecord.wins, 0)
+    : canUsePlayerRoleStats && player.with_you_stats
+    ? player.with_you_stats
+    : emptyRoleStats(tw + tl, tw, tl);
+
+  const againstStats: PlayerRoleStatsSummary = isLocal
+    ? canUseLocalRoleStats && player.in_losses_stats
+      ? player.in_losses_stats
+      : emptyRoleStats(Math.max(0, sessionRecord.losses), 0, sessionRecord.losses)
+    : canUsePlayerRoleStats && player.against_you_stats
+    ? player.against_you_stats
+    : emptyRoleStats(ow + ol, ow, ol);
 
   const renderHistRow = (
     roleLabel: string,
     roleColor: string,
-    s: PlayerRoleStatsSummary
+    s: PlayerRoleStatsSummary,
   ) => {
     if (!s || s.games === 0) {
       return (
@@ -279,7 +298,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
           </div>
           {rank && (
             <div className="t-font-display font-bold text-[11px] tracking-widest uppercase opacity-90 mt-0.5">
-              {shortRank(rank.rank_name, rank.division)}
+              {shortRank(rank.rank_name, rank.division, rank.short_rank, rank.tier)}
             </div>
           )}
         </div>
@@ -387,7 +406,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
               <span
                 className={`font-extrabold text-2xl leading-none t-font-mono ${statInk(
                   stats[key] || 0,
-                  leaders[key]
+                  leaders[key],
                 )}`}
               >
                 {stats[key] || 0}
@@ -430,4 +449,3 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
     </div>
   );
 };
-

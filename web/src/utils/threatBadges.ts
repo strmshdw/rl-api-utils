@@ -87,7 +87,7 @@ export function computeLiveThreatBadges(
       if (diffVsYou >= 120 && diffVsOwnActive >= 80) {
         if (!bestSmurf || diffVsYou > bestSmurf.diffVsYou) {
           const modeLabel = MODE_SHORT_LABEL[pid] || r.playlist_name?.toUpperCase() || `MODE ${pid}`;
-          const rankShort = shortRank(r.rank_name, r.division).split('·')[0].trim();
+          const rankShort = shortRank(r.rank_name, r.division, r.short_rank, r.tier).split('·')[0].trim();
           bestSmurf = {
             modeLabel,
             rankShort,

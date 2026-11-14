@@ -150,12 +150,63 @@ describe('HistoryView', () => {
     expect(calls.some((c) => c.includes('playlist=10'))).toBe(true);
   });
 
-  it('filters by result on the client', async () => {
-    mockFetch([record({ match_guid: 'w', blue_score: 3, orange_score: 1 }), record({ match_guid: 'l', blue_score: 0, orange_score: 2, result: 'defeat' })]);
-    const { container } = await mount(<HistoryView />);
+  it('filters by result and strict LOCAL status (downloaded && !uploaded) and preserves short_rank divisions in box scores', async () => {
+    const withShortRankDiv = record({
+      match_guid: 'local-dl',
+      blue_score: 0,
+      orange_score: 2,
+      result: 'defeat',
+      download_status: 'DOWNLOADED',
+      upload_status: 'PENDING',
+      stats: {
+        match_guid: 'local-dl',
+        map_name: 'DFH Stadium',
+        playlist: 11,
+        blue_score: 0,
+        orange_score: 2,
+        duration: 300,
+        overtime: false,
+        date: new Date().toISOString(),
+        players: [
+          {
+            name: 'LocalHero',
+            platform: 'Steam',
+            online_id: 'me',
+            team: 0,
+            score: 410,
+            goals: 0,
+            assists: 0,
+            saves: 2,
+            shots: 3,
+            demos: 1,
+            mmr: 1490,
+            rank_name: 'Grand Champion I',
+            short_rank: 'GC I · DIV II',
+          },
+        ],
+      },
+    });
+    const pendingNotDownloaded = record({
+      match_guid: 'pending-nodl',
+      blue_score: 3,
+      orange_score: 1,
+      download_status: 'PENDING',
+      upload_status: 'PENDING',
+    });
+    mockFetch([withShortRankDiv, pendingNotDownloaded]);
+    const { container } = await mount(<HistoryView localPlayerIds={new Set(['me'])} />);
     expect(rows(container)).toHaveLength(2);
+
+    // LOCAL filter must include DOWNLOADED & !UPLOADED, excluding PENDING / non-downloaded
+    await clickText(container, 'LOCAL');
+    expect(rows(container).map((r) => r.dataset.guid)).toEqual(['local-dl']);
+
     await clickText(container, 'LOSSES');
-    expect(rows(container).map((r) => r.dataset.guid)).toEqual(['l']);
+    expect(rows(container).map((r) => r.dataset.guid)).toEqual(['local-dl']);
+
+    // Expanding row preserves short_rank division ("GC I · DIV II") when rank_name is tier-only
+    await act(async () => (rows(container)[0].firstElementChild as HTMLElement).click());
+    expect(container.querySelector('[data-testid="history-box-score"]')!.textContent).toContain('GC I · DIV II');
   });
 
   it('expands one row at a time, and only rows with parsed stats', async () => {
@@ -216,5 +267,87 @@ describe('HistoryView', () => {
     mockFetch([]);
     const { container } = await mount(<HistoryView />);
     expect(container.textContent).toContain('NO MATCHES IN THE LOCAL STORE YET');
+  });
+
+  it('orients HistoryRow collapsed score as You – Opponent when local player is on Orange and formats raw UE3 arena names', async () => {
+    const orangeWin = record({
+      match_guid: 'orange-win-1',
+      map_name: 'UF_Day_P',
+      playlist: 11,
+      blue_score: 1,
+      orange_score: 3,
+      winner_team: 1,
+      result: 'victory',
+      stats: {
+        match_guid: 'orange-win-1',
+        map_name: 'UF_Day_P',
+        playlist: 11,
+        blue_score: 1,
+        orange_score: 3,
+        winner_team: 1,
+        duration: 300,
+        overtime: false,
+        date: new Date().toISOString(),
+        players: [
+          { name: 'OppBlue1', platform: 'Steam', online_id: 'opp1', team: 0, score: 250, goals: 1, assists: 0, saves: 1, shots: 2, demos: 0 },
+          { name: 'OppBlue2', platform: 'Steam', online_id: 'opp2', team: 0, score: 200, goals: 0, assists: 1, saves: 0, shots: 1, demos: 0 },
+          { name: 'MeOrange', platform: 'Epic', online_id: 'local_orange_id', team: 1, score: 520, goals: 2, assists: 1, saves: 2, shots: 4, demos: 1 },
+          { name: 'MateOrange', platform: 'Steam', online_id: 'mate1', team: 1, score: 410, goals: 1, assists: 2, saves: 1, shots: 3, demos: 0 },
+        ],
+      },
+    });
+
+    mockFetch([orangeWin]);
+    const { container } = await mount(<HistoryView localPlayerIds={new Set(['local_orange_id'])} />);
+    const [row] = rows(container);
+    expect(row.textContent).toContain('Urban Future (Day)');
+    expect(row.textContent).toContain('You + MateOrange vs OppBlue1, OppBlue2');
+
+    // Score cell shows W + 3–1 (3 in orange ink, 1 in blue ink), never contradictory W + 1–3
+    expect(row.textContent).toMatch(/^W3–1/);
+    const scoreSpans = row.querySelectorAll('div.t-font-mono span');
+    expect(scoreSpans[0].textContent).toBe('3');
+    expect(scoreSpans[0].className).toContain('text-orange-ink');
+    expect(scoreSpans[2].textContent).toBe('1');
+    expect(scoreSpans[2].className).toContain('text-blue-ink');
+
+    // Expanding the row preserves canonical BLUE and ORANGE box score slabs
+    await act(async () => (row.firstElementChild as HTMLElement).click());
+    const box = row.querySelector('[data-testid="history-box-score"]')!;
+    expect(box.textContent).toContain('BLUE');
+    expect(box.textContent).toContain('ORANGE');
+  });
+
+  it('resets pagination to page 1 when sort changes and omits inline playlist segmented control when hidePlaylistFilter is true', async () => {
+    const manyMatches = Array.from({ length: 20 }, (_, i) => record({ match_guid: `m-${i}` }));
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn((url: string) => {
+      calls.push(url);
+      if (url.startsWith('/api/sync/ballchasing/status')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ running: false, total_replays: 0, synced_matches: 0, synced_players: 0 }) });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ matches: manyMatches, total: 45, limit: 20, offset: 0 }),
+      });
+    }) as unknown as typeof fetch;
+
+    const { container } = await mount(<HistoryView hidePlaylistFilter />);
+    expect(container.querySelector('[aria-label="Filter by playlist"]')).toBeNull();
+    expect(container.textContent).toContain('SHOWING 1–20 OF 45 MATCHES');
+
+    await clickText(container, 'NEXT');
+    expect(calls.some((c) => c.includes('offset=20'))).toBe(true);
+    expect(container.textContent).toContain('SHOWING 21–40 OF 45 MATCHES');
+
+    const sortSelect = container.querySelector<HTMLSelectElement>('#history-sort')!;
+    sortSelect.value = 'goals-desc';
+    await act(async () => {
+      sortSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const lastMatchCall = [...calls].reverse().find((c) => c.startsWith('/api/matches?'))!;
+    expect(lastMatchCall).toContain('offset=0');
+    expect(lastMatchCall).toContain('sort_by=goals');
+    expect(lastMatchCall).toContain('sort_dir=desc');
   });
 });

@@ -93,7 +93,7 @@ export function getSamplePlayerProfile(playerId: string, playerName?: string): P
   if (ENABLED) return Preview.getSamplePlayerProfile(playerId, playerName);
   return {
     player_id: playerId, platform: '', player_name: playerName || '', ranks_json: '{}',
-    first_seen_at: '', last_seen_at: '', matchups: [],
+    first_seen_at: '', last_seen_at: '', matchups: [], playlist_breakdown: [],
   };
 }
 

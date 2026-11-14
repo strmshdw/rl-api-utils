@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CurrentMatchResponse, HistoricalMatchRecord, MatchesResponse } from '../../types/api';
+import { matchesPlaylistFilter, playlistFilterToParam } from '../../utils/broadcast';
 import { isDemoMode, SAMPLE_HISTORICAL_MATCHES } from '../../utils/sampleData';
 import { COLUMN_HEADER, GhostButton, PageHeader, PrimaryButton, SearchInput, Segmented } from '../common/ui';
 import { HistoricalMatchDetailModal } from './HistoricalMatchDetailModal';
@@ -9,7 +10,16 @@ import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
 import { useDashboard } from '../../context/DashboardContext';
 import { useBallchasingSync } from '../../hooks/useBallchasingSync';
 
-type PlaylistFilter = 'all' | 'duel' | 'doubles' | 'standard';
+const PLAYLIST_OPTIONS = [
+  ['all', 'ALL MODES'],
+  ['10', '1V1'],
+  ['11', '2V2'],
+  ['13', '3V3'],
+  ['extra', 'EXTRA'],
+  ['casual', 'CASUAL'],
+] as const;
+
+type PlaylistFilter = (typeof PLAYLIST_OPTIONS)[number][0];
 type StatusFilter = 'all' | 'BALLCHASING' | 'LOCAL';
 type OutcomeFilter = 'all' | 'W' | 'L';
 type HistorySortOption =
@@ -20,14 +30,6 @@ type HistorySortOption =
   | 'saves-desc'
   | 'demos-desc'
   | 'duration-desc';
-
-const PLAYLIST_OPTIONS = [
-  ['all', 'ALL MODES'],
-  ['duel', '1V1'],
-  ['doubles', '2V2'],
-  ['standard', '3V3'],
-] as const;
-const PLAYLIST_IDS: Record<PlaylistFilter, number> = { all: 0, duel: 10, doubles: 11, standard: 13 };
 
 const STATUS_OPTIONS = [
   ['all', 'ALL STATUS'],
@@ -48,15 +50,23 @@ interface HistoryViewProps {
   /** Lower-cased online IDs of the local player, used to orient W/L and highlight "you". */
   localPlayerIds?: Set<string>;
   liveMatch?: CurrentMatchResponse | null;
+  hidePlaylistFilter?: boolean;
   onOpenFullProfile?: (playerId: string, playerName?: string) => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
   localPlayerIds = EMPTY_IDS,
   liveMatch,
+  hidePlaylistFilter = false,
   onOpenFullProfile,
 }) => {
-  const { dateRangeQueryParams } = useDashboard();
+  const {
+    dateRangeQueryParams,
+    activePlaylist,
+    setActivePlaylist,
+    isDevBuild,
+    previewMode,
+  } = useDashboard();
   const [matches, setMatches] = useState<HistoricalMatchRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [serverLocalIds, setServerLocalIds] = useState<string[]>([]);
@@ -66,7 +76,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [playlistFilter, setPlaylistFilter] = useState<PlaylistFilter>('all');
+  const [localPlaylistFilter, setLocalPlaylistFilter] = useState<PlaylistFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
   const [sortOption, setSortOption] = useState<HistorySortOption>('date-desc');
@@ -77,6 +87,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const retryingRef = useRef<Set<string>>(new Set());
   const [profilePlayerId, setProfilePlayerId] = useState<string | null>(null);
   const [profilePlayerName, setProfilePlayerName] = useState<string | undefined>(undefined);
+
+  const effectivePlaylistFilter = hidePlaylistFilter ? activePlaylist : localPlaylistFilter;
+  const playlistParam = useMemo(
+    () => playlistFilterToParam(effectivePlaylistFilter),
+    [effectivePlaylistFilter],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [playlistParam]);
 
   const effectiveLocalIds = useMemo(() => {
     if (serverLocalIds.length === 0) return localPlayerIds;
@@ -103,13 +123,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const fetchMatches = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    const playlistId = PLAYLIST_IDS[playlistFilter];
+    const demoEnabled = isDemoMode() || (isDevBuild && previewMode);
     try {
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE),
         offset: String((page - 1) * PAGE_SIZE),
       });
-      if (playlistId > 0) params.set('playlist', String(playlistId));
+      if (playlistParam) params.set('playlist', playlistParam);
       if (debouncedQuery) {
         params.set('query', debouncedQuery);
         params.set('search', debouncedQuery);
@@ -142,17 +162,23 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         setServerLocalIds(data.local_player_ids);
       }
 
-      if (data.matches.length === 0 && isDemoMode() && !debouncedQuery && playlistId === 0) {
-        setMatches(SAMPLE_HISTORICAL_MATCHES);
-        setTotal(SAMPLE_HISTORICAL_MATCHES.length);
+      if (data.matches.length === 0 && demoEnabled && !debouncedQuery) {
+        const demoFiltered = SAMPLE_HISTORICAL_MATCHES.filter((m) =>
+          matchesPlaylistFilter(m.playlist, effectivePlaylistFilter),
+        );
+        setMatches(demoFiltered);
+        setTotal(demoFiltered.length);
       } else {
         setMatches(data.matches);
         setTotal(data.total);
       }
     } catch (err) {
       if (isDemoMode()) {
-        setMatches(SAMPLE_HISTORICAL_MATCHES);
-        setTotal(SAMPLE_HISTORICAL_MATCHES.length);
+        const demoFiltered = SAMPLE_HISTORICAL_MATCHES.filter((m) =>
+          matchesPlaylistFilter(m.playlist, effectivePlaylistFilter),
+        );
+        setMatches(demoFiltered);
+        setTotal(demoFiltered.length);
       } else {
         setError(err instanceof Error ? err.message : 'Failed to fetch historical matches');
       }
@@ -161,7 +187,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     }
   }, [
     page,
-    playlistFilter,
+    playlistParam,
+    effectivePlaylistFilter,
+    isDevBuild,
+    previewMode,
     debouncedQuery,
     outcomeFilter,
     statusFilter,
@@ -229,8 +258,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       if (statusFilter !== 'all') {
         const st = replayStatus(m);
         const isBc = st.label.startsWith('BALLCHASING');
+        const isDownloaded =
+          (m.download_status || '').toUpperCase() === 'DOWNLOADED' ||
+          Boolean(m.local_file_path?.trim());
         if (statusFilter === 'BALLCHASING' && !isBc) return false;
-        if (statusFilter === 'LOCAL' && isBc) return false;
+        if (statusFilter === 'LOCAL' && (!isDownloaded || isBc)) return false;
       }
       return true;
     });
@@ -261,7 +293,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const hasFilters =
     debouncedQuery !== '' ||
-    playlistFilter !== 'all' ||
+    playlistParam !== '' ||
     outcomeFilter !== 'all' ||
     statusFilter !== 'all';
   const combinedError = syncError || error;
@@ -306,15 +338,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             placeholder="SEARCH ARENA, PLAYER OR GUID…"
             className="w-64 sm:w-72"
           />
-          <Segmented
-            label="Filter by playlist"
-            options={PLAYLIST_OPTIONS}
-            value={playlistFilter}
-            onChange={(v) => {
-              setPlaylistFilter(v);
-              setPage(1);
-            }}
-          />
+          {!hidePlaylistFilter && (
+            <Segmented
+              label="Filter by playlist"
+              options={PLAYLIST_OPTIONS}
+              value={localPlaylistFilter}
+              onChange={(v) => {
+                setLocalPlaylistFilter(v);
+                setActivePlaylist(v);
+                setPage(1);
+              }}
+            />
+          )}
           <Segmented
             label="Filter by status"
             options={STATUS_OPTIONS}
@@ -340,7 +375,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             id="history-sort"
             aria-label="Sort matches"
             value={sortOption}
-            onChange={(e) => setSortOption(e.target.value as HistorySortOption)}
+            onChange={(e) => {
+              setSortOption(e.target.value as HistorySortOption);
+              setPage(1);
+            }}
             className="h-[38px] t-bg-page bg-page t-border border border-outline px-3 text-sm font-extrabold t-text-strong text-ink-strong uppercase outline-none t-radius"
           >
             <option value="date-desc">SORT: NEWEST FIRST</option>
@@ -399,7 +437,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-4 px-2">
               <span className="text-muted text-sm font-semibold">
-                SHOWING {rows.length} OF {total} MATCHES
+                SHOWING {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} OF {total}{' '}
+                MATCHES
               </span>
               <div className="flex items-center gap-2">
                 <GhostButton onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>

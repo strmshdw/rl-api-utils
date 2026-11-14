@@ -1,19 +1,29 @@
 import React, { useState } from 'react';
-import { SessionResponse } from '../../types/api';
-import { deltaInk, formatMmr, formatRecord, formatSigned, playlistLabels } from '../../utils/broadcast';
+import { DashboardTab, SessionResponse } from '../../types/api';
+import {
+  deltaInk,
+  formatMmr,
+  formatRecord,
+  formatSigned,
+  matchesPlaylistFilter,
+  playlistFilterToParam,
+  playlistLabels,
+} from '../../utils/broadcast';
+import { isDemoMode } from '../../utils/sampleData';
 import { StatusDot } from '../common/ui';
-import { DateRangePreset, useDashboard } from '../../context/DashboardContext';
+import { useDashboard } from '../../context/DashboardContext';
+import { ContextFilterBar } from './ContextFilterBar';
 import { ReplayLimitBanner } from './ReplayLimitBanner';
 import { SettingsPanel } from './SettingsPanel';
 
-export type DashboardTab = 'live' | 'session' | 'history' | 'players';
+export type { DashboardTab };
 
 interface TopBarProps {
   activeTab: DashboardTab;
   onTabChange: (tab: DashboardTab) => void;
   inMatch: boolean;
   session: SessionResponse | null;
-  /** Playlist whose MMR is shown on the right (current match, else latest session match). */
+  /** Playlist whose MMR is shown on the right (current match, active mode, else most played). */
   playlistId?: number;
   /** Shown while a live match is on screen; opens the column customiser. */
   onOpenColumns?: () => void;
@@ -40,16 +50,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   onRefreshSession,
 }) => {
   const {
-    statMode,
-    setStatMode,
+    activePlaylist,
     dateRange,
-    setDateRange,
     customFrom,
     setCustomFrom,
     customTo,
     setCustomTo,
     showCustomCalendar,
-    setShowCustomCalendar,
     isDevBuild,
     appVersion,
     previewMode,
@@ -57,23 +64,45 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const matchCount = session?.matches?.length ?? 0;
-  const playlist = playlistId != null ? session?.playlists?.[String(playlistId)] : undefined;
+  const matchCount = session?.matches?.length ?? session?.total_matches ?? 0;
+  const activeParam = playlistFilterToParam(activePlaylist);
+  const numericActiveId = Number(activeParam);
+  const isAllModes = activeParam === '';
+  const playlist =
+    !isAllModes && playlistId != null ? session?.playlists?.[String(playlistId)] : undefined;
+  const groupPlaylists = !isAllModes
+    ? Object.values(session?.playlists ?? {}).filter((p) =>
+        matchesPlaylistFilter(p.playlist_id, activeParam),
+      )
+    : [];
+  const groupWins = groupPlaylists.reduce((s, p) => s + p.wins, 0);
+  const groupLosses = groupPlaylists.reduce((s, p) => s + p.losses, 0);
+  const modeShortLabel =
+    Number.isInteger(numericActiveId) && numericActiveId > 0
+      ? playlistLabels(numericActiveId).short
+      : activeParam === 'extra'
+      ? 'EXTRA'
+      : activeParam === 'casual'
+      ? 'CASUAL'
+      : activeParam.toUpperCase();
+  const activeDemo = isDevBuild && (previewMode || isDemoMode());
+  const overlayHref = activeDemo ? '/?mode=overlay&demo=true' : '/?mode=overlay';
 
   return (
     <>
       {/* REPLAY HISTORY LIMIT WARNING / ERROR BANNER */}
       <ReplayLimitBanner session={session} onRefreshSession={onRefreshSession} />
 
-      {/* STICKY ARCHITECTURAL MASTHEAD — Compact Single-Row Broadcast Bar */}
+      {/* 2-TIER STICKY ARCHITECTURAL MASTHEAD (Tier 1 Nav + Tier 2 Context Filter Toolbar) */}
       <header
         data-testid="app-header"
         className="sticky top-0 z-30 t-bg-page bg-page border-b t-border border-line font-display"
       >
-        <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-2 flex flex-wrap xl:flex-nowrap items-center justify-between gap-3">
-          {/* Left: Brand Mark + Primary Navigation Tabs */}
-          <div className="flex items-center gap-4 min-w-0 shrink-0">
-            <div className="flex items-center gap-2 select-none">
+        {/* Tier 1: Primary Navigation, Session/Playlist MMR Readout, Overlay & Settings */}
+        <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-2 flex flex-wrap 2xl:flex-nowrap items-center justify-between gap-x-3 gap-y-1.5">
+          {/* Left: Brand Mark + Single-Row Primary Navigation Tabs */}
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0 max-w-full">
+            <div className="flex items-center gap-2 select-none shrink-0">
               <span
                 aria-hidden="true"
                 className="inline-flex items-center justify-center w-6 h-6 surface-plaque border border-outline text-xs font-extrabold t-text-blue"
@@ -83,13 +112,16 @@ export const TopBar: React.FC<TopBarProps> = ({
               <span className="t-font-display font-bold text-xl tracking-widest t-text-strong whitespace-nowrap">
                 RL<span className="t-text-orange text-orange-ink">/</span>SYNC
               </span>
-              <span className="text-[11px] t-font-mono cartouche-mono px-1.5 py-0.5 hidden sm:inline whitespace-nowrap">
+              <span className="text-[11px] t-font-mono cartouche-mono px-1.5 py-0.5 hidden md:inline whitespace-nowrap">
                 v{appVersion}
                 {isDevBuild ? '-dev' : ''}
               </span>
             </div>
 
-            <nav aria-label="Dashboard" className="flex items-center gap-0.5 font-bold text-sm tracking-wider">
+            <nav
+              aria-label="Dashboard"
+              className="dashboard-nav-scroll flex flex-nowrap overflow-x-auto items-center gap-0.5 font-bold text-sm tracking-wider min-w-0"
+            >
               {TABS.map((tab) => {
                 const active = tab.id === activeTab;
                 return (
@@ -99,14 +131,14 @@ export const TopBar: React.FC<TopBarProps> = ({
                     id={`nav-${tab.id}`}
                     aria-current={active ? 'page' : undefined}
                     onClick={() => onTabChange(tab.id)}
-                    className={`px-3 py-1 t-font-display font-bold text-sm uppercase tracking-widest flex items-center gap-1.5 border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+                    className={`px-2.5 sm:px-3 py-1 flex-none t-font-display font-bold text-sm uppercase tracking-widest flex items-center gap-1.5 border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
                       active
                         ? 't-border-blue border-blue-ink t-text-strong text-ink-strong'
                         : 'border-transparent t-text-muted text-muted hover:text-ink'
                     }`}
                   >
-                    {tab.id === 'live' && (
-                      <StatusDot className={inMatch ? 'bg-loss animate-pulse' : 'bg-faint'} />
+                    {tab.id === 'live' && inMatch && (
+                      <StatusDot className="bg-loss animate-pulse" />
                     )}
                     {tab.label}
                     {tab.id === 'session' && matchCount > 0 && (
@@ -120,105 +152,55 @@ export const TopBar: React.FC<TopBarProps> = ({
             </nav>
           </div>
 
-          {/* Right: Essential Data Scope, Live Session Summary, Columns, Overlay & Settings Gear Button */}
-          <div className="flex flex-wrap xl:flex-nowrap items-center gap-1.5 text-xs shrink-0">
-            {/* Global AVG / G vs TOTALS Toggle */}
-            <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Stat aggregation mode">
-              <button
-                type="button"
-                id="btn-stat-avg"
-                onClick={() => setStatMode('avg')}
-                className={`px-2.5 py-1 t-font-display font-bold text-xs uppercase tracking-wider cursor-pointer whitespace-nowrap ${
-                  statMode === 'avg'
-                    ? 't-bg-blue-ink t-text-on-accent'
-                    : 'surface-plaque t-text-muted hover:opacity-80'
-                }`}
-              >
-                AVG / G
-              </button>
-              <button
-                type="button"
-                id="btn-stat-total"
-                onClick={() => setStatMode('total')}
-                className={`px-2.5 py-1 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border cursor-pointer whitespace-nowrap ${
-                  statMode === 'total'
-                    ? 't-bg-blue-ink t-text-on-accent'
-                    : 'surface-plaque t-text-muted hover:opacity-80'
-                }`}
-              >
-                TOTALS
-              </button>
-            </div>
-
-            {/* Global Timeframe Selector */}
-            <div className="flex items-center gap-1.5 surface-plaque t-border px-2 py-0.5 t-radius whitespace-nowrap">
-              <span className="t-font-display font-bold text-xs uppercase tracking-wider t-text-muted hidden 2xl:inline">
-                TIMEFRAME:
-              </span>
-              <select
-                id="global-date-range"
-                aria-label="Timeframe"
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value as DateRangePreset)}
-                className="t-bg-page t-text-strong text-xs t-font-display font-bold uppercase tracking-wider px-1.5 py-0.5 t-border focus:outline-none cursor-pointer"
-              >
-                <option value="all">ALL TIME</option>
-                <option value="today">TODAY / SESSION</option>
-                <option value="7d">LAST 7 DAYS</option>
-                <option value="30d">LAST 30 DAYS</option>
-                <option value="custom">CUSTOM RANGE...</option>
-              </select>
-              <button
-                type="button"
-                id="btn-cal-toggle"
-                onClick={() => {
-                  if (!showCustomCalendar && dateRange !== 'custom') {
-                    setDateRange('custom');
-                  } else {
-                    setShowCustomCalendar((prev) => !prev);
-                  }
-                }}
-                className="px-1.5 py-0.5 t-bg-page t-border t-font-display font-bold text-xs uppercase tracking-wider t-text-strong hover:opacity-80 cursor-pointer whitespace-nowrap"
-                title="Pick custom start & end dates"
-              >
-                ◆ DATES
-              </button>
-            </div>
-
-            {/* Session W-L & Active Playlist MMR Readout */}
+          {/* Right: Active-Mode Session Status Pill, Overlay Link & Settings Button */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs shrink-0 ml-auto">
             {(session || playlist) && (
-              <div className="hidden lg:flex items-center gap-2.5 px-2.5 py-1 surface-plaque t-border font-semibold text-xs tracking-wider text-muted whitespace-nowrap">
-                {session && (
+              <div className="hidden sm:flex items-center gap-2.5 px-2.5 py-1 surface-plaque t-border font-semibold text-xs tracking-wider text-muted whitespace-nowrap">
+                {isAllModes && session ? (
                   <span>
-                    SESSION{' '}
+                    ALL MODES · SESSION{' '}
                     <span className="text-ink-strong t-font-mono">
                       {formatRecord(session.total_wins, session.total_losses)}
                     </span>
                   </span>
-                )}
-                {playlist && (
+                ) : playlist &&
+                  (Number.isInteger(numericActiveId) && numericActiveId > 0
+                    ? true
+                    : groupPlaylists.length === 1) ? (
                   <span>
                     {playlistLabels(playlist.playlist_id, playlist.playlist_name).short}{' '}
-                    <span className="text-ink-strong t-font-mono">{formatMmr(playlist.current_mmr)}</span>{' '}
+                    <span className="text-ink-strong t-font-mono">
+                      {formatMmr(playlist.current_mmr)}
+                    </span>{' '}
                     <span className={`${deltaInk(playlist.mmr_delta)} t-font-mono`}>
                       {formatSigned(playlist.mmr_delta)}
+                    </span>
+                    <span className="text-muted t-font-mono">
+                      {' '}
+                      ·{' '}
+                      {playlist.wins + playlist.losses > 0
+                        ? formatRecord(playlist.wins, playlist.losses)
+                        : '0–0'}
+                    </span>
+                  </span>
+                ) : (
+                  <span>
+                    {modeShortLabel}{' '}
+                    <span className="text-muted t-font-mono">
+                      ·{' '}
+                      {groupWins + groupLosses > 0
+                        ? formatRecord(groupWins, groupLosses)
+                        : '0–0'}
                     </span>
                   </span>
                 )}
               </div>
             )}
 
-            {onOpenColumns && (
-              <button type="button" onClick={onOpenColumns} className={GHOST_LINK}>
-                COLUMNS
-              </button>
-            )}
-
-            <a href="/?mode=overlay" target="_blank" rel="noopener noreferrer" className={GHOST_LINK}>
+            <a href={overlayHref} target="_blank" rel="noopener noreferrer" className={GHOST_LINK}>
               OVERLAY ↗
             </a>
 
-            {/* Gear Icon / Settings Button */}
             <button
               type="button"
               id="btn-settings"
@@ -257,6 +239,13 @@ export const TopBar: React.FC<TopBarProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Tier 2: Unified Mode Switcher + Contextual Analytics Toolbar */}
+        <ContextFilterBar
+          activeTab={activeTab}
+          inMatch={inMatch}
+          onOpenColumns={onOpenColumns}
+        />
 
         {/* On-Demand Custom Date Range Picker Strip (Only visible when Custom Range is active) */}
         {(showCustomCalendar || dateRange === 'custom') && (
@@ -303,7 +292,6 @@ export const TopBar: React.FC<TopBarProps> = ({
         onSwitchToLive={() => {
           if (activeTab !== 'live') onTabChange('live');
         }}
-        onOpenColumns={onOpenColumns}
       />
     </>
   );

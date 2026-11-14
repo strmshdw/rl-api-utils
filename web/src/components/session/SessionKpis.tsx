@@ -2,13 +2,17 @@ import React from 'react';
 import { MMRHistoryEntry, PlaylistSessionStats, SessionResponse } from '../../types/api';
 import {
   SessionKpi,
+  SessionPlaylistBreakdownItem,
   deltaInk,
   emptyRoleStats,
   formatMmr,
   formatRecord,
   formatSigned,
   hasSyncedRoleTelemetry,
+  matchesPlaylistFilter,
+  playlistFilterToParam,
   playlistLabels,
+  summarizeSessionPlaylists,
 } from '../../utils/broadcast';
 import { PlayerRoleStatsSummary } from '../../types/api';
 import { PANEL_LABEL, RecordCells } from '../common/ui';
@@ -24,6 +28,22 @@ interface SessionKpiStripProps {
   session?: SessionResponse | null;
 }
 
+function reconcileScopedKpis(kpis: SessionKpi[], session?: SessionResponse | null): SessionKpi[] {
+  const plEntries = session?.playlists ? Object.values(session.playlists) : [];
+  if (plEntries.length !== 1) return kpis;
+  const authoritativeDelta = plEntries[0].mmr_delta;
+  if (typeof authoritativeDelta !== 'number') return kpis;
+  return kpis.map((k) =>
+    k.key === 'mmr'
+      ? {
+          ...k,
+          value: formatSigned(authoritativeDelta),
+          ink: deltaInk(authoritativeDelta),
+        }
+      : k,
+  );
+}
+
 export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
   kpis,
   variant,
@@ -33,13 +53,15 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
 }) => {
   const { dateRangeLabel } = useDashboard();
   const page = variant === 'page';
+  const effectiveKpis = React.useMemo(() => reconcileScopedKpis(kpis, session), [kpis, session]);
 
   // Find most played playlist if available
+  const sessionPlaylists = session?.playlists ? Object.values(session.playlists) : playlists;
   const mostPlayed =
     session?.most_played_playlist ||
-    (playlists.length > 0
+    (sessionPlaylists.length > 0
       ? (() => {
-          const sorted = [...playlists].sort((a, b) => b.matches_played - a.matches_played);
+          const sorted = [...sessionPlaylists].sort((a, b) => b.matches_played - a.matches_played);
           const top = sorted[0];
           return {
             id: top.playlist_id,
@@ -64,7 +86,7 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
           : 'grid-cols-2 lg:grid-cols-4'
       }`}
     >
-      {kpis.map((k) => {
+      {effectiveKpis.map((k) => {
         const isRecord = k.key === 'record';
         const isMmr = k.key === 'mmr';
         return (
@@ -76,11 +98,11 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
             }`}
           >
             <div className="flex items-center justify-between gap-2 min-w-0">
-              <span className={`${PANEL_LABEL} whitespace-nowrap truncate`}>
+              <span className={`${PANEL_LABEL} whitespace-nowrap ${isMmr ? 'shrink-0' : 'truncate'}`}>
                 {isRecord ? `${k.label} (${dateRangeLabel})` : isMmr ? 'NET MMR' : k.label}
               </span>
               {isMmr && mostPlayed && (
-                <span className="text-[11px] t-font-display font-bold px-1.5 py-0 t-bg-page t-border t-text-blue uppercase whitespace-nowrap shrink-0">
+                <span className="text-[11px] t-font-display font-bold px-1.5 py-0 t-bg-page t-border t-text-blue uppercase whitespace-nowrap truncate">
                   {playlistLabels(mostPlayed.id, mostPlayed.name).mode}
                 </span>
               )}
@@ -116,8 +138,11 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
               key={pl.playlist_id}
               className="flex justify-between items-center gap-2 font-semibold text-base tracking-t4"
             >
-              <span className="min-w-0 truncate">
-                {playlistLabels(pl.playlist_id, pl.playlist_name).name}{' '}
+              <span
+                className="min-w-0 truncate"
+                title={playlistLabels(pl.playlist_id, pl.playlist_name).name}
+              >
+                {playlistLabels(pl.playlist_id, pl.playlist_name).short}{' '}
                 <span className="text-muted t-font-mono">({formatRecord(pl.wins, pl.losses)})</span>
               </span>
               <div className="flex items-center gap-2 shrink-0">
@@ -144,7 +169,7 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
 export const SessionForAgainstTable: React.FC<{
   session: SessionResponse | null;
 }> = ({ session }) => {
-  const { statMode, dateRangeLabel, setStatMode } = useDashboard();
+  const { statMode, dateRangeLabel } = useDashboard();
   const isAvg = statMode === 'avg';
 
   const games = session?.total_matches ?? session?.matches?.length ?? 0;
@@ -206,10 +231,14 @@ export const SessionForAgainstTable: React.FC<{
             <div className="col-span-1 text-right font-bold t-text-orange">
               {fmtVal(synced, s.avg_demos_inflicted, s.total_demos_inflicted, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink2">{Math.round(s.avg_bpm)}</div>
-            <div className="col-span-1 text-right t-text-muted">{Math.round(s.avg_boost)}</div>
+            <div className="col-span-1 text-right t-text-ink2">
+              {s.avg_bpm > 0 ? Math.round(s.avg_bpm) : '—'}
+            </div>
+            <div className="col-span-1 text-right t-text-muted">
+              {s.avg_boost > 0 ? Math.round(s.avg_boost) : '—'}
+            </div>
             <div className={`col-span-1 text-right ${tailColor}`}>
-              {`${s.avg_supersonic_pct.toFixed(1)}%`}
+              {s.avg_supersonic_pct > 0 ? `${s.avg_supersonic_pct.toFixed(1)}%` : '—'}
             </div>
           </>
         )}
@@ -231,15 +260,6 @@ export const SessionForAgainstTable: React.FC<{
             {isAvg ? 'SHOWING PER-GAME AVERAGES' : 'SHOWING CUMULATIVE TOTALS'}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setStatMode(isAvg ? 'total' : 'avg')}
-            className="text-xs t-font-display font-bold uppercase tracking-wider px-2.5 py-0.5 surface-plaque border border-outline t-text-strong hover:opacity-80"
-          >
-            SWITCH TO {isAvg ? 'TOTALS' : 'AVG / G'}
-          </button>
-        </div>
       </div>
 
       {/* Shared Column Header */}
@@ -259,6 +279,92 @@ export const SessionForAgainstTable: React.FC<{
 
       {renderSplitRow('YOUR STATS (FOR)', 't-text-blue', 't-text-win', 't-text-blue', forStats, true)}
       {renderSplitRow('OPPONENTS (AGAINST)', 't-text-orange', 't-text-loss', 't-text-orange', againstStats, false)}
+    </div>
+  );
+};
+
+function breakdownModeTitle(item: SessionPlaylistBreakdownItem): string {
+  if (item.playlistId === 11) return '2V2 DOUBLES';
+  if (item.playlistId === 13 || item.playlistId === 12) return '3V3 STANDARD';
+  if (item.playlistId === 10) return '1V1 DUEL';
+  if (item.playlistId === 2) return 'CASUAL 2V2';
+  if (item.playlistId === 3) return 'CASUAL 3V3';
+  if (item.playlistId === 1) return 'CASUAL 1V1';
+  return item.shortLabel || item.label;
+}
+
+/**
+ * Clickable per-mode session breakdown strip (`2V2 DOUBLES · 3–1 · 1485 (+29)` | `3V3 STANDARD ...` | `◆ ALL SESSION (5)`).
+ */
+export const SessionModeBreakdownStrip: React.FC<{
+  session: SessionResponse | null;
+  activeFilter: string;
+  onSelectFilter: (filterKey: string) => void;
+}> = ({ session, activeFilter, onSelectFilter }) => {
+  const items = React.useMemo(() => summarizeSessionPlaylists(session), [session]);
+  if (items.length === 0) return null;
+
+  const normalizedActive = playlistFilterToParam(activeFilter) || 'all';
+  const totalMatches =
+    session?.matches?.length ??
+    session?.total_matches ??
+    items.reduce((acc, x) => acc + x.matches, 0);
+  const isAllActive = normalizedActive === 'all';
+
+  return (
+    <div
+      data-testid="session-mode-breakdown"
+      role="group"
+      aria-label="Session mode breakdown"
+      className="flex flex-wrap items-center gap-2"
+    >
+      {items.map((item) => {
+        const itemParam = playlistFilterToParam(item.filterKey) || item.filterKey;
+        const isActive =
+          normalizedActive !== 'all' &&
+          (normalizedActive === itemParam || matchesPlaylistFilter(item.playlistId, normalizedActive));
+        return (
+          <button
+            key={item.playlistId}
+            type="button"
+            aria-pressed={isActive}
+            onClick={() => onSelectFilter(item.filterKey)}
+            className={`toolbar-btn px-3 py-1.5 t-border border t-radius t-font-display font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-colors duration-120 ${
+              isActive
+                ? 't-bg-blue-ink t-text-on-accent border-blue-ink'
+                : 'surface-plaque border-outline t-text-ink hover:border-ink'
+            }`}
+          >
+            <span className="font-extrabold">{breakdownModeTitle(item)}</span>
+            <span className={isActive ? 'opacity-80' : 't-text-muted'}>·</span>
+            <span className="t-font-mono">{formatRecord(item.wins, item.losses)}</span>
+            {(item.currentMmr > 0 || item.netMmr !== 0) && (
+              <>
+                <span className={isActive ? 'opacity-80' : 't-text-muted'}>·</span>
+                <span className="t-font-mono">
+                  {item.currentMmr > 0 ? `${formatMmr(item.currentMmr)} ` : ''}
+                  <span className={isActive ? 'font-extrabold' : `font-extrabold ${deltaInk(item.netMmr)}`}>
+                    ({formatSigned(item.netMmr)})
+                  </span>
+                </span>
+              </>
+            )}
+          </button>
+        );
+      })}
+
+      <button
+        type="button"
+        aria-pressed={isAllActive}
+        onClick={() => onSelectFilter('all')}
+        className={`toolbar-btn px-3 py-1.5 t-border border t-radius t-font-display font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-colors duration-120 ${
+          isAllActive
+            ? 't-bg-blue-ink t-text-on-accent border-blue-ink'
+            : 'surface-plaque border-outline t-text-muted hover:text-ink hover:border-ink'
+        }`}
+      >
+        <span>◆ ALL SESSION ({totalMatches})</span>
+      </button>
     </div>
   );
 };

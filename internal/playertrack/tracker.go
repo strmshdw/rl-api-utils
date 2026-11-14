@@ -50,9 +50,10 @@ type Tracker struct {
 	failBackoff map[string]time.Time
 	backoffTTL  time.Duration
 
-	// Tier 4: In-Memory Matchup Cache (Key: "playerID:playlistID")
-	matchupCache    map[string]*storage.PlayerMatchup
-	matchupInFlight map[string]time.Time
+	// Tier 4: In-Memory Matchup Cache (Key: "playerID:playlistID" and per-player all-playlist map)
+	matchupCache            map[string]*storage.PlayerMatchup
+	matchupsByPlaylistCache map[string]map[string]*storage.PlayerMatchup
+	matchupInFlight         map[string]time.Time
 
 	// Post-Match MMR Poller State ("idle", "polling", "synced")
 	mmrPollerState        string
@@ -90,8 +91,9 @@ func NewTracker(store storage.StateStore, rankClient SkillFetcher, cfg config.Pl
 		inFlight:              make(map[string]time.Time),
 		failBackoff:           make(map[string]time.Time),
 		backoffTTL:            defaultBackoffTTL,
-		matchupCache:          make(map[string]*storage.PlayerMatchup),
-		matchupInFlight:       make(map[string]time.Time),
+		matchupCache:            make(map[string]*storage.PlayerMatchup),
+		matchupsByPlaylistCache: make(map[string]map[string]*storage.PlayerMatchup),
+		matchupInFlight:         make(map[string]time.Time),
 		mmrPollerState:        "idle",
 		postMatchPollSchedule: append([]time.Duration(nil), defaultPostMatchPollSchedule...),
 		ctx:                   ctx,

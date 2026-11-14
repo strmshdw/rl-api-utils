@@ -47,6 +47,7 @@ export type {
   PlayerPatchPayload,
   PlayerPatchResponse,
   PlayerPlaylistRank,
+  PlayerProfile,
   PlayerRanksSnapshot,
   PlayerRoleStatsSummary,
   PlayerSearchResponse,

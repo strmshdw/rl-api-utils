@@ -1,4 +1,5 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { modeKeyFromPlaylistId } from '../utils/broadcast';
 import {
   getAppVersion,
   isDemoMode,
@@ -31,6 +32,9 @@ export interface DashboardContextValue {
   setFontScale: (scale: FontScale) => void;
   statMode: StatMode;
   setStatMode: (mode: StatMode) => void;
+  activePlaylist: string;
+  setActivePlaylist: (playlist: string) => void;
+  syncLivePlaylist: (playlistId: number | null | undefined) => void;
   dateRange: DateRangePreset;
   setDateRange: (range: DateRangePreset) => void;
   customFrom: string;
@@ -66,6 +70,9 @@ const DEFAULT_CONTEXT: DashboardContextValue = {
   setFontScale: () => {},
   statMode: 'avg',
   setStatMode: () => {},
+  activePlaylist: 'all',
+  setActivePlaylist: () => {},
+  syncLivePlaylist: () => {},
   dateRange: 'all',
   setDateRange: () => {},
   customFrom: DEFAULT_CUSTOM_FROM,
@@ -95,6 +102,8 @@ const DEFAULT_CONTEXT: DashboardContextValue = {
 
 const DashboardContext = createContext<DashboardContextValue>(DEFAULT_CONTEXT);
 
+const ACTIVE_PLAYLIST_STORAGE_KEY = 'rlsync_active_playlist';
+
 const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { themeStyle, colorMode, setTheme, fontScale, setFontScale } = useTheme();
   const isDevBuild = useMemo(() => isPreviewBuildAllowed(), []);
@@ -102,6 +111,11 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const [previewMode, setPreviewModeState] = useState<boolean>(() => isDemoMode());
   const [statMode, setStatMode] = useState<StatMode>('avg');
+  const [activePlaylist, setActivePlaylistState] = useState<string>(
+    () => safeStorageGet(ACTIVE_PLAYLIST_STORAGE_KEY) || '11',
+  );
+  const lastSyncedLivePlaylistRef = useRef<number | null>(null);
+  const userOverrodeInCurrentMatchRef = useRef<boolean>(false);
   const [dateRange, setDateRangeState] = useState<DateRangePreset>('all');
   const [customFrom, setCustomFromState] = useState<string>(DEFAULT_CUSTOM_FROM);
   const [customTo, setCustomToState] = useState<string>(DEFAULT_CUSTOM_TO);
@@ -118,6 +132,30 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const setDateRange = useCallback((range: DateRangePreset) => {
     setDateRangeState(range);
     setShowCustomCalendar(range === 'custom');
+  }, []);
+
+  const setActivePlaylist = useCallback((playlist: string) => {
+    const next = playlist || '11';
+    setActivePlaylistState(next);
+    safeStorageSet(ACTIVE_PLAYLIST_STORAGE_KEY, next);
+    if (lastSyncedLivePlaylistRef.current !== null && lastSyncedLivePlaylistRef.current > 0) {
+      userOverrodeInCurrentMatchRef.current = true;
+    }
+  }, []);
+
+  const syncLivePlaylist = useCallback((playlistId: number | null | undefined) => {
+    if (!playlistId || playlistId <= 0) {
+      lastSyncedLivePlaylistRef.current = null;
+      userOverrodeInCurrentMatchRef.current = false;
+      return;
+    }
+    if (lastSyncedLivePlaylistRef.current !== playlistId) {
+      lastSyncedLivePlaylistRef.current = playlistId;
+      userOverrodeInCurrentMatchRef.current = false;
+      const next = modeKeyFromPlaylistId(playlistId);
+      setActivePlaylistState(next);
+      safeStorageSet(ACTIVE_PLAYLIST_STORAGE_KEY, next);
+    }
   }, []);
 
   const setCustomFrom = useCallback(
@@ -204,6 +242,9 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setFontScale,
       statMode,
       setStatMode,
+      activePlaylist,
+      setActivePlaylist,
+      syncLivePlaylist,
       dateRange,
       setDateRange,
       customFrom,
@@ -237,6 +278,9 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
       fontScale,
       setFontScale,
       statMode,
+      activePlaylist,
+      setActivePlaylist,
+      syncLivePlaylist,
       dateRange,
       setDateRange,
       customFrom,

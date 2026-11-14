@@ -1,10 +1,16 @@
 import React from 'react';
 import { HistoricalMatchRecord } from '../../types/api';
-import { formatAgo, playlistLabels } from '../../utils/broadcast';
+import { formatAgo, formatArenaName, playlistLabels } from '../../utils/broadcast';
 import { formatDuration } from '../../utils/formatters';
 import { TeamBoxScore } from '../common/BoxScore';
 import { ResultSlab } from '../common/ui';
-import { historyOutcome, playerNames, replayStatus, teamRows } from './historyData';
+import {
+  historyOutcome,
+  orientedMatchSummary,
+  playerNames,
+  replayStatus,
+  teamRows,
+} from './historyData';
 
 export const HISTORY_ROW_GRID =
   '72px 120px minmax(0,1.2fr) minmax(0,1fr) 90px 150px 140px';
@@ -38,6 +44,11 @@ export const HistoryRow: React.FC<HistoryRowProps> = ({
     (match.download_status || '').toUpperCase() === 'FAILED' ||
     (match.upload_status || '').toUpperCase() === 'FAILED';
 
+  const oriented = orientedMatchSummary(match, localIds);
+  const oppTeamInk = oriented.myTeam === 0 ? 'text-orange-ink' : 'text-blue-ink';
+  const rawArena = (match.map_name || match.stats?.map_name || '').trim();
+  const arenaLabel = rawArena ? formatArenaName(rawArena) : 'Unknown arena';
+
   return (
     <div
       data-testid="history-row"
@@ -68,20 +79,20 @@ export const HistoryRow: React.FC<HistoryRowProps> = ({
       >
         <ResultSlab outcome={historyOutcome(match, localIds)} className="text-[20px]" />
         <div className="flex items-center gap-2 pl-[22px] font-extrabold text-[34px] leading-none t-font-mono">
-          <span className="text-blue-ink">{match.blue_score}</span>
+          <span className={oriented.myTeamInk}>{oriented.myScore}</span>
           <span className="text-faint text-[24px]">–</span>
-          <span className="text-orange-ink">{match.orange_score}</span>
+          <span className={oppTeamInk}>{oriented.oppScore}</span>
         </div>
         <div className="flex flex-col gap-0.5 min-w-0 pr-4">
           <span className="font-bold text-lg tracking-t6 truncate">
             {playlistLabels(match.playlist).name}
           </span>
           <span className="font-medium text-sm tracking-t6 text-muted truncate">
-            {match.map_name || match.stats?.map_name || 'Unknown arena'}
+            {arenaLabel}
           </span>
         </div>
         <span className="font-medium text-sm tracking-t4 text-muted truncate pr-4">
-          {playerNames(players, localIds) || '—'}
+          {oriented.rosterText || playerNames(players, localIds) || '—'}
         </span>
         <span className="text-right font-bold text-lg tracking-t4 text-ink-2 whitespace-nowrap t-font-mono">
           {duration ? formatDuration(duration) : '—'}

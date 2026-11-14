@@ -184,6 +184,12 @@ func (s *JSONStore) GetPlayerSpotlights(ctx context.Context) (*GlobalSpotlights,
 	return withRead(s, func() (*GlobalSpotlights, error) { return s.inner.GetPlayerSpotlights(ctx) })
 }
 
+func (s *JSONStore) GetScopedPlayerSpotlights(ctx context.Context, playlist string, fromUnix, toUnix int64) (*GlobalSpotlights, error) {
+	return withRead(s, func() (*GlobalSpotlights, error) {
+		return s.inner.GetScopedPlayerSpotlights(ctx, playlist, fromUnix, toUnix)
+	})
+}
+
 func (s *JSONStore) GetLocalPlayerIDs(ctx context.Context) ([]string, error) {
 	return withRead(s, func() ([]string, error) { return s.inner.GetLocalPlayerIDs(ctx) })
 }
@@ -202,6 +208,12 @@ func (s *JSONStore) GetPlayerMatchup(ctx context.Context, playerID string, playl
 
 func (s *JSONStore) GetPlayerMatchups(ctx context.Context, playerID string) ([]*PlayerMatchup, error) {
 	return withRead(s, func() ([]*PlayerMatchup, error) { return s.inner.GetPlayerMatchups(ctx, playerID) })
+}
+
+func (s *JSONStore) GetScopedPlayerMatchups(ctx context.Context, playerID string, fromUnix, toUnix int64) ([]*PlayerMatchup, error) {
+	return withRead(s, func() ([]*PlayerMatchup, error) {
+		return s.inner.GetScopedPlayerMatchups(ctx, playerID, fromUnix, toUnix)
+	})
 }
 
 func (s *JSONStore) SyncReplayStats(ctx context.Context, stats *ReplayMatchStats) error {

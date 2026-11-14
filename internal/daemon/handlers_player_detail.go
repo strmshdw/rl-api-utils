@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/dank/rl-api-utils/internal/storage"
@@ -13,16 +14,17 @@ import (
 // PlayerDetailResponse represents the composite response for GET /players/{id}.
 type PlayerDetailResponse struct {
 	*storage.PlayerRecord
-	EncountersCount int                             `json:"encounters_count"`
-	TeammateWins    int                             `json:"teammate_wins"`
-	TeammateLosses  int                             `json:"teammate_losses"`
-	OpponentWins    int                             `json:"opponent_wins"`
-	OpponentLosses  int                             `json:"opponent_losses"`
-	RelationshipTag string                          `json:"relationship_tag,omitempty"`
-	WithYouStats    *storage.PlayerRoleStatsSummary `json:"with_you_stats,omitempty"`
-	AgainstYouStats *storage.PlayerRoleStatsSummary `json:"against_you_stats,omitempty"`
-	Matchups        []*storage.PlayerMatchup        `json:"matchups"`
-	RecentMatches   []*storage.PlayerMatchDetail    `json:"recent_matches"`
+	EncountersCount   int                             `json:"encounters_count"`
+	TeammateWins      int                             `json:"teammate_wins"`
+	TeammateLosses    int                             `json:"teammate_losses"`
+	OpponentWins      int                             `json:"opponent_wins"`
+	OpponentLosses    int                             `json:"opponent_losses"`
+	RelationshipTag   string                          `json:"relationship_tag,omitempty"`
+	WithYouStats      *storage.PlayerRoleStatsSummary `json:"with_you_stats,omitempty"`
+	AgainstYouStats   *storage.PlayerRoleStatsSummary `json:"against_you_stats,omitempty"`
+	Matchups          []*storage.PlayerMatchup        `json:"matchups"`
+	PlaylistBreakdown []*storage.PlayerMatchup        `json:"playlist_breakdown,omitempty"`
+	RecentMatches     []*storage.PlayerMatchDetail    `json:"recent_matches"`
 }
 
 type localProfileProvider interface {
@@ -31,6 +33,10 @@ type localProfileProvider interface {
 
 type splitStatsProvider interface {
 	ComputePlayerSplitStats(ctx context.Context, playerID, playerName string, playlistIDs []int, fromUnix, toUnix int64, fbTMWins, fbTMLosses, fbOppWins, fbOppLosses int) (*storage.PlayerRoleStatsSummary, *storage.PlayerRoleStatsSummary)
+}
+
+type scopedMatchupsStore interface {
+	GetScopedPlayerMatchups(ctx context.Context, playerID string, fromUnix, toUnix int64) ([]*storage.PlayerMatchup, error)
 }
 
 func (d *Daemon) loadPlayerProfile(ctx context.Context, playerID string) (*storage.PlayerRecord, string, []*storage.PlayerMatchup, bool, error) {
@@ -139,7 +145,27 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pids := storage.ParsePlaylistFilter(playlist)
+	var playlistBreakdown []*storage.PlayerMatchup
+	if scopedStore, ok := d.stateStore.(scopedMatchupsStore); ok {
+		if scopedList, sErr := scopedStore.GetScopedPlayerMatchups(r.Context(), playerID, fromUnix, toUnix); sErr == nil {
+			playlistBreakdown = sortMatchupsForBreakdown(scopedList)
+			if hasDateFilter {
+				matchups = sortMatchupsByPlaylistID(scopedList)
+			}
+		} else {
+			d.logger.Warn("failed to query scoped player matchups",
+				slog.String("player_id", playerID),
+				slog.Any("error", sErr),
+			)
+		}
+	} else if !hasDateFilter && len(matchups) > 0 {
+		playlistBreakdown = sortMatchupsForBreakdown(matchups)
+	}
+
 	filteredMatchups := filterPlayerMatchups(matchups, pids, hasPlaylistFilter)
+	if filteredMatchups == nil {
+		filteredMatchups = make([]*storage.PlayerMatchup, 0)
+	}
 
 	var fbTmWins, fbTmLosses, fbOppWins, fbOppLosses, encountersCount int
 	if !hasDateFilter {
@@ -196,18 +222,53 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.writeJSONResponse(w, r, http.StatusOK, PlayerDetailResponse{
-		PlayerRecord:    &playerCopy,
-		EncountersCount: encountersCount,
-		TeammateWins:    withYouStats.Wins,
-		TeammateLosses:  withYouStats.Losses,
-		OpponentWins:    againstYouStats.Wins,
-		OpponentLosses:  againstYouStats.Losses,
-		RelationshipTag: relTag,
-		WithYouStats:    withYouStats,
-		AgainstYouStats: againstYouStats,
-		Matchups:        filteredMatchups,
-		RecentMatches:   recentMatches,
+		PlayerRecord:      &playerCopy,
+		EncountersCount:   encountersCount,
+		TeammateWins:      withYouStats.Wins,
+		TeammateLosses:    withYouStats.Losses,
+		OpponentWins:      againstYouStats.Wins,
+		OpponentLosses:    againstYouStats.Losses,
+		RelationshipTag:   relTag,
+		WithYouStats:      withYouStats,
+		AgainstYouStats:   againstYouStats,
+		Matchups:          filteredMatchups,
+		PlaylistBreakdown: playlistBreakdown,
+		RecentMatches:     recentMatches,
 	}, "error encoding player detail response")
+}
+
+func sortMatchupsForBreakdown(src []*storage.PlayerMatchup) []*storage.PlayerMatchup {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]*storage.PlayerMatchup, 0, len(src))
+	for _, m := range src {
+		if m != nil && m.TotalMatches > 0 {
+			cp := *m
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TotalMatches != out[j].TotalMatches {
+			return out[i].TotalMatches > out[j].TotalMatches
+		}
+		return out[i].PlaylistID < out[j].PlaylistID
+	})
+	return out
+}
+
+func sortMatchupsByPlaylistID(src []*storage.PlayerMatchup) []*storage.PlayerMatchup {
+	out := make([]*storage.PlayerMatchup, 0, len(src))
+	for _, m := range src {
+		if m != nil && m.TotalMatches > 0 {
+			cp := *m
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].PlaylistID < out[j].PlaylistID
+	})
+	return out
 }
 
 func filterPlayerMatchups(matchups []*storage.PlayerMatchup, pids []int, hasPlaylistFilter bool) []*storage.PlayerMatchup {

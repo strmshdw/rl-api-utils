@@ -1,22 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import {
   chronological,
+  compactRank,
   deltaInk,
+  filterSessionByPlaylist,
   findMvp,
   formatAgo,
+  formatArenaName,
   formatElapsed,
   formatMmr,
   formatPct,
   formatRecord,
   formatShortDate,
   formatSigned,
+  matchesPlaylistFilter,
+  modeKeyFromPlaylistId,
   onlineIdOf,
   platformLabel,
+  playlistFilterToParam,
   playlistLabels,
+  positioningRoleLabels,
   recordCells,
   recordInk,
   rosterLine,
+  shortRank,
   summarizeSession,
+  summarizeSessionPlaylists,
   trackerUrl,
 } from './broadcast';
 import { SessionMatchDetail, SessionMatchPlayer, SessionResponse } from '../types/api';
@@ -123,8 +132,85 @@ describe('labels', () => {
   it('maps known playlists and cleans unknown names', () => {
     expect(playlistLabels(11)).toEqual({ name: 'RANKED DOUBLES', short: 'DOUBLES', mode: 'RANKED 2V2' });
     expect(playlistLabels(10).mode).toBe('RANKED 1V1');
+    expect(playlistLabels(6).name).toBe('PRIVATE MATCH');
+    expect(playlistLabels(53).name).toBe('KNOCKOUT');
     expect(playlistLabels(99, 'Heatseeker (2v2)').name).toBe('HEATSEEKER');
     expect(playlistLabels(77).name).toBe('PLAYLIST 77');
+  });
+
+  it('formats ranks cleanly without duplicating embedded divisions or shifting 0-based PsyNet divisions', () => {
+    expect(shortRank('Platinum II Division II', 1)).toBe('PLAT II · DIV II');
+    expect(shortRank('Platinum II Division I', 0)).toBe('PLAT II · DIV I');
+    expect(shortRank('Grand Champion I', 3)).toBe('GC I · DIV III');
+    expect(shortRank('Grand Champion I', undefined, 'GC I · DIV II')).toBe('GC I · DIV II');
+    expect(shortRank('Diamond III', 0, undefined, 15)).toBe('DIA III · DIV I');
+    expect(shortRank('Supersonic Legend', 2)).toBe('SSL');
+    expect(shortRank('Supersonic Legend Division I', 0)).toBe('SSL');
+    expect(shortRank('Unranked', 2)).toBe('UNRANKED');
+    expect(shortRank(null, 1)).toBe('UNRANKED');
+    expect(shortRank('GC I · DIV II', 1)).toBe('GC I · DIV II');
+    expect(compactRank('Grand Champion I', 2)).toBe('GC I · D2');
+    expect(compactRank('Platinum II Division II', 1)).toBe('PLAT II · D2');
+    expect(compactRank('Diamond III', 0, undefined, 15)).toBe('DIA III · D1');
+    expect(compactRank('Supersonic Legend', 1)).toBe('SSL');
+    expect(compactRank(undefined, 1)).toBe('UNRANKED');
+  });
+
+  it('maps UE3 arena filenames to canonical Rocket League arena names with clean fallback', () => {
+    expect(formatArenaName('UF_Day_P')).toBe('Urban Future (Day)');
+    expect(formatArenaName('stadium_10a_p')).toBe('DFH Stadium (10th Anniversary)');
+    expect(formatArenaName('eurostadium_night_p')).toBe('Mannfield (Night)');
+    expect(formatArenaName('wasteland_Night_S_P')).toBe('Wasteland (Night)');
+    expect(formatArenaName('cs_hw_p')).toBe('Rivals Arena');
+    expect(formatArenaName('DFH Stadium')).toBe('DFH Stadium');
+    expect(formatArenaName('custom_desert_arena_p')).toBe('Custom Desert Arena');
+    expect(formatArenaName('')).toBe('—');
+    expect(formatArenaName(null)).toBe('—');
+  });
+
+  it('evaluates playlist mode filters, query params, mode keys, and positioning role labels', () => {
+    expect(matchesPlaylistFilter(11, '2v2')).toBe(true);
+    expect(matchesPlaylistFilter(12, '3v3')).toBe(true);
+    expect(matchesPlaylistFilter(13, '3v3')).toBe(true);
+    expect(matchesPlaylistFilter(12, '13')).toBe(false);
+    expect(matchesPlaylistFilter(13, '13')).toBe(true);
+    expect(matchesPlaylistFilter(27, 'extra')).toBe(true);
+    expect(matchesPlaylistFilter(34, 'extra')).toBe(true);
+    expect(matchesPlaylistFilter(2, 'casual')).toBe(true);
+    expect(matchesPlaylistFilter(6, 'private')).toBe(true);
+    expect(matchesPlaylistFilter(28, '27,28')).toBe(true);
+    expect(matchesPlaylistFilter(11, '1v1')).toBe(false);
+
+    expect(playlistFilterToParam('all')).toBe('');
+    expect(playlistFilterToParam('2v2')).toBe('11');
+    expect(playlistFilterToParam('3v3')).toBe('13');
+    expect(playlistFilterToParam('hoops')).toBe('27');
+    expect(playlistFilterToParam('extra')).toBe('extra');
+
+    expect(modeKeyFromPlaylistId(11)).toBe('11');
+    expect(modeKeyFromPlaylistId(12)).toBe('13');
+    expect(modeKeyFromPlaylistId(2)).toBe('casual');
+
+    expect(positioningRoleLabels(10)).toEqual({
+      showRotation: false,
+      forwardLabel: 'MOST FWD',
+      backLabel: 'MOST BACK',
+    });
+    expect(positioningRoleLabels(11)).toEqual({
+      showRotation: true,
+      forwardLabel: '1ST MAN',
+      backLabel: '2ND MAN',
+    });
+    expect(positioningRoleLabels(13)).toEqual({
+      showRotation: true,
+      forwardLabel: '1ST MAN',
+      backLabel: '3RD MAN',
+    });
+    expect(positioningRoleLabels(4)).toEqual({
+      showRotation: true,
+      forwardLabel: 'MOST FWD',
+      backLabel: 'MOST BACK',
+    });
   });
 
   it('labels platforms, including PS4/PS5 IDs and bots', () => {
@@ -248,5 +334,75 @@ describe('summarizeSession', () => {
     const s = summarizeSession(null);
     expect(s.kpis.find((k) => k.key === 'record')?.value).toBe('—');
     expect(s.kpis.find((k) => k.key === 'mmr')?.value).toBe('±0');
+  });
+
+  it('does not sum incompatible playlist MMRs together in multi-playlist sessions and filters by playlist cleanly', () => {
+    const multi: SessionResponse = {
+      ...session(
+        [
+          match({ match_guid: 'm1', playlist_id: 11, playlist_name: 'Ranked Doubles', ended_at: minsAgo(40), result: 'victory', mmr_change: 10 }),
+          match({ match_guid: 'm2', playlist_id: 11, playlist_name: 'Ranked Doubles', ended_at: minsAgo(25), result: 'victory', mmr_change: 9 }),
+          match({ match_guid: 'm3', playlist_id: 13, playlist_name: 'Ranked Standard', ended_at: minsAgo(10), result: 'victory', mmr_change: 12 }),
+        ],
+        3,
+        0,
+      ),
+      playlists: {
+        '11': {
+          playlist_id: 11,
+          playlist_name: 'Ranked Doubles',
+          matches_played: 2,
+          wins: 2,
+          losses: 0,
+          win_rate: 100,
+          initial_mmr: 1466,
+          current_mmr: 1485,
+          mmr_delta: 19,
+        },
+        '13': {
+          playlist_id: 13,
+          playlist_name: 'Ranked Standard',
+          matches_played: 1,
+          wins: 1,
+          losses: 0,
+          win_rate: 100,
+          initial_mmr: 1410,
+          current_mmr: 1422,
+          mmr_delta: 12,
+        },
+      },
+      most_played_playlist: {
+        id: 11,
+        name: 'Ranked Doubles',
+        net_mmr: 19,
+        wins: 2,
+        losses: 0,
+        matches_count: 2,
+      },
+    };
+
+    const s = summarizeSession(multi);
+    const mmrKpi = s.kpis.find((k) => k.key === 'mmr')!;
+    expect(mmrKpi.value).toBe('+19');
+    expect(mmrKpi.sub).toBe('RANKED 2V2 MMR');
+
+    const breakdown = summarizeSessionPlaylists(multi);
+    expect(breakdown.map((b) => b.playlistId)).toEqual([11, 13]);
+    expect(breakdown[0]).toMatchObject({
+      playlistId: 11,
+      filterKey: '11',
+      wins: 2,
+      losses: 0,
+      matches: 2,
+      currentMmr: 1485,
+      netMmr: 19,
+      winPct: '100%',
+    });
+
+    const filtered2v2 = filterSessionByPlaylist(multi, '2v2')!;
+    expect(filtered2v2.total_matches).toBe(2);
+    expect(filtered2v2.total_wins).toBe(2);
+    expect(filtered2v2.total_losses).toBe(0);
+    expect(filtered2v2.matches.map((m) => m.match_guid)).toEqual(['m1', 'm2']);
   });
 });

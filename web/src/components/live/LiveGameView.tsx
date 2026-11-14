@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useColumnConfig } from '../../hooks/useColumnConfig';
 import { ConnectionStatus } from '../../hooks/useLiveMatch';
 import { CurrentMatchResponse, LobbyPlayer, SessionMatchDetail, SessionResponse } from '../../types/api';
@@ -8,6 +8,7 @@ import { IdleStateView } from './IdleStateView';
 import { ColumnConfigModal } from './ColumnConfigModal';
 import { ContinueSessionBanner } from '../session/SessionView';
 import { useDashboard } from '../../context/DashboardContext';
+import { matchesPlaylistFilter, playlistFilterToParam } from '../../utils/broadcast';
 import { SAMPLE_CURRENT_MATCH } from '../../utils/sampleData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
 import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
@@ -16,6 +17,10 @@ import { sessionMatchToHistoricalRecord } from '../historical/historyData';
 interface LiveGameViewProps {
   match: CurrentMatchResponse | null;
   session: SessionResponse | null;
+  scopedSession?: SessionResponse | null;
+  activePlaylist?: string;
+  onSelectPlaylist?: (playlist: string) => void;
+  hideHeaderHistToggle?: boolean;
   connection: ConnectionStatus;
   columnsOpen: boolean;
   onCloseColumns: () => void;
@@ -50,9 +55,19 @@ const PLAYLIST_SCOPES: ReadonlyArray<{ id: string; label: string }> = [
   { id: '10', label: '1V1' },
 ];
 
+function resolveScopedPlaylistId(scope: string): number {
+  const param = playlistFilterToParam(scope);
+  const num = Number(param);
+  return Number.isInteger(num) && num > 0 ? num : 0;
+}
+
 export const LiveGameView: React.FC<LiveGameViewProps> = ({
   match,
   session,
+  scopedSession,
+  activePlaylist,
+  onSelectPlaylist,
+  hideHeaderHistToggle = false,
   connection,
   columnsOpen,
   onCloseColumns,
@@ -64,6 +79,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
 }) => {
   const { config, toggleColumn, applyPreset, resetToDefault, activePreset } = useColumnConfig();
   const {
+    setActivePlaylist,
     liveModeOverride,
     showLiveHistData,
     setShowLiveHistData,
@@ -71,9 +87,21 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
     isDevBuild,
     previewMode,
   } = useDashboard();
-  const [playlistScope, setPlaylistScope] = useState<string>('all');
+  const [playlistScope, setPlaylistScope] = useState<string>(() => activePlaylist ?? 'all');
   const [fallbackPlayer, setFallbackPlayer] = useState<{ id: string; name?: string } | null>(null);
   const [fallbackMatch, setFallbackMatch] = useState<SessionMatchDetail | null>(null);
+
+  useEffect(() => {
+    if (activePlaylist !== undefined) {
+      setPlaylistScope(activePlaylist);
+    }
+  }, [activePlaylist]);
+
+  const handleScopeSelect = (nextScope: string) => {
+    setPlaylistScope(nextScope);
+    onSelectPlaylist?.(nextScope);
+    setActivePlaylist(nextScope);
+  };
 
   const handleInspectPlayer = (playerId: string, playerName?: string) => {
     if (onInspectPlayer) onInspectPlayer(playerId, playerName);
@@ -103,7 +131,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
 
   const lobby = useMemo(
     () => (effectiveMatch ? lobbyPlayers(effectiveMatch) : []),
-    [effectiveMatch]
+    [effectiveMatch],
   );
   const leaders = useMemo(() => statLeaders(lobby), [lobby]);
 
@@ -112,6 +140,8 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
       <>
         <IdleStateView
           session={session}
+          scopedSession={scopedSession}
+          activePlaylist={activePlaylist}
           connection={connection}
           onShowSession={onShowSession}
           onContinueSession={onContinueSession}
@@ -141,11 +171,33 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
   const localTeam = effectiveMatch.local_team ?? effectiveMatch.local_player?.team_num ?? 0;
   const teams = [0, 1].map((team) => lobby.filter((p) => p.team_num === team).sort(byScore));
   const opposingTeam = localTeam === 0 ? teams[1] : teams[0];
-  const sessionRecord = {
-    wins: session?.total_wins ?? 0,
-    losses: session?.total_losses ?? 0,
-    netMmr: session?.most_played_playlist?.net_mmr,
-  };
+
+  const scopedPlaylistId = resolveScopedPlaylistId(playlistScope);
+  const targetPlId = scopedPlaylistId > 0 ? scopedPlaylistId : effectiveMatch.playlist_id;
+  const hasPlaylistBreakdown = !!session?.playlists && Object.keys(session.playlists).length > 0;
+  const plSession = hasPlaylistBreakdown ? session?.playlists?.[String(targetPlId)] : undefined;
+  const scopeMatchesMatch =
+    !playlistScope ||
+    playlistScope === 'all' ||
+    matchesPlaylistFilter(effectiveMatch.playlist_id, playlistScope);
+
+  const sessionRecord = hasPlaylistBreakdown
+    ? scopedPlaylistId === 0 && !scopeMatchesMatch
+      ? { wins: 0, losses: 0, netMmr: undefined }
+      : {
+          wins: plSession?.wins ?? 0,
+          losses: plSession?.losses ?? 0,
+          netMmr: plSession?.mmr_delta,
+        }
+    : scopeMatchesMatch
+    ? {
+        wins: session?.total_wins ?? 0,
+        losses: session?.total_losses ?? 0,
+        netMmr: session?.most_played_playlist?.net_mmr,
+      }
+    : { wins: 0, losses: 0, netMmr: undefined };
+
+  const normalizedScopeKey = playlistFilterToParam(playlistScope) || 'all';
 
   return (
     <div data-testid="live-match" className="flex flex-col gap-4">
@@ -189,7 +241,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
         </div>
       )}
 
-      {/* IN-MATCH Top Control Bar: Historical Data Toggle & Playlist Scope */}
+      {/* IN-MATCH Top Telemetry Strip */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-1.5 surface-plaque border border-line t-radius font-display">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
@@ -205,43 +257,49 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Hideable Historical Data Toggle */}
-          <button
-            type="button"
-            id="btn-toggle-live-hist"
-            onClick={() => setShowLiveHistData((prev) => !prev)}
-            className={`px-2.5 py-0.5 t-border t-radius t-font-display font-bold text-xs uppercase tracking-wider transition-colors ${
-              showLiveHistData
-                ? 't-bg-page t-text-strong border-outline'
-                : 't-bg-page t-text-muted'
-            }`}
-            title="Show or hide historical WITH YOU / AGAINST YOU split tables on live player cards"
-          >
-            {showLiveHistData
-              ? 'HISTORICAL DATA: SHOWN (CLICK TO HIDE)'
-              : 'HISTORICAL DATA: HIDDEN (CLICK TO SHOW)'}
-          </button>
+          {!hideHeaderHistToggle && (
+            <button
+              type="button"
+              id="btn-toggle-live-hist"
+              aria-pressed={showLiveHistData}
+              onClick={() => setShowLiveHistData((prev) => !prev)}
+              className={`px-2.5 py-0.5 t-border t-radius t-font-display font-bold text-xs uppercase tracking-wider transition-colors ${
+                showLiveHistData
+                  ? 't-bg-page t-text-strong border-outline'
+                  : 't-bg-page t-text-muted'
+              }`}
+              title="Show or hide historical WITH YOU / AGAINST YOU split tables on live player cards"
+            >
+              {showLiveHistData
+                ? 'HISTORICAL DATA: SHOWN (CLICK TO HIDE)'
+                : 'HISTORICAL DATA: HIDDEN (CLICK TO SHOW)'}
+            </button>
+          )}
 
           <span className="text-xs t-font-display font-bold uppercase tracking-wider t-text-muted">
             SCOPE ({dateRangeLabel}):
           </span>
-          <div className="flex t-border t-radius overflow-hidden">
-            {PLAYLIST_SCOPES.map((sc, i) => (
-              <button
-                key={sc.id}
-                type="button"
-                onClick={() => setPlaylistScope(sc.id)}
-                className={`live-pl-btn px-2 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider ${
-                  i > 0 ? 'border-l t-border' : ''
-                } ${
-                  playlistScope === sc.id
-                    ? 't-bg-blue-ink t-text-on-accent'
-                    : 't-bg-page t-text-muted hover:opacity-80'
-                }`}
-              >
-                {sc.label}
-              </button>
-            ))}
+          <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Live player card playlist scope">
+            {PLAYLIST_SCOPES.map((sc, i) => {
+              const active = normalizedScopeKey === sc.id;
+              return (
+                <button
+                  key={sc.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => handleScopeSelect(sc.id)}
+                  className={`live-pl-btn px-2 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider cursor-pointer ${
+                    i > 0 ? 'border-l t-border' : ''
+                  } ${
+                    active
+                      ? 't-bg-blue-ink t-text-on-accent'
+                      : 't-bg-page t-text-muted hover:opacity-80'
+                  }`}
+                >
+                  {sc.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -300,4 +358,3 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
     </div>
   );
 };
-

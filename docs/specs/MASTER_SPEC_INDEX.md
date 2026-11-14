@@ -76,7 +76,7 @@ App.tsx ──▶ main.tsx    (dev-only __ENABLE_PREVIEW__ provider statically e
 | [03_auth_and_external_protocols.md](./03_auth_and_external_protocols.md) | Auth & External APIs | Epic OAuth (`EGS`), Steam IPC (`steam/steam-auth.js`), credential collision check, PsyNet RPC (`rlapi v0.1.28`), CDN replay downloader, Ballchasing v2 + shared 2 rps limiter, UE3 `.replay` parser |
 | [04_sync_engine_and_statsapi.md](./04_sync_engine_and_statsapi.md) | Sync & Live Telemetry | Syncer state machine, separate retry counters, `017db99` / `3f9d1d8` guarantees, Ballchasing history sync, `TAStatsAPI` WS/TCP listener, 20-match tracker, Windows toast |
 | [05_playertrack_session_daemon_cli.md](./05_playertrack_session_daemon_cli.md) | Tracking, Daemon & CLI | Rank LRU/TTL cache, local player resolution (`3744274`), Session epoch/continuation/archival, SSE broadcaster, all 30 HTTP routes/aliases, CSRF/origin/traversal guards, CLI runner |
-| [06_broadcast_web_architecture.md](./06_broadcast_web_architecture.md) | Web UI & Overlay | 14 CSS themes, 2 font scales (`'normal' | 'xl'`), 7 `localStorage` keys, split contexts, `<PlayerDossierView />`, honest telemetry (zero fake data multipliers), OBS overlay, `__ENABLE_PREVIEW__` tree-shaking |
+| [06_broadcast_web_architecture.md](./06_broadcast_web_architecture.md) | Web UI & Overlay | 14 CSS themes, 2 font scales (`'normal' | 'xl'`), 8 `localStorage` keys, split contexts, `<PlayerDossierView />`, honest telemetry (zero fake data multipliers), OBS overlay, `__ENABLE_PREVIEW__` tree-shaking |
 
 ---
 

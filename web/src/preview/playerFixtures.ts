@@ -138,6 +138,39 @@ export function getSamplePlayerProfile(playerId: string, playerName?: string): P
         lowerId.includes(p.player_name.toLowerCase()),
     ) || SAMPLE_PLAYERS[0];
 
+  const breakdown = [
+    {
+      player_id: playerId || found.player_id,
+      playlist_id: 11,
+      wins_as_teammate: found.total_wins_as_teammate,
+      losses_as_teammate: found.total_losses_as_teammate,
+      wins_as_opponent: isLocalDemo ? 0 : found.total_wins_as_opponent,
+      losses_as_opponent: isLocalDemo ? 0 : found.total_losses_as_opponent,
+      total_matches: found.total_matches,
+      last_played_at: found.last_seen_at,
+    },
+    {
+      player_id: playerId || found.player_id,
+      playlist_id: 13,
+      wins_as_teammate: 1,
+      losses_as_teammate: 0,
+      wins_as_opponent: isLocalDemo ? 0 : 1,
+      losses_as_opponent: 0,
+      total_matches: isLocalDemo ? 1 : 2,
+      last_played_at: found.last_seen_at,
+    },
+    {
+      player_id: playerId || found.player_id,
+      playlist_id: 10,
+      wins_as_teammate: 0,
+      losses_as_teammate: 0,
+      wins_as_opponent: isLocalDemo ? 0 : 1,
+      losses_as_opponent: isLocalDemo ? 0 : 1,
+      total_matches: isLocalDemo ? 0 : 2,
+      last_played_at: found.last_seen_at,
+    },
+  ].filter((m) => m.total_matches > 0);
+
   return {
     player_id: playerId || found.player_id,
     platform: isLocalDemo ? 'Epic' : found.platform,
@@ -152,28 +185,8 @@ export function getSamplePlayerProfile(playerId: string, playerName?: string): P
     last_seen_at: found.last_seen_at,
     with_you_stats: found.with_you_stats,
     against_you_stats: isLocalDemo ? synthesizeRoleStats(0, 0, 0) : found.against_you_stats,
-    matchups: [
-      {
-        player_id: playerId || found.player_id,
-        playlist_id: 11,
-        wins_as_teammate: found.total_wins_as_teammate,
-        losses_as_teammate: found.total_losses_as_teammate,
-        wins_as_opponent: isLocalDemo ? 0 : found.total_wins_as_opponent,
-        losses_as_opponent: isLocalDemo ? 0 : found.total_losses_as_opponent,
-        total_matches: found.total_matches,
-        last_played_at: found.last_seen_at,
-      },
-      {
-        player_id: playerId || found.player_id,
-        playlist_id: 13,
-        wins_as_teammate: 1,
-        losses_as_teammate: 0,
-        wins_as_opponent: isLocalDemo ? 0 : 1,
-        losses_as_opponent: 0,
-        total_matches: isLocalDemo ? 1 : 2,
-        last_played_at: found.last_seen_at,
-      },
-    ],
+    matchups: breakdown,
+    playlist_breakdown: breakdown,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   formatMmr,
   formatRecord,
   localTeamOf,
+  onlineIdOf,
   recordInk,
   shortRank,
   zeroInk,
@@ -20,6 +21,8 @@ export interface BoxScoreRow {
   mvp?: boolean;
   disconnected?: boolean;
   rank?: string;
+  shortRank?: string;
+  tier?: number;
   division?: number;
   mmr?: number;
   score: number;
@@ -47,39 +50,59 @@ export interface TeamBoxScoreProps {
 /** Box score rows for one team of a session match, top scorer first. */
 export function sessionMatchRows(match: SessionMatchDetail, team: number, mvpId?: string): BoxScoreRow[] {
   const localTeam = localTeamOf(match);
-  return (match.players || [])
+  const sorted = (match.players || [])
     .filter((p) => p.team_num === team)
-    .sort((a, b) => (b.stats?.score || 0) - (a.stats?.score || 0))
-    .map((p) => {
-      const rec = p.matchup_record;
-      const h2h =
-        rec && !p.is_local
-          ? team === localTeam
-            ? { wins: rec.wins_as_teammate, losses: rec.losses_as_teammate }
-            : { wins: rec.wins_as_opponent, losses: rec.losses_as_opponent }
-          : undefined;
-      return {
-        key: p.player_id,
-        playerId: p.player_id,
-        name: p.is_local ? 'You' : p.name,
-        you: p.is_local,
-        mvp: p.player_id === mvpId,
-        disconnected: p.is_disconnected,
-        rank: shortRank(p.rank_name, p.division),
-        division: p.division,
-        mmr: p.mmr,
-        score: p.stats?.score || 0,
-        goals: p.stats?.goals || 0,
-        assists: p.stats?.assists || 0,
-        saves: p.stats?.saves || 0,
-        shots: p.stats?.shots || 0,
-        demos: p.stats?.demos || 0,
-        h2h,
-      };
-    });
+    .sort((a, b) => (b.stats?.score || 0) - (a.stats?.score || 0));
+
+  let seenLocal = false;
+  const seenKeys = new Set<string>();
+  const deduped = sorted.filter((p) => {
+    if (p.is_local) {
+      if (seenLocal) return false;
+      seenLocal = true;
+    }
+    const idKey = onlineIdOf(p.player_id) || (p.player_id || '').trim().toLowerCase();
+    const nameKey = (p.name || '').trim().toLowerCase();
+    if ((idKey && seenKeys.has(`id:${idKey}`)) || (nameKey && seenKeys.has(`name:${nameKey}`))) {
+      return false;
+    }
+    if (idKey) seenKeys.add(`id:${idKey}`);
+    if (nameKey) seenKeys.add(`name:${nameKey}`);
+    return true;
+  });
+
+  return deduped.map((p) => {
+    const rec = p.matchup_record;
+    const h2h =
+      rec && !p.is_local
+        ? team === localTeam
+          ? { wins: rec.wins_as_teammate, losses: rec.losses_as_teammate }
+          : { wins: rec.wins_as_opponent, losses: rec.losses_as_opponent }
+        : undefined;
+    return {
+      key: p.player_id,
+      playerId: p.player_id,
+      name: p.is_local ? 'You' : p.name,
+      you: p.is_local,
+      mvp: p.player_id === mvpId,
+      disconnected: p.is_disconnected,
+      rank: p.rank_name,
+      shortRank: p.short_rank,
+      tier: p.tier,
+      division: p.division,
+      mmr: p.mmr,
+      score: p.stats?.score || 0,
+      goals: p.stats?.goals || 0,
+      assists: p.stats?.assists || 0,
+      saves: p.stats?.saves || 0,
+      shots: p.stats?.shots || 0,
+      demos: p.stats?.demos || 0,
+      h2h,
+    };
+  });
 }
 
-const WITH_RANKS = 'minmax(110px,1.3fr) 56px minmax(92px,1fr) 48px repeat(5,34px)';
+const WITH_RANKS = 'minmax(132px,1.55fr) 52px minmax(108px,1.1fr) 46px repeat(5,32px)';
 const STATS_ONLY = 'minmax(110px,1fr) 48px repeat(5,34px)';
 
 /** One team's box score panel with a 3px rule in the team slab colour. */
@@ -112,7 +135,7 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
         {withH2H && <span className="text-right">H2H</span>}
       </div>
       {rows.map((p) => {
-        const formattedRank = p.rank ? shortRank(p.rank, p.division) : 'UNRANKED';
+        const formattedRank = shortRank(p.rank, p.division, p.shortRank, p.tier);
         return (
           <div
             key={p.key}
@@ -163,7 +186,10 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
               </span>
             )}
             {withRanks && (
-              <span className="pl-1 font-bold text-sm tracking-wider text-muted uppercase whitespace-nowrap overflow-hidden text-ellipsis">
+              <span
+                title={formattedRank}
+                className="pl-1 font-bold text-sm tracking-wider text-muted uppercase whitespace-nowrap overflow-hidden text-ellipsis"
+              >
                 {formattedRank}
               </span>
             )}

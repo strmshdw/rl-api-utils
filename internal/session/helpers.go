@@ -154,12 +154,16 @@ func concludeMatchPlayers(match *playertrack.CurrentMatchResponse) ([]SessionMat
 		if lp.CurrentRank != nil {
 			rankName = lp.CurrentRank.RankName
 			tier = lp.CurrentRank.Tier
-			div = lp.CurrentRank.Division
 			mmr = lp.CurrentRank.MMR
 			shortRank = lp.CurrentRank.ShortRank
+			if tier > 0 && tier < 22 {
+				div = storage.Resolve1BasedDivision(lp.CurrentRank.Division, rankName)
+				if div == 0 && lp.CurrentRank.Division == 0 {
+					div = 1
+				}
+			}
 			if shortRank == "" && tier > 0 {
-				effDiv := storage.Resolve1BasedDivision(div, rankName)
-				shortRank = storage.FormatShortRankName(tier, effDiv)
+				shortRank = storage.FormatShortRankName(tier, div)
 			}
 		}
 
@@ -350,6 +354,7 @@ func FilterSessionSummary(summary *SessionResponse, playlist string, fromUnix, t
 		} else if m.Result == "defeat" {
 			ps.Losses++
 		}
+		ps.WinRate = domain.ComputeWinRate(ps.Wins, ps.MatchesPlayed)
 		ps.MMRDelta = domain.RoundFloat(ps.MMRDelta+m.MMRChange, 2)
 		if m.EndingMMR > 0 {
 			ps.CurrentMMR = m.EndingMMR

@@ -8,7 +8,7 @@ import {
   platformLabel,
   shortRank,
 } from '../../utils/broadcast';
-import { Spotlight, primaryRank } from './playerData';
+import { isSoloDuelPlaylist, rankForPlaylist, Spotlight } from './playerData';
 
 export interface PinnedSlot {
   idx: number;
@@ -23,6 +23,7 @@ interface PinnedPlayerCardProps {
   spot?: Spotlight;
   isPinned: boolean;
   isAvg: boolean;
+  activePlaylist?: string;
   onTogglePin: (playerId: string) => void;
   onOpen: (player: PlayerSummary) => void;
 }
@@ -33,6 +34,7 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
   spot,
   isPinned,
   isAvg,
+  activePlaylist,
   onTogglePin,
   onOpen,
 }) => {
@@ -45,13 +47,17 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
       ? 'spotlight-rival'
       : `pinned-slot-${slotIndex}`;
 
+  const soloDuelMateSlot = spot?.key === 'mate' && isSoloDuelPlaylist(activePlaylist);
+
   if (!player) {
     return (
       <div
         data-testid={testId}
         className="t-bg-panel bg-panel border border-dashed border-outline p-5 flex flex-col items-center justify-center gap-1 text-sm font-extrabold text-muted t-radius"
       >
-        <span>EMPTY PIN SLOT ({slotIndex + 1}/3)</span>
+        <span>
+          {soloDuelMateSlot ? 'SOLO DUEL — NO TEAMMATES' : `EMPTY PIN SLOT (${slotIndex + 1}/3)`}
+        </span>
         {spot && (
           <span className="text-sm text-faint">
             {spot.label} · {spot.sub}
@@ -61,7 +67,7 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
     );
   }
 
-  const rank = primaryRank(player.ranks_json);
+  const rank = rankForPlaylist(player.ranks_json, activePlaylist);
   const wWins = player.total_wins_as_teammate;
   const wLosses = player.total_losses_as_teammate;
   const wGames = wWins + wLosses;
@@ -118,8 +124,11 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
             <span className="t-text-blue text-blue-ink t-font-mono">
               {formatMmr(rank?.mmr)} MMR
             </span>{' '}
-            · {rank?.rank_name ? shortRank(rank.rank_name, rank.division) : 'UNRANKED'} ·{' '}
-            {platformLabel(player.platform || player.player_id)}
+            ·{' '}
+            {rank?.rank_name
+              ? shortRank(rank.rank_name, rank.division, rank.short_rank, rank.tier)
+              : 'UNRANKED'}{' '}
+            · {platformLabel(player.platform || player.player_id)}
           </div>
         </div>
         <div className="text-right text-sm font-extrabold t-font-mono shrink-0">
@@ -231,6 +240,7 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
 interface PlayersSpotlightGridProps {
   pinnedSlots: PinnedSlot[];
   isAvg: boolean;
+  activePlaylist?: string;
   onTogglePin: (playerId: string) => void;
   onOpenPlayer: (player: PlayerSummary) => void;
 }
@@ -238,6 +248,7 @@ interface PlayersSpotlightGridProps {
 export const PlayersSpotlightGrid: React.FC<PlayersSpotlightGridProps> = ({
   pinnedSlots,
   isAvg,
+  activePlaylist,
   onTogglePin,
   onOpenPlayer,
 }) => (
@@ -256,6 +267,7 @@ export const PlayersSpotlightGrid: React.FC<PlayersSpotlightGridProps> = ({
           spot={s.spot}
           isPinned={s.isPinned}
           isAvg={isAvg}
+          activePlaylist={activePlaylist}
           onTogglePin={onTogglePin}
           onOpen={onOpenPlayer}
         />

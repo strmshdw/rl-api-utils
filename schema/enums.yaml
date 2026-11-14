@@ -111,12 +111,47 @@ playlists:
   - { id: 2,  name: "Casual Doubles (2v2)",       storage_name: "Casual Doubles 2v2",       is_ranked: false, is_extra_mode: false, slugs: ["unranked-doubles", "casual-doubles"] }
   - { id: 3,  name: "Casual Standard (3v3)",      storage_name: "Casual Standard 3v3",      is_ranked: false, is_extra_mode: false, slugs: ["unranked-standard", "casual-standard"] }
   - { id: 4,  name: "Casual Chaos (4v4)",         storage_name: "Casual Chaos 4v4",         is_ranked: false, is_extra_mode: false, slugs: ["unranked-chaos", "casual-chaos"] }
+  - { id: 6,  name: "Private Match",              storage_name: "Private Match",            is_ranked: false, is_extra_mode: false, slugs: ["private", "private-match"] }
+  - { id: 7,  name: "Season Offline",             storage_name: "Season",                   is_ranked: false, is_extra_mode: false, slugs: ["season"] }
+  - { id: 8,  name: "Exhibition",                 storage_name: "Exhibition",               is_ranked: false, is_extra_mode: false, slugs: ["offline", "exhibition"] }
+  - { id: 9,  name: "Free Play Training",         storage_name: "Training",                 is_ranked: false, is_extra_mode: false, slugs: ["training"] }
   - { id: 10, name: "Ranked Duel (1v1)",          storage_name: "Ranked Duel 1v1",          is_ranked: true,  is_extra_mode: false, slugs: ["ranked-duels", "duels"] }
   - { id: 11, name: "Ranked Doubles (2v2)",       storage_name: "Ranked Doubles 2v2",       is_ranked: true,  is_extra_mode: false, slugs: ["ranked-doubles", "doubles"] }
   - { id: 12, name: "Ranked Solo Standard (3v3)", storage_name: "Ranked Solo Standard 3v3", is_ranked: true,  is_extra_mode: false, slugs: ["ranked-solo-standard"] }
   - { id: 13, name: "Ranked Standard (3v3)",      storage_name: "Ranked Standard 3v3",      is_ranked: true,  is_extra_mode: false, slugs: ["ranked-standard", "standard"] }
+  - { id: 15, name: "Casual Hoops",               storage_name: "Casual Hoops",             is_ranked: false, is_extra_mode: false, slugs: ["unranked-hoops", "casual-hoops"] }
+  - { id: 16, name: "Rocket Labs",                storage_name: "Rocket Labs",              is_ranked: false, is_extra_mode: false, slugs: ["rocket-labs"] }
+  - { id: 17, name: "Casual Snow Day",            storage_name: "Casual Snow Day",          is_ranked: false, is_extra_mode: false, slugs: ["unranked-snowday", "casual-snow-day"] }
+  - { id: 18, name: "Casual Rumble",              storage_name: "Casual Rumble",            is_ranked: false, is_extra_mode: false, slugs: ["unranked-rumble", "casual-rumble"] }
+  - { id: 22, name: "Custom Tournament",          storage_name: "Custom Tournament",        is_ranked: false, is_extra_mode: false, slugs: ["custom-tournament"] }
+  - { id: 23, name: "Casual Dropshot",            storage_name: "Casual Dropshot",          is_ranked: false, is_extra_mode: false, slugs: ["unranked-dropshot", "casual-dropshot"] }
+  - { id: 24, name: "LAN Match",                  storage_name: "LAN Match",                is_ranked: false, is_extra_mode: false, slugs: ["lan", "local-lobby"] }
   - { id: 27, name: "Ranked Hoops",               storage_name: "Hoops",                    is_ranked: true,  is_extra_mode: true,  slugs: ["hoops", "ranked-hoops"] }
   - { id: 28, name: "Ranked Rumble",              storage_name: "Rumble",                   is_ranked: true,  is_extra_mode: true,  slugs: ["rumble", "ranked-rumble"] }
   - { id: 29, name: "Ranked Dropshot",            storage_name: "Dropshot",                 is_ranked: true,  is_extra_mode: true,  slugs: ["dropshot", "ranked-dropshot"] }
   - { id: 30, name: "Ranked Snow Day",            storage_name: "Snow Day",                 is_ranked: true,  is_extra_mode: true,  slugs: ["snowday", "snow-day", "ranked-snow-day"] }
+  - { id: 31, name: "Ghost Hunt",                 storage_name: "Ghost Hunt",               is_ranked: false, is_extra_mode: false, slugs: ["ghost-hunt"] }
+  - { id: 32, name: "Beach Ball",                 storage_name: "Beach Ball",               is_ranked: false, is_extra_mode: false, slugs: ["beach-ball"] }
+  - { id: 33, name: "Spike Rush",                 storage_name: "Spike Rush",               is_ranked: false, is_extra_mode: false, slugs: ["spike-rush"] }
   - { id: 34, name: "Competitive Tournaments",    storage_name: "Tournament",               is_ranked: true,  is_extra_mode: false, slugs: ["tournament", "tournaments"] }
+  - { id: 35, name: "Rocket Labs LTM",            storage_name: "Rocket Labs LTM",          is_ranked: false, is_extra_mode: false, slugs: ["rocket-labs-ltm"] }
+  - { id: 37, name: "Dropshot Rumble",            storage_name: "Dropshot Rumble",          is_ranked: false, is_extra_mode: false, slugs: ["dropshot-rumble"] }
+  - { id: 38, name: "Heatseeker",                 storage_name: "Heatseeker",               is_ranked: false, is_extra_mode: false, slugs: ["heatseeker"] }
+  - { id: 41, name: "Boomer Ball",                storage_name: "Boomer Ball",              is_ranked: false, is_extra_mode: false, slugs: ["boomer-ball"] }
+  - { id: 43, name: "Heatseeker Doubles",         storage_name: "Heatseeker Doubles",       is_ranked: false, is_extra_mode: false, slugs: ["heatseeker-doubles"] }
+  - { id: 44, name: "Winter Breakaway",           storage_name: "Winter Breakaway",         is_ranked: false, is_extra_mode: false, slugs: ["winter-breakaway"] }
+  - { id: 46, name: "Gridiron",                   storage_name: "Gridiron",                 is_ranked: false, is_extra_mode: false, slugs: ["gridiron"] }
+  - { id: 47, name: "Super Cube",                 storage_name: "Super Cube",               is_ranked: false, is_extra_mode: false, slugs: ["super-cube"] }
+  - { id: 48, name: "Tactical Rumble",            storage_name: "Tactical Rumble",          is_ranked: false, is_extra_mode: false, slugs: ["tactical-rumble"] }
+  - { id: 49, name: "Spring Loaded",              storage_name: "Spring Loaded",            is_ranked: false, is_extra_mode: false, slugs: ["spring-loaded"] }
+  - { id: 50, name: "Speed Demon",                storage_name: "Speed Demon",              is_ranked: false, is_extra_mode: false, slugs: ["speed-demon"] }
+  - { id: 52, name: "Gotham City Rumble",         storage_name: "Gotham City Rumble",       is_ranked: false, is_extra_mode: false, slugs: ["gotham-city-rumble"] }
+  - { id: 53, name: "Knockout LTM",               storage_name: "Knockout LTM",             is_ranked: false, is_extra_mode: false, slugs: ["knockout-ltm"] }
+  - { id: 54, name: "Knockout",                   storage_name: "Knockout",                 is_ranked: false, is_extra_mode: false, slugs: ["knockout"] }
+  - { id: 55, name: "Confidential Thirdwheel",    storage_name: "Thirdwheel",               is_ranked: false, is_extra_mode: false, slugs: ["thirdwheel"] }
+  - { id: 61, name: "Nike FC Showdown",           storage_name: "Nike FC Showdown",         is_ranked: false, is_extra_mode: false, slugs: ["nike-fc-showdown"] }
+  - { id: 62, name: "Sacred Grounds",             storage_name: "Sacred Grounds",           is_ranked: false, is_extra_mode: false, slugs: ["sacred-grounds"] }
+  - { id: 66, name: "Heatseeker Ricochet",        storage_name: "Heatseeker Ricochet",      is_ranked: false, is_extra_mode: false, slugs: ["heatseeker-ricochet"] }
+  - { id: 67, name: "Spooky Cube",                storage_name: "Spooky Cube",              is_ranked: false, is_extra_mode: false, slugs: ["spooky-cube"] }
+  - { id: 68, name: "G-Force Frenzy",             storage_name: "G-Force Frenzy",           is_ranked: false, is_extra_mode: false, slugs: ["g-force-frenzy"] }
+  - { id: 70, name: "Split Shot",                 storage_name: "Split Shot",               is_ranked: false, is_extra_mode: false, slugs: ["split-shot"] }

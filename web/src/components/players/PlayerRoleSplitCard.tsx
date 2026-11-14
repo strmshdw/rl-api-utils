@@ -10,7 +10,7 @@ import {
 } from '../../utils/broadcast';
 import { h2hTag } from './playerData';
 
-export type ProfilePlaylistScope = 'all' | '2v2' | '3v3' | '1v1';
+export type ProfilePlaylistScope = 'all' | '2v2' | '3v3' | '1v1' | 'extra' | 'casual';
 export type ProfileRoleFilter = 'all' | 'teammate' | 'opponent';
 export type ProfileResultFilter = 'all' | 'W' | 'L';
 export type ProfileSortOption =
@@ -26,6 +26,8 @@ export const PLAYLIST_SCOPE_IDS: Record<ProfilePlaylistScope, number> = {
   '2v2': 11,
   '3v3': 13,
   '1v1': 10,
+  extra: 0,
+  casual: 0,
 };
 
 export const PLAYLIST_SCOPE_BUTTONS: ReadonlyArray<{
@@ -36,6 +38,8 @@ export const PLAYLIST_SCOPE_BUTTONS: ReadonlyArray<{
   { scope: '2v2', label: '2V2' },
   { scope: '3v3', label: '3V3' },
   { scope: '1v1', label: '1V1' },
+  { scope: 'extra', label: 'EXTRA' },
+  { scope: 'casual', label: 'CASUAL' },
 ];
 
 export function resolveLocalOutcome(
@@ -118,42 +122,61 @@ export const CompactRoleSplitCard: React.FC<CompactRoleSplitCardProps> = ({
       role="button"
       tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && onClick) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       data-testid={teammate ? 'h2h-with' : 'h2h-vs'}
       className={`t-bg-panel bg-panel t-border border border-line p-4 flex flex-col gap-3 min-w-0 cursor-pointer transition-all duration-150 t-num ${
         selected ? 'ring-2 ring-blue-ink bg-panel-hover' : 'hover:bg-panel-hover'
       }`}
     >
-      <div className="flex items-center justify-between gap-2 border-b t-border border-line pb-2.5">
-        <div className="flex items-center gap-2 min-w-0">
-          <span
-            className={`px-2.5 py-1 text-sm font-extrabold uppercase shrink-0 ${
-              teammate
-                ? 't-bg-blue-slab bg-blue-slab text-white'
-                : 't-bg-orange-slab bg-orange-slab t-text-on-slab text-page'
-            }`}
-          >
-            {roleTitle}
-          </span>
-          <SectionLabel className="truncate">
-            {label} · {games} {gameWord} IN RANGE
-          </SectionLabel>
-          {tag && (
+      {/* 2-Row Collision-Free Header (UI-02, STAT-06) */}
+      <div className="flex flex-col gap-2 border-b t-border border-line pb-2.5">
+        <div className="flex items-center justify-between gap-3 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <span
-              className={`font-bold text-sm tracking-t14 text-page px-2 py-0.5 whitespace-nowrap ${recordFill(
+              className={`px-2.5 py-1 text-sm font-extrabold uppercase shrink-0 ${
+                teammate
+                  ? 't-bg-blue-slab bg-blue-slab text-white'
+                  : 't-bg-orange-slab bg-orange-slab t-text-on-slab text-page'
+              }`}
+            >
+              {roleTitle}
+            </span>
+            <SectionLabel className="truncate">
+              {label} · {games} {gameWord}
+            </SectionLabel>
+          </div>
+          <span
+            className={`font-extrabold text-2xl sm:text-[28px] leading-none whitespace-nowrap shrink-0 ${recordInk(
+              wins,
+              losses,
+            )}`}
+          >
+            {formatRecord(wins, losses)}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          {tag ? (
+            <span
+              className={`font-bold text-xs sm:text-sm tracking-t14 text-page px-2 py-0.5 whitespace-nowrap ${recordFill(
                 wins,
                 losses,
               )}`}
             >
               {tag}
             </span>
+          ) : (
+            <span className="text-xs font-bold text-muted uppercase tracking-wider truncate">
+              {selected ? 'FILTER ACTIVE · CLICK TO SHOW ALL' : 'CLICK TO FILTER MATCHES'}
+            </span>
           )}
-        </div>
-        <div className="flex items-baseline gap-2 whitespace-nowrap shrink-0">
-          <span className={`font-extrabold text-[28px] leading-none ${recordInk(wins, losses)}`}>
-            {formatRecord(wins, losses)}
-          </span>
-          <span className="t-font-mono font-extrabold text-sm text-muted">
-            ({wr}% · {formatPct(wins, losses)})
+          <span className="t-font-mono font-extrabold text-sm text-muted whitespace-nowrap shrink-0">
+            {games > 0 ? `${wr}% WIN RATE` : '0 GAMES'}
           </span>
         </div>
       </div>
@@ -216,7 +239,7 @@ export const CompactRoleSplitCard: React.FC<CompactRoleSplitCardProps> = ({
             <span className="t-text-win text-win">{shPct}%</span>
             <span className="t-text-orange text-orange-ink">{dem}</span>
             <span className="t-text-blue text-blue-ink">{bpm}</span>
-            <span className="t-text-ink2 text-ink-2">{bst}%</span>
+            <span className="t-text-ink2 text-ink-2">{bst}</span>
             <span className="t-text-ink2 text-ink-2">{sup}%</span>
           </div>
         </div>

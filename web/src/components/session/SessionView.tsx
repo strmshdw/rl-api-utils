@@ -2,30 +2,35 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CurrentMatchResponse, SessionMatchDetail, SessionResponse } from '../../types/api';
 import {
   chronological,
+  filterSessionByPlaylist,
   formatAgo,
   formatElapsed,
   formatShortDate,
+  matchesPlaylistFilter,
   onlineIdOf,
   summarizeSession,
 } from '../../utils/broadcast';
 import { EmptyLine, GhostButton, PageHeader, PrimaryButton } from '../common/ui';
-import { SessionKpiStrip, SessionForAgainstTable } from './SessionKpis';
+import {
+  SessionForAgainstTable,
+  SessionKpiStrip,
+  SessionModeBreakdownStrip,
+} from './SessionKpis';
 import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
 import { sessionMatchToHistoricalRecord } from '../historical/historyData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
 import { useMMRHistory } from '../../hooks/useMMRHistory';
 import { useBallchasingSync } from '../../hooks/useBallchasingSync';
 import { ContinueSessionBanner, SessionHistoryList } from './SessionHistorySection';
-import {
-  OutcomeFilter,
-  SessionMatchesSection,
-  SessionPlaylistFilter,
-} from './SessionMatchesSection';
+import { OutcomeFilter, SessionMatchesSection } from './SessionMatchesSection';
 
 export { ContinueSessionBanner, type ContinueSessionBannerProps } from './SessionHistorySection';
 
 interface SessionViewProps {
   session: SessionResponse | null;
+  scopedSession?: SessionResponse | null;
+  activePlaylist?: string;
+  onSelectPlaylist?: (playlist: string) => void;
   pastSessions?: SessionResponse[];
   liveMatch?: CurrentMatchResponse | null;
   isLoading: boolean;
@@ -39,6 +44,9 @@ interface SessionViewProps {
 
 export const SessionView: React.FC<SessionViewProps> = ({
   session,
+  scopedSession,
+  activePlaylist,
+  onSelectPlaylist,
   pastSessions = [],
   liveMatch,
   isLoading,
@@ -50,7 +58,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   onInspectPlayer,
 }) => {
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
-  const [playlistFilter, setPlaylistFilter] = useState<SessionPlaylistFilter>('all');
+  const [playlistFilter, setPlaylistFilter] = useState<string>(() => activePlaylist ?? 'all');
   const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
   const [inspectedSessionId, setInspectedSessionId] = useState<string | null>(null);
   const [clearedPendingSnapshot, setClearedPendingSnapshot] = useState<{
@@ -64,6 +72,17 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [profilePlayerId, setProfilePlayerId] = useState<string | null>(null);
   const [profilePlayerName, setProfilePlayerName] = useState<string | undefined>(undefined);
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
+
+  useEffect(() => {
+    if (activePlaylist !== undefined) {
+      setPlaylistFilter(activePlaylist);
+    }
+  }, [activePlaylist]);
+
+  const handlePlaylistSelect = (next: string) => {
+    setPlaylistFilter(next);
+    onSelectPlaylist?.(next);
+  };
 
   useEffect(() => {
     if (session?.trigger_threshold && session.trigger_threshold > 0) {
@@ -115,7 +134,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
   }, [inspectedSessionId, session, pastSessions]);
 
   const activeSession = inspectedSession ?? session;
-  const summary = useMemo(() => summarizeSession(activeSession), [activeSession]);
+  const effectiveScopedSession = useMemo(() => {
+    if (!activeSession) return null;
+    if (!playlistFilter || playlistFilter === 'all') return activeSession;
+    if (!inspectedSession && scopedSession && playlistFilter === activePlaylist) {
+      return scopedSession;
+    }
+    return filterSessionByPlaylist(activeSession, playlistFilter);
+  }, [activeSession, playlistFilter, inspectedSession, scopedSession, activePlaylist]);
+
+  const summary = useMemo(
+    () => summarizeSession(effectiveScopedSession),
+    [effectiveScopedSession],
+  );
   const matches = activeSession?.matches ?? [];
   const playlists = activeSession?.playlists ? Object.values(activeSession.playlists) : [];
 
@@ -133,8 +164,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     const newestFirst = chronological(activeSession?.matches).reverse();
     return newestFirst.filter((m) => {
       if (outcomeFilter !== 'all' && m.result !== outcomeFilter) return false;
-      if (playlistFilter === '2v2' && m.playlist_id !== 11) return false;
-      if (playlistFilter === '3v3' && m.playlist_id !== 13) return false;
+      if (!matchesPlaylistFilter(m.playlist_id, playlistFilter)) return false;
       return true;
     });
   }, [activeSession, outcomeFilter, playlistFilter]);
@@ -341,23 +371,28 @@ export const SessionView: React.FC<SessionViewProps> = ({
         </div>
       )}
 
+      <SessionModeBreakdownStrip
+        session={activeSession}
+        activeFilter={playlistFilter}
+        onSelectFilter={handlePlaylistSelect}
+      />
+
       <SessionKpiStrip
         kpis={summary.kpis}
         variant="page"
         playlists={playlists}
         mmrHistory={mmrByPlaylist}
-        session={activeSession}
+        session={effectiveScopedSession}
       />
 
-      <SessionForAgainstTable session={activeSession} />
+      <SessionForAgainstTable session={effectiveScopedSession} />
 
       <SessionMatchesSection
-        totalMatchCount={matches.length}
+        totalMatchCount={effectiveScopedSession?.matches?.length ?? 0}
+        sessionMatchCount={matches.length}
         rows={rows}
         outcomeFilter={outcomeFilter}
         onOutcomeChange={setOutcomeFilter}
-        playlistFilter={playlistFilter}
-        onPlaylistChange={setPlaylistFilter}
         onOpenMatch={setSelectedMatch}
       />
 

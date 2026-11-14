@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/dank/rl-api-utils/internal/storage"
 )
+
+type scopedSpotlightsStore interface {
+	GetScopedPlayerSpotlights(ctx context.Context, playlist string, fromUnix, toUnix int64) (*storage.GlobalSpotlights, error)
+}
 
 // PlayerSearchResponse represents the paginated envelope returned by GET /api/players.
 type PlayerSearchResponse struct {
@@ -144,7 +149,15 @@ func (d *Daemon) handleListPlayers(w http.ResponseWriter, r *http.Request) {
 
 	var spotlights *storage.GlobalSpotlights
 	if isAPIRoute {
-		sp, spErr := d.stateStore.GetPlayerSpotlights(r.Context())
+		var (
+			sp    *storage.GlobalSpotlights
+			spErr error
+		)
+		if scopedStore, ok := d.stateStore.(scopedSpotlightsStore); ok {
+			sp, spErr = scopedStore.GetScopedPlayerSpotlights(r.Context(), filter.Playlist, filter.FromUnix, filter.ToUnix)
+		} else {
+			sp, spErr = d.stateStore.GetPlayerSpotlights(r.Context())
+		}
 		if spErr != nil && isClientDisconnect(r.Context(), spErr) {
 			d.logger.Debug("player spotlights canceled by client", slog.Any("error", spErr))
 			return

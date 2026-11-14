@@ -5,8 +5,22 @@ import { Sparkline } from '../common/Sparkline';
 import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
 import { PlayerNotesModal } from './PlayerNotesModal';
 import { useDashboard } from '../../context/DashboardContext';
-import { formatAgo, formatMmr, formatShortDate, platformLabel, playlistLabels, shortRank } from '../../utils/broadcast';
-import { CompactRoleSplitCard, PLAYLIST_SCOPE_BUTTONS, RecordWithPct } from './PlayerRoleSplitCard';
+import {
+  compactRank,
+  formatAgo,
+  formatMmr,
+  formatShortDate,
+  platformLabel,
+  playlistFilterToParam,
+  playlistLabels,
+  shortRank,
+} from '../../utils/broadcast';
+import {
+  CompactRoleSplitCard,
+  PLAYLIST_SCOPE_BUTTONS,
+  ProfilePlaylistScope,
+  RecordWithPct,
+} from './PlayerRoleSplitCard';
 import { PlayerMatchHistoryList } from './PlayerMatchHistoryList';
 import { PlayerDossierDataState, usePlayerDossierData } from './usePlayerDossierData';
 
@@ -23,6 +37,14 @@ interface PlayerDossierViewProps {
 const PLAYLIST_GRID = 'minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 70px 120px';
 const NO_IDS = new Set<string>();
 
+const EXTRA_MODE_SPECS: ReadonlyArray<{ id: number; label: string }> = [
+  { id: 27, label: 'HOOPS (2V2)' },
+  { id: 28, label: 'RUMBLE (3V3)' },
+  { id: 29, label: 'DROPSHOT (3V3)' },
+  { id: 30, label: 'SNOW DAY (3V3)' },
+  { id: 34, label: 'TOURNAMENTS (3V3)' },
+];
+
 export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
   playerId,
   playerName,
@@ -34,7 +56,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
 }) => {
   const {
     statMode,
-    dateRangeLabel,
+    setActivePlaylist,
     pinnedPlayerIds,
     togglePinPlayer,
   } = useDashboard();
@@ -54,12 +76,48 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
   const isDialog = variant === 'dialog';
   const padX = isDialog ? 'px-8' : '';
   const isPinned = pinnedPlayerIds.includes(d.id);
+  const hasPlaylistFilter = Boolean(d.activePlaylistParam);
   const showHistory =
     !isDialog ||
     d.matches.length > 0 ||
     d.isLoadingMatches ||
     d.roleFilter !== 'all' ||
-    d.activePlaylistId !== 0;
+    hasPlaylistFilter;
+
+  const handleSelectScope = (scope: ProfilePlaylistScope) => {
+    d.setStatPlaylist(scope);
+    if (!isDialog) {
+      setActivePlaylist(scope === 'all' ? 'all' : playlistFilterToParam(scope) || scope);
+    }
+  };
+
+  const handleSelectPlaylistRow = (playlistId: number) => {
+    const togglingOff = playlistId === 0 || d.activePlaylistId === playlistId;
+    d.setPlaylistById(playlistId);
+    if (!isDialog) {
+      setActivePlaylist(togglingOff ? 'all' : String(playlistId));
+    }
+  };
+
+  const handleClearFilters = () => {
+    d.clearFilters();
+    if (!isDialog) {
+      setActivePlaylist('all');
+    }
+  };
+
+  const activePlaylistLabel =
+    d.activePlaylistId > 0
+      ? playlistLabels(d.activePlaylistId).name
+      : d.statPlaylist === 'extra'
+      ? 'EXTRA MODES'
+      : d.statPlaylist === 'casual'
+      ? 'CASUAL'
+      : '';
+
+  const displayTotalMatches = d.isDemoMatches
+    ? d.filteredAndSortedMatches.length
+    : d.totalMatches;
 
   return (
     <>
@@ -73,19 +131,13 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
         </div>
       ) : !d.profile && isDialog ? null : (
         <div className="flex flex-col font-display pb-4 gap-4">
-          {/* Scope Controls: Pin Toggle, Playlist Scope (.prof-pl-btn), Date Range Indicator */}
+          {/* Scope Controls: MMR Trend Sparkline, Pin Toggle, Playlist Scope (.prof-pl-btn) */}
           <div
             className={`${padX} ${
               isDialog ? 'pt-4' : ''
             } flex flex-wrap items-center justify-between gap-2.5 text-sm font-extrabold`}
           >
             <div className="flex items-center gap-2">
-              <span
-                data-testid="dossier-date-range"
-                className="px-2.5 py-1 t-bg-panel bg-panel t-border border border-line text-muted uppercase tracking-wider t-radius"
-              >
-                RANGE: {dateRangeLabel}
-              </span>
               {d.mmrSparkline.length > 0 && (
                 <div
                   data-testid="dossier-mmr-sparkline"
@@ -111,24 +163,38 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                 {isPinned ? '★ PINNED' : '☆ PIN PLAYER'}
               </button>
 
-              <div className="flex t-border border border-outline t-bg-panel bg-panel t-radius overflow-hidden">
-                {PLAYLIST_SCOPE_BUTTONS.map((b) => (
-                  <button
-                    key={b.scope}
-                    type="button"
-                    onClick={() => d.setStatPlaylist(b.scope)}
-                    className={`prof-pl-btn px-3 py-1.5 uppercase cursor-pointer ${
-                      d.statPlaylist === b.scope
-                        ? 't-bg-ink bg-ink text-page'
-                        : 'text-muted hover:text-ink'
-                    }`}
-                  >
-                    {b.label}
-                  </button>
-                ))}
+              <div className="flex flex-wrap t-border border border-outline t-bg-panel bg-panel t-radius overflow-hidden">
+                {PLAYLIST_SCOPE_BUTTONS.map((b) => {
+                  const isActive =
+                    d.statPlaylist === b.scope &&
+                    (b.scope !== 'all' || !hasPlaylistFilter);
+                  return (
+                    <button
+                      key={b.scope}
+                      type="button"
+                      onClick={() => handleSelectScope(b.scope)}
+                      className={`prof-pl-btn px-3 py-1.5 uppercase cursor-pointer ${
+                        isActive
+                          ? 't-bg-ink bg-ink text-page'
+                          : 'text-muted hover:text-ink'
+                      }`}
+                    >
+                      {b.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
+
+          {!hasPlaylistFilter && d.playlistBreakdown.length > 1 && (
+            <div
+              data-testid="blended-modes-note"
+              className={`${padX} text-xs font-bold text-muted uppercase tracking-wider`}
+            >
+              BLENDED ACROSS MODES — SELECT A PLAYLIST FOR EXACT AVERAGES
+            </div>
+          )}
 
           {/* Interactive WITH YOU & AGAINST YOU H2H Role Split Cards */}
           <div className={`${padX} grid grid-cols-1 lg:grid-cols-2 gap-3.5`}>
@@ -165,7 +231,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
           </div>
 
           {/* Active Filter Summary Bar */}
-          {(d.roleFilter !== 'all' || d.activePlaylistId > 0) && (
+          {(d.roleFilter !== 'all' || hasPlaylistFilter) && (
             <div
               data-testid="active-filter-summary"
               className={`${
@@ -180,16 +246,16 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                     : d.roleFilter === 'opponent'
                     ? 'VS YOU (OPPONENT)'
                     : ''}
-                  {d.roleFilter !== 'all' && d.activePlaylistId > 0 ? ' · ' : ''}
-                  {d.activePlaylistId > 0 ? playlistLabels(d.activePlaylistId).name : ''}
+                  {d.roleFilter !== 'all' && activePlaylistLabel ? ' · ' : ''}
+                  {activePlaylistLabel}
                 </span>
                 <span className="text-muted">
-                  ({d.totalMatches} {d.totalMatches === 1 ? 'match' : 'matches'})
+                  ({displayTotalMatches} {displayTotalMatches === 1 ? 'match' : 'matches'})
                 </span>
               </div>
               <button
                 type="button"
-                onClick={d.clearFilters}
+                onClick={handleClearFilters}
                 className="text-muted hover:text-loss text-sm uppercase underline cursor-pointer"
               >
                 CLEAR FILTERS
@@ -246,26 +312,32 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
             )}
 
             {showAllRanks && (
-              <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 pt-1">
-                {[
-                  { id: 27, label: 'HOOPS (2V2)' },
-                  { id: 28, label: 'RUMBLE (3V3)' },
-                  { id: 29, label: 'DROPSHOT (3V3)' },
-                  { id: 30, label: 'SNOW DAY (3V3)' },
-                ].map((em) => {
+              <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 pt-1 t-num">
+                {EXTRA_MODE_SPECS.map((em) => {
                   const found = d.allRanks.find((r) => r.playlist_id === em.id);
+                  const fullRank = found?.rank_name
+                    ? shortRank(found.rank_name, found.division, found.short_rank, found.tier)
+                    : 'UNRANKED';
+                  const badgeRank = found?.rank_name
+                    ? compactRank(found.rank_name, found.division, found.short_rank, found.tier)
+                    : 'UNRANKED';
                   return (
                     <div
                       key={em.id}
-                      className="bg-panel px-4 py-2.5 flex justify-between items-center gap-2 min-w-0 t-border border border-line"
+                      className="bg-panel px-3.5 py-2.5 flex justify-between items-center gap-2 min-w-0 t-border border border-line"
                     >
                       <div className="flex flex-col min-w-0">
-                        <span className="text-sm font-bold text-muted uppercase">{em.label}</span>
-                        <span className="font-bold text-base uppercase truncate">
-                          {found?.rank_name ? shortRank(found.rank_name, found.division) : 'UNRANKED'}
+                        <span className="text-xs font-bold text-muted uppercase whitespace-nowrap">
+                          {em.label}
+                        </span>
+                        <span
+                          title={fullRank}
+                          className="font-bold text-base uppercase whitespace-nowrap"
+                        >
+                          {badgeRank}
                         </span>
                       </div>
-                      <span className="font-bold text-lg text-ink-2 t-font-mono">
+                      <span className="font-bold text-lg text-ink-2 t-font-mono whitespace-nowrap shrink-0">
                         {found?.mmr ? formatMmr(found.mmr) : '—'}
                       </span>
                     </div>
@@ -278,13 +350,13 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
           {/* Scouting Notes & Tags */}
           <div className={`${padX} flex flex-col gap-2`}>
             <div className="t-bg-panel bg-panel t-border border border-line p-4 flex flex-col gap-2">
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center gap-2">
                 <SectionLabel>SCOUTING NOTES & TAGS</SectionLabel>
                 <button
                   type="button"
                   data-testid="edit-notes-btn"
                   onClick={() => setIsNotesModalOpen(true)}
-                  className="text-sm font-bold text-ink-2 hover:text-ink tracking-wider uppercase transition-colors cursor-pointer"
+                  className="px-3 py-1 t-bg-page bg-page t-border border border-outline hover:border-ink text-sm font-bold text-ink-2 hover:text-ink tracking-wider uppercase t-radius transition-colors cursor-pointer"
                 >
                   EDIT NOTES & TAGS ✎
                 </button>
@@ -316,7 +388,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
           {/* Interactive Breakdown By Playlist */}
           <div className={`${padX} flex flex-col gap-2`}>
             <SectionLabel className="pb-1">BY PLAYLIST</SectionLabel>
-            {d.profile?.matchups?.length ? (
+            {d.playlistBreakdown.length ? (
               <>
                 <div
                   className={`grid px-[18px] ${COLUMN_HEADER}`}
@@ -328,7 +400,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                   <span className="text-right">GAMES</span>
                   <span className="text-right">LAST MET</span>
                 </div>
-                {d.profile.matchups.map((m) => {
+                {d.playlistBreakdown.map((m) => {
                   const isSelected = d.activePlaylistId === m.playlist_id;
                   return (
                     <div
@@ -336,7 +408,13 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                       data-testid="profile-playlist-row"
                       role="button"
                       tabIndex={0}
-                      onClick={() => d.setPlaylistById(m.playlist_id)}
+                      onClick={() => handleSelectPlaylistRow(m.playlist_id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleSelectPlaylistRow(m.playlist_id);
+                        }
+                      }}
                       className={`grid items-center h-[52px] bg-panel px-[18px] cursor-pointer transition-all duration-120 ${
                         isSelected
                           ? 'ring-2 ring-blue-ink bg-panel-hover'
@@ -377,12 +455,8 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
             <PlayerMatchHistoryList
               playerId={d.id}
               playerName={d.name}
-              matches={variant === 'page' ? d.filteredAndSortedMatches : d.matches}
-              totalMatches={
-                variant === 'page'
-                  ? d.filteredAndSortedMatches.length
-                  : d.totalMatches
-              }
+              matches={d.filteredAndSortedMatches}
+              totalMatches={displayTotalMatches}
               isLoadingMatches={d.isLoadingMatches}
               matchPage={d.matchPage}
               totalPages={d.totalPages}

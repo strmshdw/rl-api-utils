@@ -139,10 +139,42 @@ func ParsePlaylistFilter(raw string) []int {
 	if s == "" || s == "all" || s == "0" {
 		return nil
 	}
-	if n, err := strconv.Atoi(s); err == nil && n > 0 {
-		return []int{n}
+	if n, err := strconv.Atoi(s); err == nil {
+		if n > 0 {
+			return []int{n}
+		}
+		return nil
+	}
+	if strings.Contains(s, ",") {
+		parts := strings.Split(s, ",")
+		seen := make(map[int]bool, len(parts))
+		out := make([]int, 0, len(parts))
+		for _, part := range parts {
+			tok := strings.TrimSpace(part)
+			if tok == "" {
+				continue
+			}
+			if n, err := strconv.Atoi(tok); err == nil && n > 0 && !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+		return nil
 	}
 	switch s {
+	case "casual", "unranked":
+		return []int{1, 2, 3, 4, 15, 16, 17, 18, 23}
+	case "private", "custom":
+		return []int{6, 7, 8, 22, 24}
+	case "ranked_1v1":
+		return []int{10}
+	case "ranked_2v2":
+		return []int{11}
+	case "ranked_3v3":
+		return []int{13, 12}
 	case "1v1", "duel", "ranked duel", "ranked duel (1v1)", "casual duel", "casual duel (1v1)":
 		return []int{10, 1}
 	case "2v2", "doubles", "ranked doubles", "ranked doubles (2v2)", "casual doubles", "casual doubles (2v2)":
@@ -159,7 +191,7 @@ func ParsePlaylistFilter(raw string) []int {
 		return []int{28}
 	case "dropshot", "ranked dropshot":
 		return []int{29}
-	case "snow day", "snowday", "ranked snow day":
+	case "snow day", "snowday", "snow_day", "ranked snow day":
 		return []int{30}
 	case "tournament", "tournaments", "competitive tournament":
 		return []int{34}

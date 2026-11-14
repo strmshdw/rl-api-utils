@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { HistoricalMatchRecord, ReplayPlayerStats } from '../../types/api';
 import { Modal } from '../common/Modal';
-import { OUTCOME_SLAB, formatAgo, playlistLabels } from '../../utils/broadcast';
+import { OUTCOME_SLAB, formatAgo, formatArenaName, playlistLabels } from '../../utils/broadcast';
 import { formatDuration } from '../../utils/formatters';
-import { historyOutcome, isLocal, replayStatus } from './historyData';
+import { dedupeTeamPlayers, historyOutcome, isLocal, replayStatus } from './historyData';
 import { MatchCoreOverviewTab } from './MatchCoreOverviewTab';
 import {
   MatchBoostTab,
@@ -132,12 +132,12 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
   const status = effectiveMatch ? replayStatus(effectiveMatch) : { label: '', ink: '' };
 
   const bluePlayers = useMemo(
-    () => players.filter((p) => p.team === 0).sort((a, b) => (b.score || 0) - (a.score || 0)),
-    [players],
+    () => dedupeTeamPlayers(players, 0, localPlayerIds),
+    [players, localPlayerIds],
   );
   const orangePlayers = useMemo(
-    () => players.filter((p) => p.team === 1).sort((a, b) => (b.score || 0) - (a.score || 0)),
-    [players],
+    () => dedupeTeamPlayers(players, 1, localPlayerIds),
+    [players, localPlayerIds],
   );
 
   const mvpKey = useMemo(
@@ -202,14 +202,15 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
         effectiveMatch.stats?.date || effectiveMatch.created_at,
       )} · FULL BALLCHASING TELEMETRY`;
 
+  const rawArena = effectiveMatch.map_name || effectiveMatch.stats?.map_name;
+  const arenaTitle = rawArena ? formatArenaName(rawArena) : 'Unknown arena';
+
   return (
     <Modal
       isOpen
       onClose={onClose}
       kicker={kickerText}
-      title={`${
-        effectiveMatch.map_name || effectiveMatch.stats?.map_name || 'Unknown arena'
-      } (BLUE ${effectiveMatch.blue_score} – ${effectiveMatch.orange_score} ORANGE)`}
+      title={`${arenaTitle} (BLUE ${effectiveMatch.blue_score} – ${effectiveMatch.orange_score} ORANGE)`}
       meta={
         <>
           {outcome && (
@@ -317,6 +318,7 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
             hasTelemetry={hasTelemetry}
             displayPlayerName={displayPlayerName}
             onPlayerClick={onPlayerClick}
+            playlist={effectiveMatch.playlist}
           />
         )}
 

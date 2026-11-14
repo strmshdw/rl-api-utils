@@ -3,7 +3,7 @@ import { Outcome, outcomeOf, onlineIdOf } from '../../utils/broadcast';
 import { SAMPLE_HISTORICAL_MATCHES } from '../../utils/sampleData';
 import { BoxScoreRow } from '../common/BoxScore';
 
-export const isLocal = (p: ReplayPlayerStats, ids: Set<string>): boolean => {
+export const isLocal = (p: ReplayPlayerStats, ids: ReadonlySet<string>): boolean => {
   if (p.is_bot) return false;
   if (p.is_local) return true;
   if (!p.online_id || p.online_id === '0') return false;
@@ -21,7 +21,7 @@ export const isLocal = (p: ReplayPlayerStats, ids: Set<string>): boolean => {
 };
 
 /** W/L from the local player's side when we can find them in the replay, else the stored result. */
-export function historyOutcome(m: HistoricalMatchRecord, localIds: Set<string>): Outcome {
+export function historyOutcome(m: HistoricalMatchRecord, localIds: ReadonlySet<string>): Outcome {
   const local = m.stats?.players?.find((p) => isLocal(p, localIds));
   if (local && (local.team === 0 || local.team === 1)) {
     const us = local.team === 0 ? m.blue_score : m.orange_score;
@@ -69,51 +69,158 @@ export function replayStatus(m: HistoricalMatchRecord): ReplayStatus {
   return { label: 'NO REPLAY', ink: 'text-faint' };
 }
 
+/**
+ * Filters a replay's player array to a single team, sorted by score descending,
+ * and deduplicates reconnect duplicate entries (including repeated "You" entries),
+ * keeping the higher-score entry.
+ */
+export function dedupeTeamPlayers(
+  players: ReplayPlayerStats[],
+  team: number,
+  localIds: ReadonlySet<string>,
+): ReplayPlayerStats[] {
+  const sorted = (players || [])
+    .filter((p) => p.team === team)
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  let seenLocal = false;
+  const seenKeys = new Set<string>();
+  const out: ReplayPlayerStats[] = [];
+
+  for (const p of sorted) {
+    const you = isLocal(p, localIds);
+    if (you) {
+      if (seenLocal) continue;
+      seenLocal = true;
+    }
+    const idKey =
+      p.online_id && p.online_id !== '0'
+        ? onlineIdOf(p.online_id) || p.online_id.trim().toLowerCase()
+        : '';
+    const nameKey = (p.name || '').trim().toLowerCase();
+    if ((idKey && seenKeys.has(`id:${idKey}`)) || (nameKey && seenKeys.has(`name:${nameKey}`))) {
+      continue;
+    }
+    if (idKey) seenKeys.add(`id:${idKey}`);
+    if (nameKey) seenKeys.add(`name:${nameKey}`);
+    out.push(p);
+  }
+
+  return out;
+}
+
 export function teamRows(
   players: ReplayPlayerStats[],
   team: number,
-  localIds: Set<string>,
+  localIds: ReadonlySet<string>,
   inspectedIdOrName?: string,
 ): BoxScoreRow[] {
   const inspectedLower = inspectedIdOrName?.toLowerCase();
   const inspectedOnlineId = inspectedLower?.includes('|') ? inspectedLower.split('|')[1] : inspectedLower;
-  return players
-    .filter((p) => p.team === team)
-    .sort((a, b) => b.score - a.score)
-    .map((p, i) => {
-      const you = isLocal(p, localIds);
-      const isInspected = Boolean(
-        inspectedLower &&
-          !you &&
-          (p.online_id?.toLowerCase() === inspectedLower ||
-            p.online_id?.toLowerCase() === inspectedOnlineId ||
-            p.name?.toLowerCase() === inspectedLower),
-      );
-      return {
-        key: `${p.online_id || p.name}-${i}`,
-        playerId: p.online_id && p.online_id !== '0' ? p.online_id : p.name,
-        name: you ? 'You' : p.name,
-        you,
-        inspected: isInspected,
-        score: p.score,
-        goals: p.goals,
-        assists: p.assists,
-        saves: p.saves,
-        shots: p.shots,
-        demos: p.demos,
-        mmr: p.mmr,
-        rank: p.rank_name,
-      };
-    });
+  return dedupeTeamPlayers(players, team, localIds).map((p, i) => {
+    const you = isLocal(p, localIds);
+    const isInspected = Boolean(
+      inspectedLower &&
+        !you &&
+        (p.online_id?.toLowerCase() === inspectedLower ||
+          p.online_id?.toLowerCase() === inspectedOnlineId ||
+          p.name?.toLowerCase() === inspectedLower),
+    );
+    return {
+      key: `${p.online_id || p.name}-${i}`,
+      playerId: p.online_id && p.online_id !== '0' ? p.online_id : p.name,
+      name: you ? 'You' : p.name,
+      you,
+      inspected: isInspected,
+      score: p.score,
+      goals: p.goals,
+      assists: p.assists,
+      saves: p.saves,
+      shots: p.shots,
+      demos: p.demos,
+      mmr: p.mmr,
+      rank: p.rank_name || p.rank?.name || p.short_rank || p.rank?.short_rank,
+      shortRank: p.short_rank || p.rank?.short_rank,
+      tier: p.tier ?? p.rank?.tier,
+      division: p.division ?? p.rank?.division,
+    };
+  });
 }
 
-export function playerNames(players: ReplayPlayerStats[], localIds: Set<string>): string {
+export function playerNames(players: ReplayPlayerStats[], localIds: ReadonlySet<string>): string {
   const side = (team: number) =>
-    players
-      .filter((p) => p.team === team)
+    dedupeTeamPlayers(players, team, localIds)
       .map((p) => (isLocal(p, localIds) ? 'You' : p.name))
       .join(', ');
   return [side(0), side(1)].filter(Boolean).join(' vs ');
+}
+
+export interface MatchSummary {
+  blue_score: number;
+  orange_score: number;
+  stats?: {
+    players?: ReplayPlayerStats[];
+  };
+  player_stats?: {
+    team_num?: number;
+    is_local?: boolean;
+  };
+  role?: 'teammate' | 'opponent' | string;
+}
+
+export interface OrientedMatchSummary {
+  myTeam: 0 | 1;
+  myScore: number;
+  oppScore: number;
+  myTeamInk: string;
+  rosterText: string;
+}
+
+/** Orients score and roster summary ("You + Mate vs Opp") from the local player's perspective. */
+export function orientedMatchSummary(
+  m: MatchSummary,
+  localIds: ReadonlySet<string>,
+): OrientedMatchSummary {
+  const players = m.stats?.players ?? [];
+  const local = players.find((p) => isLocal(p, localIds));
+
+  let myTeam: 0 | 1 = 0;
+  if (local && (local.team === 0 || local.team === 1)) {
+    myTeam = local.team;
+  } else if (m.player_stats && (m.player_stats.team_num === 0 || m.player_stats.team_num === 1)) {
+    if (m.player_stats.is_local || m.role === 'teammate') {
+      myTeam = m.player_stats.team_num;
+    } else if (m.role === 'opponent') {
+      myTeam = m.player_stats.team_num === 0 ? 1 : 0;
+    }
+  }
+
+  const oppTeam: 0 | 1 = myTeam === 0 ? 1 : 0;
+  const myScore = myTeam === 0 ? m.blue_score : m.orange_score;
+  const oppScore = myTeam === 0 ? m.orange_score : m.blue_score;
+  const myTeamInk = myTeam === 0 ? 'text-blue-ink' : 'text-orange-ink';
+
+  const myPlayers = dedupeTeamPlayers(players, myTeam, localIds);
+  const oppPlayers = dedupeTeamPlayers(players, oppTeam, localIds);
+
+  let rosterText = '';
+  if (myPlayers.length > 0 || oppPlayers.length > 0) {
+    const hasLocalOnMySide = myPlayers.some((p) => isLocal(p, localIds));
+    const mates = myPlayers.filter((p) => !isLocal(p, localIds)).map((p) => p.name);
+    const us = hasLocalOnMySide
+      ? ['You', mates.join(', ')].filter(Boolean).join(' + ')
+      : mates.join(', ');
+    const opps = oppPlayers.map((p) => (isLocal(p, localIds) ? 'You' : p.name)).join(', ');
+    rosterText = opps ? (us ? `${us} vs ${opps}` : opps) : us;
+  }
+
+  return {
+    myTeam,
+    myScore,
+    oppScore,
+    myTeamInk,
+    rosterText,
+  };
 }
 
 export function sessionMatchToHistoricalRecord(match: SessionMatchDetail): HistoricalMatchRecord {
@@ -141,6 +248,9 @@ export function sessionMatchToHistoricalRecord(match: SessionMatchDetail): Histo
       demos: p.stats?.demos ?? sp?.demos ?? 0,
       mmr: p.mmr ?? sp?.mmr,
       rank_name: p.rank_name ?? sp?.rank_name,
+      short_rank: p.short_rank ?? sp?.short_rank,
+      tier: p.tier ?? sp?.tier,
+      division: p.division ?? sp?.division,
       boost: sp?.boost,
       movement: sp?.movement,
       positioning: sp?.positioning,

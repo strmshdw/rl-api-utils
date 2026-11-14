@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -139,15 +140,38 @@ func (t *Tracker) OnUpdateGameState(ctx context.Context, matchGUID string, playl
 		}
 
 		var matchupRecord *storage.PlayerMatchup
+		var matchupsByPlaylist map[string]*storage.PlayerMatchup
+		if !isBot && !isLocal && strings.TrimSpace(p.PrimaryId) != "" {
+			if byMap, ok := t.matchupsByPlaylistCache[p.PrimaryId]; ok {
+				matchupsByPlaylist = cloneNonEmptyMatchupsByPlaylist(byMap)
+			}
+		}
 		if activePlaylistID != 0 && !isBot {
 			mKey := fmt.Sprintf("%s:%d", p.PrimaryId, activePlaylistID)
-			if m, ok := t.matchupCache[mKey]; ok {
-				matchupRecord = m
+			if m, ok := t.matchupCache[mKey]; ok && m != nil {
+				cp := *m
+				matchupRecord = &cp
 			} else if !isLocal {
-				if _, inFlight := t.matchupInFlight[mKey]; !inFlight {
+				if byMap, ok := t.matchupsByPlaylistCache[p.PrimaryId]; ok {
+					if m, mOk := byMap[strconv.Itoa(activePlaylistID)]; mOk && m != nil {
+						cp := *m
+						matchupRecord = &cp
+					}
+				}
+			}
+			if !isLocal && strings.TrimSpace(p.PrimaryId) != "" {
+				_, hasSingle := t.matchupCache[mKey]
+				_, hasAll := t.matchupsByPlaylistCache[p.PrimaryId]
+				if (!hasSingle || !hasAll) && t.matchupInFlight[mKey].IsZero() {
 					t.matchupInFlight[mKey] = now
 					playersToQueryMatchup = append(playersToQueryMatchup, p)
 				}
+			}
+		} else if !isBot && !isLocal && strings.TrimSpace(p.PrimaryId) != "" {
+			mKey := fmt.Sprintf("%s:0", p.PrimaryId)
+			if _, hasAll := t.matchupsByPlaylistCache[p.PrimaryId]; !hasAll && t.matchupInFlight[mKey].IsZero() {
+				t.matchupInFlight[mKey] = now
+				playersToQueryMatchup = append(playersToQueryMatchup, p)
 			}
 		}
 
@@ -166,9 +190,10 @@ func (t *Tracker) OnUpdateGameState(ctx context.Context, matchGUID string, playl
 				Shots:   p.Shots,
 				Demos:   p.Demos,
 			},
-			CurrentRank:   currentRank,
-			Ranks:         ranksSnapshot,
-			MatchupRecord: matchupRecord,
+			CurrentRank:        currentRank,
+			Ranks:              ranksSnapshot,
+			MatchupRecord:      matchupRecord,
+			MatchupsByPlaylist: matchupsByPlaylist,
 		}
 
 		if isLocal {
@@ -270,23 +295,59 @@ func (t *Tracker) upsertNewPlayers(ctx context.Context, players []statsapi.Stats
 }
 
 func (t *Tracker) warmMatchupCache(ctx context.Context, matchGUID string, playlistID int, players []statsapi.StatsPlayer) {
-	if len(players) == 0 || playlistID == 0 {
+	if len(players) == 0 {
 		return
 	}
 	var updatedSnapshot *CurrentMatchResponse
 	for _, p := range players {
 		mKey := fmt.Sprintf("%s:%d", p.PrimaryId, playlistID)
-		matchup, err := t.store.GetPlayerMatchup(ctx, p.PrimaryId, playlistID)
+		allMatchups, allErr := t.store.GetPlayerMatchups(ctx, p.PrimaryId)
+		var byPlaylist map[string]*storage.PlayerMatchup
+		if allErr == nil {
+			byPlaylist = make(map[string]*storage.PlayerMatchup, len(allMatchups))
+			for _, m := range allMatchups {
+				if m != nil && m.PlaylistID > 0 {
+					cp := *m
+					byPlaylist[strconv.Itoa(m.PlaylistID)] = &cp
+				}
+			}
+		}
+
+		var (
+			matchup *storage.PlayerMatchup
+			err     error
+		)
+		if playlistID != 0 {
+			if byPlaylist != nil {
+				if m, ok := byPlaylist[strconv.Itoa(playlistID)]; ok && m != nil {
+					cp := *m
+					matchup = &cp
+				}
+			}
+			if matchup == nil {
+				matchup, err = t.store.GetPlayerMatchup(ctx, p.PrimaryId, playlistID)
+				if err == nil && matchup != nil && matchup.TotalMatches > 0 {
+					if byPlaylist == nil {
+						byPlaylist = make(map[string]*storage.PlayerMatchup, 1)
+					}
+					cp := *matchup
+					byPlaylist[strconv.Itoa(playlistID)] = &cp
+				}
+			}
+		}
 
 		t.mu.Lock()
 		delete(t.matchupInFlight, mKey)
-		if err == nil && matchup != nil {
+		if byPlaylist != nil {
+			t.matchupsByPlaylistCache[p.PrimaryId] = byPlaylist
+		}
+		if playlistID != 0 && err == nil && matchup != nil {
 			t.matchupCache[mKey] = matchup
-			t.boundMatchupCacheLocked()
-			if t.currentMatch != nil && t.currentMatch.MatchGUID == matchGUID {
-				t.updateLobbyPlayerMatchupLocked(p.PrimaryId, matchup)
-				updatedSnapshot = t.currentMatch.DeepClone()
-			}
+		}
+		t.boundMatchupCacheLocked()
+		if t.currentMatch != nil && t.currentMatch.MatchGUID == matchGUID && (matchup != nil || len(byPlaylist) > 0) {
+			t.updateLobbyPlayerMatchupLocked(p.PrimaryId, matchup, byPlaylist)
+			updatedSnapshot = t.currentMatch.DeepClone()
 		}
 		t.mu.Unlock()
 	}
@@ -356,8 +417,14 @@ func (t *Tracker) updateLobbyPlayerRanksLocked(playerID string, snapshot PlayerR
 	})
 }
 
-func (t *Tracker) updateLobbyPlayerMatchupLocked(playerID string, matchup *storage.PlayerMatchup) {
+func (t *Tracker) updateLobbyPlayerMatchupLocked(playerID string, matchup *storage.PlayerMatchup, byPlaylist map[string]*storage.PlayerMatchup) {
 	visitMatchPlayers(t.currentMatch, playerID, func(p *LobbyPlayer) {
-		p.MatchupRecord = matchup
+		if matchup != nil {
+			cp := *matchup
+			p.MatchupRecord = &cp
+		}
+		if !p.IsLocal {
+			p.MatchupsByPlaylist = cloneNonEmptyMatchupsByPlaylist(byPlaylist)
+		}
 	})
 }
