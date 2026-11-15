@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { usePlayerSearch } from './usePlayerSearch';
-import { DashboardProvider } from '../context/DashboardContext';
+import { DashboardProvider, useDashboard } from '../context/DashboardContext';
 import { cleanup, flush, mount } from '../test/dom';
 
 interface RecordedFetch {
@@ -78,6 +78,61 @@ describe('usePlayerSearch connection & pagination lifecycle', () => {
     expect(latestApi.page).toBe(1);
     expect(requests).toHaveLength(4);
     expect(requests[3].url).toContain('offset=0');
+    expect(requests[3].signal.aborted).toBe(false);
+  });
+
+  it('syncs playlist query param synchronously with DashboardContext activePlaylist and omits playlist when all', async () => {
+    localStorage.clear();
+    const requests: RecordedFetch[] = [];
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, signal: init?.signal as AbortSignal });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ players: [], total: 100, limit: 24, offset: 0 }),
+      } as Response);
+    }) as unknown as typeof fetch;
+
+    let setActivePlaylistFn!: (pl: string) => void;
+    let latestApi!: ReturnType<typeof usePlayerSearch>;
+    function PlaylistHarness() {
+      const { setActivePlaylist } = useDashboard();
+      setActivePlaylistFn = setActivePlaylist;
+      const api = usePlayerSearch({ limit: 24 });
+      latestApi = api;
+      return <div data-testid="pl">{api.playlist}</div>;
+    }
+
+    await mount(
+      <DashboardProvider>
+        <PlaylistHarness />
+      </DashboardProvider>,
+    );
+    await flush();
+
+    // DashboardProvider defaults to '11' (2v2)
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toContain('playlist=11');
+    expect(requests[0].signal.aborted).toBe(false);
+
+    // Move to page 2, then switch activePlaylist to '3v3' -> single fetch at offset=0&playlist=13
+    await act(async () => latestApi.setPage(2));
+    await flush();
+    expect(requests).toHaveLength(2);
+
+    await act(async () => setActivePlaylistFn('3v3'));
+    await flush();
+    expect(latestApi.page).toBe(1);
+    expect(requests).toHaveLength(3);
+    expect(requests[2].url).toContain('offset=0');
+    expect(requests[2].url).toContain('playlist=13');
+    expect(requests[2].signal.aborted).toBe(false);
+
+    // Switch to 'all' -> omits playlist= param
+    await act(async () => setActivePlaylistFn('all'));
+    await flush();
+    expect(requests).toHaveLength(4);
+    expect(requests[3].url).not.toContain('playlist=');
     expect(requests[3].signal.aborted).toBe(false);
   });
 });

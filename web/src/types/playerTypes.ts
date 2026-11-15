@@ -99,6 +99,7 @@ export interface LobbyPlayer {
   current_rank?: PlayerPlaylistRank;
   ranks?: PlayerRanksSnapshot;
   matchup_record?: PlayerMatchup;
+  matchups_by_playlist?: Record<string, PlayerMatchup>;
   with_you_stats?: PlayerRoleStatsSummary;
   against_you_stats?: PlayerRoleStatsSummary;
   in_wins_stats?: PlayerRoleStatsSummary;
@@ -215,6 +216,7 @@ export interface PlayerDetailResponse {
   first_seen_at: string;
   last_seen_at: string;
   matchups: PlayerMatchup[];
+  playlist_breakdown?: PlayerMatchup[];
   recent_matches?: PlayerMatchDetail[];
   teammate_wins?: number;
   teammate_losses?: number;
@@ -225,6 +227,8 @@ export interface PlayerDetailResponse {
   against_you_stats?: PlayerRoleStatsSummary;
   relationship_tag?: string;
 }
+
+export type PlayerProfile = PlayerDetailResponse;
 
 export interface PlayerPatchPayload {
   notes?: string;

@@ -1,10 +1,41 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CurrentMatchResponse, PlayerDetailResponse, PlayerMatchDetail, PlayerMatchesResponse, PlayerPlaylistRank, PlayerRoleStatsSummary } from '../../types/api';
-import { computeDynamicRelationshipTag, computeLiveThreatBadges, emptyRoleStats, formatMmr, playlistLabels, shortRank, trackerUrl } from '../../utils/broadcast';
-import { getSamplePlayerMatches, getSamplePlayerProfile, isDemoMode, SAMPLE_CURRENT_MATCH } from '../../utils/sampleData';
+import { useCallback, useEffect, useMemo, useState, type SetStateAction } from 'react';
+import {
+  CurrentMatchResponse,
+  PlayerDetailResponse,
+  PlayerMatchDetail,
+  PlayerMatchesResponse,
+  PlayerMatchup,
+  PlayerPlaylistRank,
+  PlayerRoleStatsSummary,
+} from '../../types/api';
+import {
+  computeDynamicRelationshipTag,
+  computeLiveThreatBadges,
+  emptyRoleStats,
+  formatArenaName,
+  formatMmr,
+  matchesPlaylistFilter,
+  playlistFilterToParam,
+  playlistLabels,
+  shortRank,
+  trackerUrl,
+} from '../../utils/broadcast';
+import {
+  getSamplePlayerMatches,
+  getSamplePlayerProfile,
+  isDemoMode,
+  SAMPLE_CURRENT_MATCH,
+} from '../../utils/sampleData';
 import { useDashboard } from '../../context/DashboardContext';
 import { parseRanks, sumMatchups } from './playerData';
-import { PLAYLIST_SCOPE_IDS, ProfilePlaylistScope, ProfileResultFilter, ProfileRoleFilter, ProfileSortOption, resolveLocalOutcome } from './PlayerRoleSplitCard';
+import {
+  PLAYLIST_SCOPE_IDS,
+  ProfilePlaylistScope,
+  ProfileResultFilter,
+  ProfileRoleFilter,
+  ProfileSortOption,
+  resolveLocalOutcome,
+} from './PlayerRoleSplitCard';
 
 export interface CoreRankCard {
   playlistId: number;
@@ -28,12 +59,14 @@ export interface PlayerDossierDataState {
   allRanks: PlayerPlaylistRank[];
   coreRankCards: CoreRankCard[];
   extraRanks: PlayerPlaylistRank[];
+  playlistBreakdown: PlayerMatchup[];
   totals: ReturnType<typeof sumMatchups>;
   withStats: PlayerRoleStatsSummary;
   vsStats: PlayerRoleStatsSummary;
   mmrSparkline: number[];
   matches: PlayerMatchDetail[];
   filteredAndSortedMatches: PlayerMatchDetail[];
+  isDemoMatches: boolean;
   totalMatches: number;
   totalPages: number;
   isLoadingMatches: boolean;
@@ -41,6 +74,7 @@ export interface PlayerDossierDataState {
   statPlaylist: ProfilePlaylistScope;
   setStatPlaylist: (next: ProfilePlaylistScope) => void;
   activePlaylistId: number;
+  activePlaylistParam: string;
   setPlaylistById: (playlistId: number) => void;
   roleFilter: ProfileRoleFilter;
   setRoleFilter: React.Dispatch<React.SetStateAction<ProfileRoleFilter>>;
@@ -69,6 +103,48 @@ export function playlistIdToScope(playlistId: number): ProfilePlaylistScope {
   return 'all';
 }
 
+export function parseDashboardPlaylist(activePlaylist: string): {
+  scope: ProfilePlaylistScope;
+  customId: number | null;
+} {
+  const f = (activePlaylist || '').trim().toLowerCase();
+  if (!f || f === 'all' || f === '0') return { scope: 'all', customId: null };
+  if (f === '11' || f === '2v2' || f === 'doubles' || f === 'ranked_2v2') {
+    return { scope: '2v2', customId: null };
+  }
+  if (f === '13' || f === '12' || f === '3v3' || f === 'standard' || f === 'ranked_3v3') {
+    return { scope: '3v3', customId: null };
+  }
+  if (f === '10' || f === '1v1' || f === 'duel' || f === 'ranked_1v1') {
+    return { scope: '1v1', customId: null };
+  }
+  if (f === 'extra') return { scope: 'extra', customId: null };
+  if (f === 'casual' || f === 'unranked') return { scope: 'casual', customId: null };
+  const num = Number(playlistFilterToParam(f));
+  if (Number.isInteger(num) && num > 0) {
+    return { scope: 'all', customId: num };
+  }
+  return { scope: 'all', customId: null };
+}
+
+function mapSortOptionToQuery(opt: ProfileSortOption): { sortBy: string; sortDir: 'asc' | 'desc' } {
+  switch (opt) {
+    case 'date-asc':
+      return { sortBy: 'date', sortDir: 'asc' };
+    case 'pts-desc':
+      return { sortBy: 'score', sortDir: 'desc' };
+    case 'goals-desc':
+      return { sortBy: 'goals', sortDir: 'desc' };
+    case 'saves-desc':
+      return { sortBy: 'saves', sortDir: 'desc' };
+    case 'demos-desc':
+      return { sortBy: 'demos', sortDir: 'desc' };
+    case 'date-desc':
+    default:
+      return { sortBy: 'date', sortDir: 'desc' };
+  }
+}
+
 export function usePlayerDossierData(
   playerId: string | null,
   playerName: string | undefined,
@@ -76,31 +152,109 @@ export function usePlayerDossierData(
   options: { enabled?: boolean; pageSize?: number; liveMatch?: CurrentMatchResponse | null } = {},
 ): PlayerDossierDataState {
   const { enabled = true, pageSize = 20 } = options;
-  const { dateRangeQueryParams } = useDashboard();
+  const { activePlaylist, dateRangeQueryParams, stampingConfig } = useDashboard();
 
   const [profile, setProfile] = useState<PlayerDetailResponse | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [statPlaylist, setStatPlaylist] = useState<ProfilePlaylistScope>('all');
-  const [customPlaylistId, setCustomPlaylistId] = useState<number | null>(null);
+  const initialScope = parseDashboardPlaylist(activePlaylist);
+  const [scopeTracker, setScopeTracker] = useState<{
+    playerId: string | null;
+    activePlaylist: string;
+    statPlaylist: ProfilePlaylistScope;
+    customPlaylistId: number | null;
+  }>({
+    playerId,
+    activePlaylist,
+    statPlaylist: initialScope.scope,
+    customPlaylistId: initialScope.customId,
+  });
+
   const [roleFilter, setRoleFilter] = useState<ProfileRoleFilter>('all');
   const [resultFilter, setResultFilter] = useState<ProfileResultFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState<ProfileSortOption>('date-desc');
-  const [matchPage, setMatchPage] = useState(1);
 
-  const [matches, setMatches] = useState<PlayerMatchDetail[]>([]);
-  const [totalMatches, setTotalMatches] = useState(0);
-  const [isLoadingMatches, setIsLoadingMatches] = useState(false);
+  if (
+    scopeTracker.playerId !== playerId ||
+    scopeTracker.activePlaylist !== activePlaylist
+  ) {
+    const synced = parseDashboardPlaylist(activePlaylist);
+    const playerChanged = scopeTracker.playerId !== playerId;
+    setScopeTracker({
+      playerId,
+      activePlaylist,
+      statPlaylist: synced.scope,
+      customPlaylistId: synced.customId,
+    });
+    if (playerChanged) {
+      setRoleFilter('all');
+      setResultFilter('all');
+      setSearchQuery('');
+      setSortOption('date-desc');
+    }
+  }
+
+  const statPlaylist =
+    scopeTracker.playerId === playerId && scopeTracker.activePlaylist === activePlaylist
+      ? scopeTracker.statPlaylist
+      : initialScope.scope;
+  const customPlaylistId =
+    scopeTracker.playerId === playerId && scopeTracker.activePlaylist === activePlaylist
+      ? scopeTracker.customPlaylistId
+      : initialScope.customId;
 
   const activePlaylistId =
     customPlaylistId !== null ? customPlaylistId : PLAYLIST_SCOPE_IDS[statPlaylist];
+  const activePlaylistParam =
+    customPlaylistId !== null && customPlaylistId > 0
+      ? String(customPlaylistId)
+      : playlistFilterToParam(statPlaylist);
+
+  const matchFilterKey = [
+    playerId ?? '',
+    activePlaylistParam,
+    roleFilter,
+    resultFilter,
+    searchQuery.trim(),
+    sortOption,
+    dateRangeQueryParams.from ?? '',
+    dateRangeQueryParams.to ?? '',
+  ].join('\x1f');
+
+  const [pageState, setPageState] = useState<{ filterKey: string; page: number }>({
+    filterKey: matchFilterKey,
+    page: 1,
+  });
+  if (pageState.filterKey !== matchFilterKey) {
+    setPageState({ filterKey: matchFilterKey, page: 1 });
+  }
+  const matchPage = pageState.filterKey === matchFilterKey ? pageState.page : 1;
+
+  const setMatchPage = useCallback(
+    (value: SetStateAction<number>) => {
+      setPageState((prev) => {
+        const currentPage = prev.filterKey === matchFilterKey ? prev.page : 1;
+        const nextPage = typeof value === 'function' ? value(currentPage) : value;
+        return { filterKey: matchFilterKey, page: nextPage };
+      });
+    },
+    [matchFilterKey],
+  );
+
+  const [matches, setMatches] = useState<PlayerMatchDetail[]>([]);
+  const [isDemoMatches, setIsDemoMatches] = useState(false);
+  const [totalMatches, setTotalMatches] = useState(0);
+  const [isLoadingMatches, setIsLoadingMatches] = useState(false);
 
   const handleSetStatPlaylist = (next: ProfilePlaylistScope) => {
-    setCustomPlaylistId(null);
-    setStatPlaylist(next);
-    setMatchPage(1);
+    setScopeTracker({
+      playerId,
+      activePlaylist,
+      statPlaylist: next,
+      customPlaylistId: null,
+    });
   };
 
   const setPlaylistById = (playlistId: number) => {
@@ -112,21 +266,14 @@ export function usePlayerDossierData(
     if (mapped !== 'all') {
       handleSetStatPlaylist(mapped);
     } else {
-      setStatPlaylist('all');
-      setCustomPlaylistId(playlistId);
-      setMatchPage(1);
+      setScopeTracker({
+        playerId,
+        activePlaylist,
+        statPlaylist: 'all',
+        customPlaylistId: playlistId,
+      });
     }
   };
-
-  useEffect(() => {
-    setStatPlaylist('all');
-    setCustomPlaylistId(null);
-    setRoleFilter('all');
-    setResultFilter('all');
-    setSearchQuery('');
-    setSortOption('date-desc');
-    setMatchPage(1);
-  }, [playerId]);
 
   useEffect(() => {
     setProfile(null);
@@ -137,7 +284,7 @@ export function usePlayerDossierData(
     setError(null);
 
     const params = new URLSearchParams();
-    if (activePlaylistId > 0) params.set('playlist', String(activePlaylistId));
+    if (activePlaylistParam) params.set('playlist', activePlaylistParam);
     if (dateRangeQueryParams.from) params.set('from', dateRangeQueryParams.from);
     if (dateRangeQueryParams.to) params.set('to', dateRangeQueryParams.to);
     const qs = params.toString();
@@ -163,7 +310,14 @@ export function usePlayerDossierData(
       });
 
     return () => controller.abort();
-  }, [enabled, playerId, playerName, activePlaylistId, dateRangeQueryParams.from, dateRangeQueryParams.to]);
+  }, [
+    enabled,
+    playerId,
+    playerName,
+    activePlaylistParam,
+    dateRangeQueryParams.from,
+    dateRangeQueryParams.to,
+  ]);
 
   useEffect(() => {
     if (!enabled || !playerId) return;
@@ -171,17 +325,20 @@ export function usePlayerDossierData(
     const controller = new AbortController();
     setIsLoadingMatches(true);
 
+    const { sortBy, sortDir } = mapSortOptionToQuery(sortOption);
     const params = new URLSearchParams({
       limit: String(pageSize),
       offset: String((matchPage - 1) * pageSize),
     });
     if (roleFilter !== 'all') params.set('role', roleFilter);
-    if (activePlaylistId > 0) params.set('playlist', String(activePlaylistId));
+    if (activePlaylistParam) params.set('playlist', activePlaylistParam);
     if (resultFilter === 'W') params.set('result', 'victory');
     if (resultFilter === 'L') params.set('result', 'defeat');
     if (searchQuery.trim()) params.set('search', searchQuery.trim());
     if (dateRangeQueryParams.from) params.set('from', dateRangeQueryParams.from);
     if (dateRangeQueryParams.to) params.set('to', dateRangeQueryParams.to);
+    params.set('sort_by', sortBy);
+    params.set('sort_dir', sortDir);
 
     fetch(`/api/players/${encodeURIComponent(playerId)}/matches?${params.toString()}`, {
       signal: controller.signal,
@@ -194,20 +351,26 @@ export function usePlayerDossierData(
         if ((!data.matches || data.matches.length === 0) && isDemoMode()) {
           const demoRows = getSamplePlayerMatches(playerId, playerName);
           setMatches(demoRows);
+          setIsDemoMatches(true);
           setTotalMatches(demoRows.length);
         } else {
           setMatches(data.matches || []);
+          setIsDemoMatches(false);
           setTotalMatches(data.total || 0);
         }
       })
       .catch(() => {
-        if (isDemoMode()) {
-          const demoRows = getSamplePlayerMatches(playerId, playerName);
-          setMatches(demoRows);
-          setTotalMatches(demoRows.length);
-        } else {
-          setMatches([]);
-          setTotalMatches(0);
+        if (!controller.signal.aborted) {
+          if (isDemoMode()) {
+            const demoRows = getSamplePlayerMatches(playerId, playerName);
+            setMatches(demoRows);
+            setIsDemoMatches(true);
+            setTotalMatches(demoRows.length);
+          } else {
+            setMatches([]);
+            setIsDemoMatches(false);
+            setTotalMatches(0);
+          }
         }
       })
       .finally(() => {
@@ -221,9 +384,10 @@ export function usePlayerDossierData(
     playerName,
     pageSize,
     roleFilter,
-    activePlaylistId,
+    activePlaylistParam,
     resultFilter,
     searchQuery,
+    sortOption,
     matchPage,
     dateRangeQueryParams.from,
     dateRangeQueryParams.to,
@@ -242,7 +406,9 @@ export function usePlayerDossierData(
         return {
           playlistId: spec.id,
           label: spec.label,
-          rank: found?.rank_name ? shortRank(found.rank_name, found.division) : 'UNRANKED',
+          rank: found?.rank_name
+            ? shortRank(found.rank_name, found.division, found.short_rank, found.tier)
+            : 'UNRANKED',
           mmr: found?.mmr ? formatMmr(found.mmr) : '—',
           games: found?.matches_played ?? 0,
         };
@@ -255,11 +421,16 @@ export function usePlayerDossierData(
     [allRanks],
   );
 
+  const playlistBreakdown = useMemo(
+    () => profile?.playlist_breakdown ?? profile?.matchups ?? [],
+    [profile?.playlist_breakdown, profile?.matchups],
+  );
+
   const scopedMatchups = useMemo(() => {
     const list = profile?.matchups ?? [];
-    if (activePlaylistId <= 0) return list;
-    return list.filter((m) => m.playlist_id === activePlaylistId);
-  }, [profile?.matchups, activePlaylistId]);
+    if (!activePlaylistParam) return list;
+    return list.filter((m) => matchesPlaylistFilter(m.playlist_id, activePlaylistParam));
+  }, [profile?.matchups, activePlaylistParam]);
 
   const totals = useMemo(() => sumMatchups(scopedMatchups), [scopedMatchups]);
 
@@ -297,8 +468,9 @@ export function usePlayerDossierData(
         totals.vs.wins,
         totals.vs.losses,
         isOwnProfile ? 'YOU' : false,
+        { minGames: stampingConfig.relationship_min_games },
       ),
-    [totals, isOwnProfile],
+    [totals, isOwnProfile, stampingConfig.relationship_min_games],
   );
 
   const threatBadges = useMemo(() => {
@@ -323,19 +495,29 @@ export function usePlayerDossierData(
       activeMatch.local_player,
       allLobby,
       activeMatch.playlist_id,
+      stampingConfig,
     );
-  }, [id, name, options.liveMatch]);
+  }, [id, name, options.liveMatch, stampingConfig]);
 
   const filteredAndSortedMatches = useMemo(() => {
+    if (!isDemoMatches) {
+      return matches;
+    }
     const q = searchQuery.trim().toLowerCase();
     const list = matches.filter((m) => {
-      if (activePlaylistId > 0 && m.playlist !== activePlaylistId) return false;
+      if (activePlaylistParam && !matchesPlaylistFilter(m.playlist, activePlaylistParam)) {
+        return false;
+      }
       if (roleFilter !== 'all' && m.role !== roleFilter) return false;
       const localOutcome = resolveLocalOutcome(m);
       if (resultFilter === 'W' && localOutcome && localOutcome !== 'victory') return false;
       if (resultFilter === 'L' && localOutcome && localOutcome !== 'defeat') return false;
       if (q) {
-        const hay = `${m.map_name || ''} ${playlistLabels(m.playlist).name} ${m.match_guid}`.toLowerCase();
+        const arena = formatArenaName(m.map_name || m.stats?.map_name);
+        const rosterHay = (m.stats?.players ?? [])
+          .map((p) => `${p.name || ''} ${p.online_id || ''} ${p.car_name || ''}`)
+          .join(' ');
+        const hay = `${m.map_name || ''} ${arena} ${playlistLabels(m.playlist).name} ${m.match_guid} ${m.player_stats?.car_name || ''} ${rosterHay}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -354,7 +536,7 @@ export function usePlayerDossierData(
       if (sortOption === 'demos-desc') return pStat(b, 'demos') - pStat(a, 'demos');
       return tB - tA;
     });
-  }, [matches, activePlaylistId, roleFilter, resultFilter, searchQuery, sortOption]);
+  }, [matches, isDemoMatches, activePlaylistParam, roleFilter, resultFilter, searchQuery, sortOption]);
 
   const mmrSparkline = useMemo(() => {
     const oid = id.includes('|') ? id.split('|')[1].toLowerCase() : id.toLowerCase();
@@ -387,11 +569,14 @@ export function usePlayerDossierData(
 
   const clearFilters = () => {
     setRoleFilter('all');
-    setStatPlaylist('all');
-    setCustomPlaylistId(null);
+    setScopeTracker({
+      playerId,
+      activePlaylist,
+      statPlaylist: 'all',
+      customPlaylistId: null,
+    });
     setResultFilter('all');
     setSearchQuery('');
-    setMatchPage(1);
   };
 
   return {
@@ -408,12 +593,14 @@ export function usePlayerDossierData(
     allRanks,
     coreRankCards,
     extraRanks,
+    playlistBreakdown,
     totals,
     withStats,
     vsStats,
     mmrSparkline,
     matches,
     filteredAndSortedMatches,
+    isDemoMatches,
     totalMatches,
     totalPages: Math.max(1, Math.ceil(totalMatches / pageSize)),
     isLoadingMatches,
@@ -421,6 +608,7 @@ export function usePlayerDossierData(
     statPlaylist,
     setStatPlaylist: handleSetStatPlaylist,
     activePlaylistId,
+    activePlaylistParam,
     setPlaylistById,
     roleFilter,
     setRoleFilter,

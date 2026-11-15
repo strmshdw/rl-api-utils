@@ -65,6 +65,12 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
           const inspected = isInspected(p);
           const demosInflicted = p.demo?.inflicted ?? p.demos ?? 0;
           const demosTaken = p.demo?.taken ?? 0;
+          const rankLabel = shortRank(
+            p.rank_name || p.rank?.name || p.short_rank || p.rank?.short_rank,
+            p.division ?? p.rank?.division,
+            p.short_rank || p.rank?.short_rank,
+            p.tier ?? p.rank?.tier,
+          );
 
           return (
             <div
@@ -86,8 +92,8 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
                 {isMvp && <MvpChip />}
               </div>
               <span className="text-right t-text-blue text-blue-ink">{formatMmr(p.mmr)}</span>
-              <span className="pl-2 text-sm t-text-ink2 text-ink-2 truncate">
-                {p.rank_name ? shortRank(p.rank_name) : 'UNRANKED'}
+              <span title={rankLabel} className="pl-2 text-sm t-text-ink2 text-ink-2 truncate">
+                {rankLabel}
               </span>
               <span className="text-right t-text-strong text-ink-strong">{p.score || 0}</span>
               <span className="text-right t-text-strong text-ink-strong">{p.goals || 0}</span>
@@ -110,14 +116,14 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
           </span>
           <span className="text-right t-text-muted text-muted">—</span>
           <span className="pl-2 t-text-muted text-muted">—</span>
-          <span className="text-right t-text-strong text-ink-strong">{totPts}</span>
-          <span className="text-right t-text-strong text-ink-strong">{totG}</span>
-          <span className="text-right t-text-ink2 text-ink-2">{totA}</span>
-          <span className="text-right t-text-ink2 text-ink-2">{totSv}</span>
-          <span className="text-right t-text-ink2 text-ink-2">{totSh}</span>
-          <span className="text-right t-text-win text-win">{shPct}%</span>
-          <span className="text-right t-text-orange text-orange-ink">{totD}</span>
-          <span className="text-right t-text-muted text-muted">{totTk}</span>
+          <span title="Team total" className="text-right t-text-strong text-ink-strong">{totPts}</span>
+          <span title="Team total" className="text-right t-text-strong text-ink-strong">{totG}</span>
+          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totA}</span>
+          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totSv}</span>
+          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totSh}</span>
+          <span title="Team average" className="text-right t-text-win text-win">{shPct}%</span>
+          <span title="Team total" className="text-right t-text-orange text-orange-ink">{totD}</span>
+          <span title="Team total" className="text-right t-text-muted text-muted">{totTk}</span>
         </div>
       </div>
     );

@@ -50,9 +50,11 @@ type Tracker struct {
 	failBackoff map[string]time.Time
 	backoffTTL  time.Duration
 
-	// Tier 4: In-Memory Matchup Cache (Key: "playerID:playlistID")
-	matchupCache    map[string]*storage.PlayerMatchup
-	matchupInFlight map[string]time.Time
+	// Tier 4: In-Memory Matchup & Scouting Cache (Key: "playerID:playlistID" and per-player maps)
+	matchupCache            map[string]*storage.PlayerMatchup
+	matchupsByPlaylistCache map[string]map[string]*storage.PlayerMatchup
+	scoutingCache           map[string]cachedScoutingEntry
+	matchupInFlight         map[string]time.Time
 
 	// Post-Match MMR Poller State ("idle", "polling", "synced")
 	mmrPollerState        string
@@ -90,8 +92,10 @@ func NewTracker(store storage.StateStore, rankClient SkillFetcher, cfg config.Pl
 		inFlight:              make(map[string]time.Time),
 		failBackoff:           make(map[string]time.Time),
 		backoffTTL:            defaultBackoffTTL,
-		matchupCache:          make(map[string]*storage.PlayerMatchup),
-		matchupInFlight:       make(map[string]time.Time),
+		matchupCache:            make(map[string]*storage.PlayerMatchup),
+		matchupsByPlaylistCache: make(map[string]map[string]*storage.PlayerMatchup),
+		scoutingCache:           make(map[string]cachedScoutingEntry),
+		matchupInFlight:         make(map[string]time.Time),
 		mmrPollerState:        "idle",
 		postMatchPollSchedule: append([]time.Duration(nil), defaultPostMatchPollSchedule...),
 		ctx:                   ctx,
@@ -202,4 +206,61 @@ func (t *Tracker) GetLocalPlayerIDs(ctx context.Context) []string {
 		}
 	}
 	return ids
+}
+
+type cachedScoutingEntry struct {
+	notes  string
+	tags   []string
+	loaded bool
+}
+
+// UpdatePlayerScouting updates in-memory scouting notes and tags for a player and broadcasts
+// an active match update immediately if that player is in the current live lobby.
+func (t *Tracker) UpdatePlayerScouting(playerID string, notes string, tags []string) {
+	trimmed := strings.TrimSpace(playerID)
+	if trimmed == "" {
+		return
+	}
+	var copiedTags []string
+	if len(tags) > 0 {
+		copiedTags = append([]string(nil), tags...)
+	}
+
+	t.mu.Lock()
+	normKey := trimmed
+	for existingKey := range t.scoutingCache {
+		if strings.EqualFold(existingKey, trimmed) {
+			normKey = existingKey
+			break
+		}
+	}
+	t.scoutingCache[normKey] = cachedScoutingEntry{
+		notes:  notes,
+		tags:   copiedTags,
+		loaded: true,
+	}
+
+	var updatedSnapshot *CurrentMatchResponse
+	var listener MatchStateListener
+	if t.currentMatch != nil {
+		matched := false
+		visitMatchPlayers(t.currentMatch, trimmed, func(p *LobbyPlayer) {
+			p.Notes = notes
+			if len(copiedTags) > 0 {
+				p.Tags = append([]string(nil), copiedTags...)
+			} else {
+				p.Tags = nil
+			}
+			matched = true
+		})
+		if matched {
+			updatedSnapshot = t.currentMatch.DeepClone()
+			listener = t.listener
+		}
+	}
+	t.mu.Unlock()
+
+	if listener != nil && updatedSnapshot != nil {
+		listener.OnActiveMatchUpdated(updatedSnapshot)
+	}
 }

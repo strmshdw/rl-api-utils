@@ -5,9 +5,10 @@
 ## 1. Player Tracking & Rank Intelligence (`internal/playertrack/`)
 
 ### 1.1 Rank Client & Cache Architecture
-- `SkillFetcher` wraps `rlapi.PsyNet` via `AuthProviderSupplier` (polling secondary account). Returns `[]PlayerWithSkills` formatted into `PlayerRanksSnapshot` (string key = playlist ID) with canonical `RankName` and `ShortRank`.
+- `SkillFetcher` wraps `rlapi.PsyNet` via `AuthProviderSupplier` (polling secondary account). Returns `[]PlayerWithSkills` formatted into `PlayerRanksSnapshot` (string key = playlist ID) with canonical `RankName`, `ShortRank`, `Sigma`, `WinStreak`, and `PlacementMatchesPlayed`.
 - **Safe Caching (`cache.go`)**:
   - Rank cache bounded at `maxRankCacheEntries = 1000` with `rank_cache_ttl` (default `15m`) + oldest-entry eviction when full.
+  - Scouting cache (`scoutingCache`) bounded at `maxRankCacheEntries` caching persisted `notes` and `tags` per player ID so live `LobbyPlayer` snapshots expose manual scouting overrides (`verified`, `not-smurf`, `smurf`/`alt`) with zero per-tick SQLite churn; immediately refreshed and broadcast via `(*Tracker).UpdatePlayerScouting(playerID, notes, tags)` upon `PATCH /api/players/{id}`.
   - Per-player failure backoff cache bounded at `maxFailBackoffEntries = 500` with `60s` TTL (`defaultBackoffTTL`) so invalid/private profiles don't hammer PsyNet on every game tick.
 - `NoOpRankClient`: returned cleanly when `auto_fetch_ranks == false` or `polling_auth.enabled == false`.
 
@@ -64,7 +65,7 @@
 | `GET` | `/players` | **Bare `[]PlayerSummary` JSON array** (legacy compat!) |
 | `GET` | `/api/players/{id}/matches`, `/players/{id}/matches` | Player's match history with batched stats & `split_stats` |
 | `GET` | `/api/players/{id...}`, `/players/{id...}` | `PlayerDetailResponse` (`player`, `matchups`, `matchup`, `recent_matches`, `split_stats`) |
-| `PATCH` | `/api/players/{id...}`, `/players/{id...}` | Update player `notes` |
+| `PATCH` | `/api/players/{id...}`, `/players/{id...}` | Update player `notes` & `tags` + live `LobbyPlayer` scouting cache |
 | `GET` | `/api/matches`, `/api/historical-matches` | Filtered `MatchesResponse` (`limit`, `offset`, `status`, `playlist`, `search`, `q`, `date_range`, `from`, `to`) |
 | `POST` | `/api/matches/prune` | Prune matches older than `days` / by `status` |
 | `POST` | `/api/matches/{guid}/retry` | Reset retry counter & trigger/mark retry |
@@ -73,6 +74,8 @@
 | `POST` | `/api/sync/ballchasing`, `/api/sync/now` | Trigger historical Ballchasing backfill or immediate sync |
 | `GET` | `/api/sync/ballchasing/status` | `BallchasingSyncStatus` |
 | `GET`, `POST`, `PATCH` | `/api/sync/config` | Read or live-update sync/player_tracking runtime settings |
+| `GET`, `POST`, `PATCH` | `/api/stamping/config` | Read or partial-patch `StampingConfig` thresholds, persisting comment-preserved `stamping:` YAML via `SaveStampingToFile` |
+| `POST` | `/api/stamping/config/reset` | Reset `StampingConfig` to `DefaultStampingConfig()` and persist to disk |
 | `GET` | `/api/events` | SSE stream (initial `session_update` + optional `match_update` snapshots, followed by `match_update`, `match_ended`, `clock_updated`, `session_update`, `sync_progress` + `: keepalive` every 15s) |
 | `GET` | `/` | `web.DistHandler()` SPA static assets (`Cache-Control: immutable` on `/assets/*`, `no-cache` on `index.html`) |
 

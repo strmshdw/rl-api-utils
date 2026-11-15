@@ -140,6 +140,7 @@ func (c *Config) Validate() error {
 	c.validatePlayerTrackingAndSession(&errs)
 	c.validateBallchasing(&errs)
 	c.validateSync(&errs)
+	c.Stamping = c.EffectiveStampingConfig()
 	c.validateLogging(&errs)
 	c.validateWeb(&errs)
 

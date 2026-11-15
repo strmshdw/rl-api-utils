@@ -50,7 +50,28 @@ describe('OBSOverlayView', () => {
     expect(overlay?.textContent).toContain('03:05'); // 185s format
     expect(overlay?.textContent).toContain('2'); // Blue score
     expect(overlay?.textContent).toContain('1'); // Orange score
+    expect(overlay?.textContent).toContain('3–1'); // Active playlist (Doubles 11) session W-L aligned with MMR
+    expect(overlay?.textContent).not.toContain('4–1'); // Does not mix cross-playlist 4-1 record with 2v2 MMR
     expect(overlay?.textContent).toContain('+29'); // MMR delta
+  });
+
+  it('populates rich sample live match and session data in demo mode when daemon endpoints fail or are empty', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('daemon offline');
+      }),
+    );
+    setSearch('mode=overlay&demo=true');
+    const { container } = await mount(<OBSOverlayView />);
+    await flush(10);
+
+    const overlay = container.querySelector('[data-testid="obs-overlay-view"]');
+    expect(overlay).toBeTruthy();
+    expect(overlay?.textContent).toContain('DOUBLES');
+    expect(overlay?.textContent).toContain('3–1');
+    expect(overlay?.textContent).toContain('+29');
+    expect(overlay?.textContent).not.toContain('SESSION—');
   });
 
   it('respects ?theme=neon and ?font=mono and ?scale=1.5', async () => {

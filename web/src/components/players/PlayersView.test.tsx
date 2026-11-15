@@ -2,7 +2,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { PlayersView } from './PlayersView';
-import { h2hTag, matchesRole, parseRanks, primaryRank, spotlights } from './playerData';
+import * as playerData from './playerData';
+const { h2hTag, matchesRole, parseRanks, primaryRank, spotlights } = playerData;
 import { PlayerDetailResponse, PlayerSummary } from '../../types/api';
 import { cleanup, clickText, flush, mount } from '../../test/dom';
 
@@ -116,6 +117,31 @@ describe('player data helpers', () => {
     expect(primaryRank(RANKS)?.rank_name).toBe('Grand Champion I');
     expect(parseRanks('{not json')).toEqual([]);
     expect(parseRanks('')).toEqual([]);
+  });
+
+  it('resolves playlist-specific ranks without leaking 2v2 rank into other ranked modes (STAT-03)', () => {
+    const rankForPlaylist = (playerData as Record<string, any>).rankForPlaylist;
+    expect(typeof rankForPlaylist).toBe('function');
+    expect(rankForPlaylist(RANKS, '13')?.mmr).toBe(1468);
+    expect(rankForPlaylist(RANKS, '3v3')?.rank_name).toBe('Champion III');
+    expect(rankForPlaylist(RANKS, '10')?.mmr).toBe(1240);
+    expect(rankForPlaylist(RANKS, '1v1')?.rank_name).toBe('Champion I');
+    // Unplayed extra mode must return null rather than misleadingly showing 2v2 GC I
+    expect(rankForPlaylist(RANKS, '27')).toBeNull();
+    expect(rankForPlaylist(RANKS, 'hoops')).toBeNull();
+    // All / casual falls back to primaryRank
+    expect(rankForPlaylist(RANKS, 'all')?.mmr).toBe(1502);
+    expect(rankForPlaylist(RANKS, 'casual')?.mmr).toBe(1502);
+  });
+
+  it('adapts best teammate spotlight slot cleanly in 1v1 Solo Duel mode', () => {
+    const [mate, faced, rival] = (spotlights as any)(PLAYERS, '10');
+    expect(mate.key).toBe('mate');
+    expect(mate.player).toBeNull();
+    expect(mate.label).toContain('SOLO DUEL');
+    expect(mate.sub).toContain('NO TEAMMATES IN 1V1');
+    expect(faced.player?.player_name).toBe('VortexRL');
+    expect(rival.player?.player_name).toBe('DanielRL');
   });
 });
 
@@ -318,6 +344,270 @@ describe('PlayersView', () => {
     // Opponent match where local_result='victory' must display WIN (not inverted to LOSS)
     const matchRow = page.querySelector('[data-testid="profile-match-row"]')!;
     expect(matchRow.textContent).toContain('WIN');
+  });
+
+  it('renders semantic responsive table with unclipped LAST SEEN header, pin as first button, and DOSSIER action button (UI-04, UI-08)', async () => {
+    mockFetch();
+    const { container } = await mount(<PlayersView />);
+
+    const region = container.querySelector('[role="region"][aria-label="Players directory"]');
+    expect(region).not.toBeNull();
+    const table = region!.querySelector('table');
+    expect(table).not.toBeNull();
+
+    const thTexts = Array.from(table!.querySelectorAll('thead th')).map((th) =>
+      (th.textContent || '').trim(),
+    );
+    expect(thTexts.some((t) => t.startsWith('LAST SEEN'))).toBe(true);
+    // Duplicate local playlist filter bar removed from PlayersView toolbar
+    expect(container.querySelector('[aria-label="Filter by playlist"]')).toBeNull();
+
+    const aeroRow = rows(container).find((r) => r.textContent?.includes('AeroPulse'))!;
+    expect(aeroRow.tagName).toBe('TR');
+    const rowButtons = Array.from(aeroRow.querySelectorAll('button'));
+    expect(rowButtons.length).toBeGreaterThanOrEqual(2);
+    // First button must remain the pin star button
+    expect(rowButtons[0].getAttribute('aria-label')).toContain('AeroPulse');
+    // Explicit DOSSIER -> button opens the profile page
+    const dossierBtn = rowButtons.find((b) => b.textContent?.includes('DOSSIER'));
+    expect(dossierBtn).toBeTruthy();
+    await act(async () => dossierBtn!.click());
+    await flush();
+    expect(container.querySelector('[data-testid="player-profile-page"]')).not.toBeNull();
+  });
+
+  it('syncs PlayersView directory & spotlights with DashboardContext activePlaylist (3v3 and 1v1 ranks + 1v1 spotlight, STAT-03, STAT-04)', async () => {
+    const { DashboardProvider, useDashboard } = await import('../../context/DashboardContext');
+    localStorage.clear();
+    const calls = mockFetch();
+
+    const PlaylistSwitcher = () => {
+      const { setActivePlaylist } = useDashboard();
+      return (
+        <div>
+          <button type="button" data-testid="switch-3v3" onClick={() => setActivePlaylist('13')}>
+            SWITCH 3V3
+          </button>
+          <button type="button" data-testid="switch-1v1" onClick={() => setActivePlaylist('10')}>
+            SWITCH 1V1
+          </button>
+        </div>
+      );
+    };
+
+    const { container } = await mount(
+      <DashboardProvider>
+        <PlaylistSwitcher />
+        <PlayersView />
+      </DashboardProvider>,
+    );
+    await flush();
+
+    // Switch to 3v3 -> fetches playlist=13 and displays 3v3 MMR (1468 / Champion III) instead of 2v2 1502
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="switch-3v3"]')!.click());
+    await flush();
+    expect(calls.some((c) => c.startsWith('/api/players?') && c.includes('playlist=13'))).toBe(true);
+    const daniel3v3 = rows(container).find((r) => r.textContent?.includes('DanielRL'))!;
+    expect(daniel3v3.textContent).toContain('1468');
+    expect(daniel3v3.textContent).toContain('Champion III');
+    expect(daniel3v3.textContent).not.toContain('1502');
+    expect(container.querySelector('[data-testid="spotlight-mate"]')!.textContent).toContain('1468 MMR');
+
+    // Switch to 1v1 -> fetches playlist=10, displays 1v1 MMR (1240), and adapts spotlight-mate for Solo Duel
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="switch-1v1"]')!.click());
+    await flush();
+    expect(calls.some((c) => c.startsWith('/api/players?') && c.includes('playlist=10'))).toBe(true);
+    const daniel1v1 = rows(container).find((r) => r.textContent?.includes('DanielRL'))!;
+    expect(daniel1v1.textContent).toContain('1240');
+    expect(daniel1v1.textContent).toContain('Champion I');
+    const mateSpot = container.querySelector('[data-testid="spotlight-mate"]')!;
+    expect(mateSpot.textContent).toContain('SOLO DUEL');
+    expect(mateSpot.textContent).toContain('NO TEAMMATES IN 1V1');
+  });
+
+  it('formats CompactRoleSplitCard win rate cleanly without duplicates/dangling parens, formats BST without %, orients match scores You–Opp, formats UE3 arenas, and preserves totalMatches across pages (STAT-06, STAT-09, STAT-10, UI-03, UI-05, UI-06)', async () => {
+    const { emptyRoleStats } = await import('../../utils/roleStats');
+    const matchUrls: string[] = [];
+
+    globalThis.fetch = vi.fn((url: string) => {
+      if (url.startsWith('/api/players?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ players: PLAYERS, total: PLAYERS.length, limit: 24, offset: 0 }),
+        });
+      }
+      if (url.includes('/matches')) {
+        matchUrls.push(url);
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              matches: [
+                {
+                  match_guid: 'orange-win-guid',
+                  record_start_timestamp: 1700000100,
+                  map_name: 'stadium_10a_p',
+                  playlist: 11,
+                  blue_score: 1,
+                  orange_score: 3,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  role: 'teammate',
+                  result: 'victory',
+                  local_result: 'victory',
+                  player_stats: {
+                    match_guid: 'orange-win-guid',
+                    player_id: 'Steam|AeroPulse|0',
+                    team_num: 1,
+                    is_local: false,
+                    won: true,
+                    score: 640,
+                    goals: 2,
+                    assists: 1,
+                    saves: 2,
+                    shots: 4,
+                    demos: 1,
+                  },
+                },
+              ],
+              total: 510,
+              limit: 20,
+              offset: 0,
+            }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            player_id: 'Steam|AeroPulse|0',
+            platform: 'Steam',
+            player_name: 'AeroPulse',
+            ranks_json: JSON.stringify({
+              ...JSON.parse(RANKS),
+              '34': {
+                playlist_id: 34,
+                playlist_name: 'Tournament',
+                tier: 19,
+                division: 2,
+                rank_name: 'Grand Champion I',
+                mmr: 1530,
+              },
+            }),
+            first_seen_at: '2026-08-14T12:00:00Z',
+            last_seen_at: new Date().toISOString(),
+            matchups: [
+              {
+                player_id: 'Steam|AeroPulse|0',
+                playlist_id: 11,
+                wins_as_teammate: 4,
+                losses_as_teammate: 1,
+                wins_as_opponent: 0,
+                losses_as_opponent: 0,
+                total_matches: 5,
+                last_played_at: new Date().toISOString(),
+              },
+            ],
+            with_you_stats: emptyRoleStats(5, 4, 1, {
+              avg_score: 612,
+              shooting_pct: 50,
+              avg_bpm: 420,
+              avg_boost: 51,
+              avg_supersonic_pct: 22,
+            }),
+            against_you_stats: emptyRoleStats(0, 0, 0),
+          }),
+      });
+    }) as unknown as typeof fetch;
+
+    const { container } = await mount(<PlayersView />);
+    const aero = rows(container).find((r) => r.textContent?.includes('AeroPulse'))!;
+    await act(async () => aero.click());
+    await flush();
+
+    const page = container.querySelector('[data-testid="player-profile-page"]')!;
+    const withCard = page.querySelector('[data-testid="h2h-with"]')!;
+    const vsCard = page.querySelector('[data-testid="h2h-vs"]')!;
+
+    // STAT-06: Single clean win-rate ("80% WIN"), never "(80% · 80%)" or dangling "(0% · )"
+    expect(withCard.textContent).toContain('80% WIN');
+    expect(withCard.textContent).not.toContain('80% · 80%');
+    expect(vsCard.textContent).toContain('0 GAMES');
+    expect(vsCard.textContent).not.toContain('(0%');
+
+    // STAT-10: BST rendered as integer tank units (51), not "51%"
+    expect(withCard.textContent).toContain('51');
+    expect(withCard.textContent).not.toContain('51%');
+
+    // UI-05: Extra Modes includes TOURNAMENTS (3V3) with compactRank ("GC I · D2")
+    await clickText(page, 'VIEW FULL PLAYLIST STATS & EXTRA MODES');
+    expect(page.textContent).toContain('TOURNAMENTS (3V3)');
+    expect(page.textContent).toContain('GC I · D2');
+
+    // STAT-09: Paginated match count header reflects server total (510 MATCHES, not 1 MATCH)
+    expect(page.textContent).toContain('510 MATCHES');
+    expect(page.textContent).not.toContain('ALL ROLES');
+
+    // UI-03 & UI-06: Match row orients Orange win 3–1 as "3 – 1" (You – Opponent) and formats stadium_10a_p
+    const matchRow = page.querySelector('[data-testid="profile-match-row"]')!;
+    expect(matchRow.textContent).toContain('WIN');
+    expect(matchRow.textContent).toContain('3 – 1');
+    expect(matchRow.textContent).not.toContain('1 – 3');
+    expect(matchRow.textContent?.toUpperCase()).toContain('DFH STADIUM (10TH ANNIVERSARY)');
+
+    // STAT-09: Server-backed sort parameter forwarding on sort dropdown change
+    const sortSelect = page.querySelector<HTMLSelectElement>('select[aria-label="Sort player matches"]')!;
+    await act(async () => {
+      sortSelect.value = 'pts-desc';
+      sortSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    expect(matchUrls.some((u) => u.includes('sort_by=score') && u.includes('sort_dir=desc'))).toBe(true);
+
+    // MED-03 PoR: Searching by a lobby participant name ("Zenith_99") preserves server-matched rows & 510 MATCHES count
+    const matchSearch = page.querySelector<HTMLInputElement>('input[placeholder*="SEARCH"]')!;
+    const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setInputValue.call(matchSearch, 'Zenith_99');
+      matchSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    expect(matchUrls.some((u) => u.includes('search=Zenith_99'))).toBe(true);
+    expect(page.querySelectorAll('[data-testid="profile-match-row"]')).toHaveLength(1);
+    expect(page.textContent).toContain('510 MATCHES');
+  });
+
+  it('hides TEAMMATES and SYNERGY role filter pills and resets teammate role when 1v1 mode is active (MED-02)', async () => {
+    localStorage.clear();
+    mockFetch();
+    const { DashboardProvider, useDashboard } = await import('../../context/DashboardContext');
+    const ModeSwitcher: React.FC = () => {
+      const { setActivePlaylist } = useDashboard();
+      return (
+        <button type="button" data-testid="switch-1v1" onClick={() => setActivePlaylist('10')}>
+          SWITCH 1V1
+        </button>
+      );
+    };
+    const { container } = await mount(
+      <DashboardProvider>
+        <ModeSwitcher />
+        <PlayersView />
+      </DashboardProvider>,
+    );
+    const roleBar = () => container.querySelector('[aria-label="Filter by role"]')!;
+    expect(roleBar().textContent).toContain('TEAMMATES (WITH YOU)');
+    expect(roleBar().textContent).toContain('SYNERGY ≥50%');
+
+    await clickText(roleBar(), 'TEAMMATES (WITH YOU)');
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="switch-1v1"]')!.click();
+    });
+    await flush();
+
+    expect(roleBar().textContent).not.toContain('TEAMMATES (WITH YOU)');
+    expect(roleBar().textContent).not.toContain('SYNERGY ≥50%');
+    expect(roleBar().querySelector('[aria-pressed="true"]')?.textContent).toBe('ALL');
   });
 });
 

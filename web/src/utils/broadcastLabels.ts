@@ -1,6 +1,15 @@
 import type { SessionMatchDetail } from '../types/api';
 import { parsePlatform } from './platforms';
 
+export {
+  formatArenaName,
+  matchesPlaylistFilter,
+  modeKeyFromPlaylistId,
+  playlistFilterToParam,
+  positioningRoleLabels,
+  type PositioningRoleLabels,
+} from './arenaLabels';
+
 // ============================================================================
 // Records, cells & signed numbers
 // ============================================================================
@@ -147,15 +156,53 @@ const PLAYLISTS: Record<number, PlaylistLabels> = {
   2: { name: 'CASUAL DOUBLES', short: 'DOUBLES', mode: 'CASUAL 2V2' },
   3: { name: 'CASUAL STANDARD', short: 'STANDARD', mode: 'CASUAL 3V3' },
   4: { name: 'CASUAL CHAOS', short: 'CHAOS', mode: 'CASUAL 4V4' },
+  6: { name: 'PRIVATE MATCH', short: 'PRIVATE', mode: 'PRIVATE MATCH' },
+  7: { name: 'SEASON', short: 'SEASON', mode: 'SEASON' },
+  8: { name: 'EXHIBITION', short: 'EXHIBITION', mode: 'EXHIBITION' },
+  9: { name: 'FREE PLAY', short: 'FREE PLAY', mode: 'FREE PLAY' },
   10: { name: 'RANKED DUEL', short: 'DUEL', mode: 'RANKED 1V1' },
   11: { name: 'RANKED DOUBLES', short: 'DOUBLES', mode: 'RANKED 2V2' },
   12: { name: 'RANKED SOLO STANDARD', short: 'SOLO STANDARD', mode: 'RANKED SOLO 3V3' },
   13: { name: 'RANKED STANDARD', short: 'STANDARD', mode: 'RANKED 3V3' },
+  15: { name: 'CASUAL HOOPS', short: 'HOOPS', mode: 'CASUAL HOOPS' },
+  16: { name: 'CASUAL ROCKET LABS', short: 'ROCKET LABS', mode: 'ROCKET LABS' },
+  17: { name: 'CASUAL SNOW DAY', short: 'SNOW DAY', mode: 'CASUAL SNOW DAY' },
+  18: { name: 'CASUAL RUMBLE', short: 'RUMBLE', mode: 'CASUAL RUMBLE' },
+  19: { name: 'CUSTOM TOURNAMENT', short: 'TOURNAMENT', mode: 'CUSTOM TOURNAMENT' },
+  22: { name: 'CUSTOM MATCH', short: 'CUSTOM', mode: 'CUSTOM MATCH' },
+  23: { name: 'CASUAL', short: 'CASUAL', mode: 'CASUAL' },
+  24: { name: 'LAN MATCH', short: 'LAN', mode: 'LAN MATCH' },
   27: { name: 'RANKED HOOPS', short: 'HOOPS', mode: 'RANKED HOOPS' },
   28: { name: 'RANKED RUMBLE', short: 'RUMBLE', mode: 'RANKED RUMBLE' },
   29: { name: 'RANKED DROPSHOT', short: 'DROPSHOT', mode: 'RANKED DROPSHOT' },
   30: { name: 'RANKED SNOW DAY', short: 'SNOW DAY', mode: 'RANKED SNOW DAY' },
+  31: { name: 'GHOST HUNT', short: 'GHOST HUNT', mode: 'GHOST HUNT' },
+  32: { name: 'BEACH BALL', short: 'BEACH BALL', mode: 'BEACH BALL' },
+  33: { name: 'SPIKE RUSH', short: 'SPIKE RUSH', mode: 'SPIKE RUSH' },
   34: { name: 'TOURNAMENT', short: 'TOURNAMENT', mode: 'TOURNAMENT' },
+  35: { name: 'ROCKET LABS', short: 'ROCKET LABS', mode: 'ROCKET LABS' },
+  37: { name: 'DROPSHOT RUMBLE', short: 'DROPSHOT RUMBLE', mode: 'DROPSHOT RUMBLE' },
+  38: { name: 'HEATSEEKER', short: 'HEATSEEKER', mode: 'HEATSEEKER' },
+  41: { name: 'BOOMER BALL', short: 'BOOMER BALL', mode: 'BOOMER BALL' },
+  43: { name: 'HEATSEEKER DOUBLES', short: 'HEATSEEKER 2V2', mode: 'HEATSEEKER 2V2' },
+  44: { name: 'WINTER BREAKAWAY', short: 'WINTER BREAKAWAY', mode: 'WINTER BREAKAWAY' },
+  46: { name: 'GRIDIRON', short: 'GRIDIRON', mode: 'GRIDIRON' },
+  47: { name: 'SUPER CUBE', short: 'SUPER CUBE', mode: 'SUPER CUBE' },
+  48: { name: 'TACTICAL RUMBLE', short: 'TACTICAL RUMBLE', mode: 'TACTICAL RUMBLE' },
+  49: { name: 'SPRING LOADED', short: 'SPRING LOADED', mode: 'SPRING LOADED' },
+  50: { name: 'SPEED DEMON', short: 'SPEED DEMON', mode: 'SPEED DEMON' },
+  52: { name: 'GOTHAM CITY RUMBLE', short: 'GOTHAM RUMBLE', mode: 'GOTHAM RUMBLE' },
+  53: { name: 'KNOCKOUT', short: 'KNOCKOUT', mode: 'KNOCKOUT' },
+  54: { name: 'CONFIDENTIAL THIRDWHEEL', short: 'THIRDWHEEL', mode: 'THIRDWHEEL' },
+  55: { name: 'NIKE FC SHOWDOWN', short: 'NIKE FC', mode: 'NIKE FC SHOWDOWN' },
+  61: { name: 'NIKE FC SHOWDOWN', short: 'NIKE FC', mode: 'NIKE FC SHOWDOWN' },
+  62: { name: 'ADIDAS SOCCAR STRIKE', short: 'SOCCAR STRIKE', mode: 'SOCCAR STRIKE' },
+  64: { name: 'SPLIT SHOT', short: 'SPLIT SHOT', mode: 'SPLIT SHOT' },
+  65: { name: 'SPLIT SHOT DOUBLES', short: 'SPLIT SHOT 2V2', mode: 'SPLIT SHOT 2V2' },
+  66: { name: 'SPLIT SHOT HEATSEEKER', short: 'SPLIT HEATSEEKER', mode: 'SPLIT HEATSEEKER' },
+  67: { name: 'SPLIT SHOT HEATSEEKER DOUBLES', short: 'SPLIT HEATSEEKER 2V2', mode: 'SPLIT HEATSEEKER 2V2' },
+  68: { name: 'G-FORCE FRENZY', short: 'G-FORCE FRENZY', mode: 'G-FORCE FRENZY' },
+  70: { name: 'CAR WARS', short: 'CAR WARS', mode: 'CAR WARS' },
 };
 
 export function playlistLabels(id: number | null | undefined, fallbackName?: string): PlaylistLabels {
@@ -271,15 +318,40 @@ export function formatMatchClock(timeRemaining: number | undefined | null, isOve
 }
 
 const ROMAN_DIV = ['', 'I', 'II', 'III', 'IV'];
+const EMBEDDED_DIV_RE = /\s+(?:DIVISION|DIV\.?)\s*(IV|III|II|I|[1-4])\s*$/i;
+const HINT_DIV_RE = /(?:·\s*)?(?:DIVISION|DIV\.?|D)\s*(IV|III|II|I|[1-4])\s*$/i;
+
+function normalizeDivisionToken(token: string): string {
+  const upper = token.toUpperCase();
+  const numeric = Number(upper);
+  return numeric >= 1 && numeric <= 4 ? ROMAN_DIV[numeric] : upper;
+}
 
 /** Formats a rank name + division into compact broadcast format (e.g. "GC I · DIV II"). */
-export function shortRank(rankName?: string | null, division?: number | null): string {
-  if (!rankName) return 'UNRANKED';
-  const clean = rankName.trim();
+export function shortRank(
+  rankName?: string | null,
+  division?: number | null,
+  shortRankHint?: string | null,
+  tier?: number | null,
+): string {
+  const clean = (rankName || shortRankHint || '').trim();
   if (!clean || clean.toUpperCase() === 'UNRANKED') return 'UNRANKED';
   if (clean.includes('·')) return clean.toUpperCase();
 
-  const r = clean
+  let embeddedDiv = '';
+  let baseRank = clean;
+  const divMatch = clean.match(EMBEDDED_DIV_RE);
+  if (divMatch && divMatch.index !== undefined) {
+    embeddedDiv = normalizeDivisionToken(divMatch[1]);
+    baseRank = clean.slice(0, divMatch.index).trim();
+  } else if (shortRankHint) {
+    const hintMatch = shortRankHint.trim().match(HINT_DIV_RE);
+    if (hintMatch) {
+      embeddedDiv = normalizeDivisionToken(hintMatch[1]);
+    }
+  }
+
+  const r = baseRank
     .replace(/Supersonic Legend/i, 'SSL')
     .replace(/Grand Champion/i, 'GC')
     .replace(/Champion/i, 'CHAMP')
@@ -288,11 +360,37 @@ export function shortRank(rankName?: string | null, division?: number | null): s
     .replace(/Gold/i, 'GOLD')
     .replace(/Silver/i, 'SILV')
     .replace(/Bronze/i, 'BRNZ')
+    .replace(/\s+/g, ' ')
+    .trim()
     .toUpperCase();
 
+  if (!r || r === 'UNRANKED') return 'UNRANKED';
   if (r.startsWith('SSL')) return 'SSL';
-  const d = division && division >= 1 && division <= 4 ? ROMAN_DIV[division] : '';
+
+  const resolvedNumericDiv =
+    division != null && division >= 1 && division <= 4
+      ? ROMAN_DIV[division]
+      : division === 0 && tier != null && tier > 0 && tier < 22
+      ? 'I'
+      : '';
+  const d = embeddedDiv || resolvedNumericDiv;
   return d ? `${r} · DIV ${d}` : r;
+}
+
+/** Ultra-concise rank badge for tight grid cells (e.g. "GC I · D2", "PLAT II · D2", "SSL"). */
+export function compactRank(
+  rankName?: string | null,
+  division?: number | null,
+  shortRankHint?: string | null,
+  tier?: number | null,
+): string {
+  const full = shortRank(rankName, division, shortRankHint, tier);
+  if (full === 'UNRANKED' || full === 'SSL') return full;
+  return full
+    .replace(/\s*·\s*DIV\s+IV$/, ' · D4')
+    .replace(/\s*·\s*DIV\s+III$/, ' · D3')
+    .replace(/\s*·\s*DIV\s+II$/, ' · D2')
+    .replace(/\s*·\s*DIV\s+I$/, ' · D1');
 }
 
 export interface RelationshipTagInfo {
@@ -303,12 +401,18 @@ export interface RelationshipTagInfo {
   border: string;
 }
 
+export interface RelationshipTagOptions {
+  minGames?: number;
+  activeRole?: 'teammate' | 'opponent';
+}
+
 export function computeDynamicRelationshipTag(
   tw: number,
   tl: number,
   ow: number,
   ol: number,
   overrideLabel?: string | boolean,
+  options?: RelationshipTagOptions,
 ): RelationshipTagInfo {
   const make = (label: string, colorClass: string, border: string): RelationshipTagInfo => ({
     label,
@@ -321,6 +425,9 @@ export function computeDynamicRelationshipTag(
   if (typeof overrideLabel === 'string' && overrideLabel) {
     const up = overrideLabel.toUpperCase();
     if (up === 'YOU') return make('YOU', 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
+    if (up === 'RECENT ALLY' || up === 'RECENT FOE') {
+      return make(up, 't-text-muted text-muted t-border-2', 'border-line');
+    }
     if (up.includes('PRIME') || up.includes('SYNERGY')) return make(up, 't-text-win text-win t-border-win', 'border-win');
     if (up.includes('FAVORABLE')) return make(up, 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
     if (up.includes('NEMESIS') || up.includes('COLD')) return make(up, 't-text-loss text-loss t-border-loss', 'border-loss');
@@ -330,15 +437,31 @@ export function computeDynamicRelationshipTag(
   const tG = (tw || 0) + (tl || 0);
   const oG = (ow || 0) + (ol || 0);
   if (tG + oG === 0) return make('NO GAMES IN RANGE', 't-text-muted text-muted t-border-2', 'border-line');
-  const tWR = tG ? Math.round((tw / tG) * 100) : 0;
-  const oWR = oG ? Math.round((ow / oG) * 100) : 0;
 
-  if (tG >= oG) {
-    if (tWR >= 65 && tG >= 2) return make('PRIME DUO', 't-text-win text-win t-border-win', 'border-win');
-    if (tWR >= 50) return make('SYNERGY ALLY', 't-text-win text-win t-border-win', 'border-win');
+  const minGames = Math.max(1, options?.minGames ?? 3);
+  const tWR = tG ? (tw || 0) / tG : 0;
+  const oWR = oG ? (ow || 0) / oG : 0;
+
+  const evalTeammate = (): RelationshipTagInfo => {
+    if (tG < minGames) return make('RECENT ALLY', 't-text-muted text-muted t-border-2', 'border-line');
+    if (tWR >= 0.65) return make('PRIME DUO', 't-text-win text-win t-border-win', 'border-win');
+    if (tWR >= 0.5) return make('SYNERGY ALLY', 't-text-win text-win t-border-win', 'border-win');
     return make('COLD DUO', 't-text-loss text-loss t-border-loss', 'border-loss');
+  };
+
+  const evalOpponent = (): RelationshipTagInfo => {
+    if (oG < minGames) return make('RECENT FOE', 't-text-muted text-muted t-border-2', 'border-line');
+    if (oWR <= 0.4) return make('NEMESIS', 't-text-loss text-loss t-border-loss', 'border-loss');
+    if (oWR >= 0.6) return make('FAVORABLE FOE', 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
+    return make('ARCH-RIVAL', 't-text-orange text-orange-ink t-border-orange', 'border-orange-ink');
+  };
+
+  if (options?.activeRole === 'opponent' && oG > 0) {
+    return evalOpponent();
   }
-  if (oWR <= 40 && oG >= 2) return make('NEMESIS', 't-text-loss text-loss t-border-loss', 'border-loss');
-  if (oWR >= 60) return make('FAVORABLE FOE', 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
-  return make('ARCH-RIVAL', 't-text-orange text-orange-ink t-border-orange', 'border-orange-ink');
+  if (options?.activeRole === 'teammate' && tG > 0) {
+    return evalTeammate();
+  }
+
+  return tG >= oG ? evalTeammate() : evalOpponent();
 }

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { act } from 'react';
 import { LiveGameView, lobbyPlayers } from './LiveGameView';
 import { parityLabel } from './Scorebug';
 import { statInk } from './LivePlayerCard';
@@ -69,12 +70,12 @@ describe('LiveGameView — in match', () => {
     expect(bug.textContent).not.toContain('● LIVE');
   });
 
-  it('puts the local player on a "You" card with the session record', async () => {
+  it('puts the local player on a "You" card with the playlist-scoped session record', async () => {
     const { container } = await renderLive(liveMatch());
     const you = cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
     expect(you.className).toContain('border-blue-ink');
     expect(you.textContent).toContain('You');
-    expect(you.querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION4–1');
+    expect(you.querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION3–1');
   });
 
   it('labels teammates WITH YOU and opponents VS YOU using the matching record', async () => {
@@ -177,15 +178,16 @@ describe('LiveGameView — in match', () => {
     expect(container.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 
-  it('renders Threat, Carry, and Smurf detection badges and toggles historical split tables', async () => {
+  it('renders Threat, Carry, and Off-Mode Peak / Streak badges and toggles historical split tables', async () => {
     const { container } = await renderLive(liveMatch());
     expect(container.textContent).toContain('◆ HIGHER MMR');
-    expect(container.textContent).toContain('◆ CARRYING');
-    expect(container.textContent).toContain('◆ SMURF');
+    expect(container.textContent).toContain('◆ PARTY CARRY');
+    expect(container.textContent).toContain('◆ OFF-MODE PEAK');
+    expect(container.textContent).toContain('◆ HOT STREAK');
 
     const youCard = cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
     expect(youCard.textContent).toContain('YOU · ACTIVE SESSION');
-    expect(youCard.textContent).toContain('IN RANGE 4W–1L');
+    expect(youCard.textContent).toContain('IN RANGE 3W–1L');
     expect(youCard.textContent).toContain('NET MMR +29');
 
     const toggleBtn = container.querySelector<HTMLButtonElement>('#btn-toggle-live-hist')!;
@@ -198,27 +200,37 @@ describe('LiveGameView — in match', () => {
     expect(toggleBtn.textContent).toContain('HISTORICAL DATA: HIDDEN');
   });
 
-  it('scopes player card Rank/MMR and historical split stats when PLAYLIST SCOPE (3V3 / 1V1) is toggled', async () => {
+  it('scopes player card Rank/MMR, matchups_by_playlist H2H, and THIS SESSION W–L when PLAYLIST SCOPE (3V3 / 1V1) is toggled', async () => {
     const { container } = await renderLive(liveMatch());
     const aeroCard = () => cards(container).find((c) => c.dataset.playerId === 'Steam|76561198000000010|0')!;
+    const youCard = () => cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
 
-    // Default (ALL) shows 2v2 rank (1502)
+    // Default (ALL) shows 2v2 rank (1502), 2v2 H2H (4–1), and 2v2 session record (3–1)
     expect(aeroCard().textContent).toContain('1502');
+    expect(aeroCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('WITH YOU4–1');
+    expect(youCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION3–1');
 
-    // Switch to 3V3 -> AeroPulse's 3v3 rank is Grand Champion III (1795)
+    // Switch to 3V3 -> AeroPulse's 3v3 rank is Grand Champion III (1795), H2H uses matchups_by_playlist['13'] (2–0),
+    // 2v2 mechanical averages (446) are NOT misattributed to 3v3, and You's session record scopes to 3v3 (1–0, +11)
     const btn3v3 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
       (b) => b.textContent?.trim() === '3V3',
     )!;
-    btn3v3.click();
-    await new Promise((r) => setTimeout(r, 10));
+    await act(async () => {
+      btn3v3.click();
+    });
     expect(aeroCard().textContent).toContain('1795');
+    expect(aeroCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('WITH YOU2–0');
+    expect(aeroCard().textContent).not.toContain('446');
+    expect(youCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION1–0');
+    expect(youCard().textContent).toContain('NET MMR +11');
 
     // Switch to 1V1 -> AeroPulse has no 1v1 rank or matches -> UNRANKED and 0G dimmed rows
     const btn1v1 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
       (b) => b.textContent?.trim() === '1V1',
     )!;
-    btn1v1.click();
-    await new Promise((r) => setTimeout(r, 10));
+    await act(async () => {
+      btn1v1.click();
+    });
     expect(aeroCard().textContent).toContain('UNRANKED');
     expect(aeroCard().textContent).toContain('— NO MATCHES IN SELECTED RANGE —');
   });
@@ -249,8 +261,30 @@ describe('LiveGameView — between matches', () => {
 
     const kpis = container.querySelector('[data-testid="session-kpis"]')!;
     expect(kpis.textContent).toContain('4–1');
-    expect(kpis.textContent).toContain('+31');
+    expect(kpis.textContent).toContain('+29');
     expect(kpis.textContent).toContain('W2');
+  });
+
+  it('scopes IdleStateView KPIs and For/Against split when activePlaylist is passed while preserving full PlaylistRows', async () => {
+    const { container } = await mount(
+      <DashboardProvider>
+        <LiveGameView
+          match={null}
+          session={SAMPLE_SESSION_RESPONSE}
+          activePlaylist="13"
+          connection="connected"
+          columnsOpen={false}
+          onCloseColumns={noop}
+          onShowSession={noop}
+        />
+      </DashboardProvider>,
+    );
+    const kpis = container.querySelector('[data-testid="session-kpis"]')!;
+    expect(kpis.textContent).toContain('1–0');
+    expect(kpis.textContent).toContain('+11');
+    // Playlist progression still displays all played playlists in session
+    expect(container.textContent).toContain('RANKED DOUBLES');
+    expect(container.textContent).toContain('RANKED STANDARD');
   });
 
   it('reflects daemon connectivity in the status dots', async () => {

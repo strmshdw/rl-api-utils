@@ -170,11 +170,19 @@ func renderGoDTOs(schema DTOSchema) ([]byte, error) {
 		}
 		buf.WriteString(fmt.Sprintf("type %s struct {\n", d.Name))
 		for _, f := range d.Fields {
-			tag := f.JSON
+			jsonTag := f.JSON
 			if f.Omitempty {
-				tag += ",omitempty"
+				jsonTag += ",omitempty"
 			}
-			buf.WriteString(fmt.Sprintf("\t%s %s `json:%q`\n", f.Name, f.GoType, tag))
+			if f.YAML != "" {
+				yamlTag := f.YAML
+				if f.Omitempty {
+					yamlTag += ",omitempty"
+				}
+				buf.WriteString(fmt.Sprintf("\t%s %s `json:%q yaml:%q`\n", f.Name, f.GoType, jsonTag, yamlTag))
+			} else {
+				buf.WriteString(fmt.Sprintf("\t%s %s `json:%q`\n", f.Name, f.GoType, jsonTag))
+			}
 		}
 		buf.WriteString("}\n\n")
 	}

@@ -5,10 +5,12 @@ export {
   OUTCOME_SLAB,
   TEAM_INK,
   TEAM_SLAB_BORDER,
+  compactRank,
   computeDynamicRelationshipTag,
   deltaInk,
   findMvp,
   formatAgo,
+  formatArenaName,
   formatElapsed,
   formatMatchClock,
   formatMmr,
@@ -17,10 +19,14 @@ export {
   formatShortDate,
   formatSigned,
   localTeamOf,
+  matchesPlaylistFilter,
+  modeKeyFromPlaylistId,
   onlineIdOf,
   outcomeOf,
   platformLabel,
+  playlistFilterToParam,
   playlistLabels,
+  positioningRoleLabels,
   recordCells,
   recordFill,
   recordInk,
@@ -32,20 +38,35 @@ export {
   type CellKind,
   type Outcome,
   type PlaylistLabels,
+  type PositioningRoleLabels,
   type RelationshipTagInfo,
+  type RelationshipTagOptions,
 } from './broadcastLabels';
 
 export {
   chronological,
+  filterSessionByPlaylist,
   summarizeSession,
+  summarizeSessionPlaylists,
   type SessionKpi,
+  type SessionPlaylistBreakdownItem,
   type SessionSummary,
 } from './sessionSummary';
 
 export {
   computeLiveThreatBadges,
+  soccarEquivalentTier,
   type LiveThreatBadge,
 } from './threatBadges';
+
+export {
+  DEFAULT_STAMPING_CONFIG,
+  STAMPING_BOUNDS,
+  isStampingConfigPayload,
+  normalizeStampingConfig,
+  type NumericStampingBounds,
+  type StampingConfig,
+} from './stampingConfig';
 
 export {
   emptyRoleStats,

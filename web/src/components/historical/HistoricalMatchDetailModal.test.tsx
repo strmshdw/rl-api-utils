@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act } from 'react';
 import { HistoricalMatchDetailModal } from './HistoricalMatchDetailModal';
+import { orientedMatchSummary, playerNames, teamRows } from './historyData';
 import { HistoricalMatchRecord } from '../../types/api';
 import { cleanup, clickText, mount } from '../../test/dom';
 
@@ -40,9 +41,18 @@ const SAMPLE_HISTORICAL_MATCH: HistoricalMatchRecord = {
         saves: 2,
         shots: 4,
         demos: 1,
+        rank_name: 'Platinum II Division II',
+        division: 1,
         boost: { bpm: 550, avg_amount: 45.2, amount_collected: 2400 },
         movement: { avg_speed: 1450, percent_supersonic_speed: 18.5 },
-        positioning: { percent_defensive_third: 42.1, percent_neutral_third: 35.0, percent_offensive_third: 22.9 },
+        positioning: {
+          percent_defensive_third: 42.1,
+          percent_neutral_third: 35.0,
+          percent_offensive_third: 22.9,
+          percent_most_forward: 54.0,
+          percent_most_back: 46.0,
+          avg_distance_to_ball: 2450,
+        },
         demo: { inflicted: 1, taken: 0 },
       },
       {
@@ -87,9 +97,18 @@ const SAMPLE_HISTORICAL_MATCH: HistoricalMatchRecord = {
         saves: 2,
         shots: 4,
         demos: 1,
+        rank_name: 'Platinum II Division II',
+        division: 1,
         boost: { bpm: 550, avg_amount: 45.2, amount_collected: 2400 },
         movement: { avg_speed: 1450, percent_supersonic_speed: 18.5 },
-        positioning: { percent_defensive_third: 42.1, percent_neutral_third: 35.0, percent_offensive_third: 22.9 },
+        positioning: {
+          percent_defensive_third: 42.1,
+          percent_neutral_third: 35.0,
+          percent_offensive_third: 22.9,
+          percent_most_forward: 54.0,
+          percent_most_back: 46.0,
+          avg_distance_to_ball: 2450,
+        },
         demo: { inflicted: 1, taken: 0 },
       },
       {
@@ -146,34 +165,110 @@ describe('HistoricalMatchDetailModal', () => {
     // Tab 1: 1. CORE & MECHANICS (default)
     expect(container.textContent).toContain('BLUE TEAM TOTALS / AVG');
     expect(container.textContent).toContain('ORANGE TEAM TOTALS / AVG');
+    expect(container.textContent).toContain('PLAT II · DIV II');
 
-    // Tab 2: 2. BOOST ECONOMY & PADS
+    // Tab 2: 2. BOOST ECONOMY & PADS (BCPM header, no fabricated bpm * 0.96 = 528)
     await clickText(container, '2. BOOST ECONOMY & PADS');
     expect(container.textContent).toContain('BPM');
+    expect(container.textContent).toContain('BCPM');
+    expect(container.textContent).not.toContain('BCMPM');
     expect(container.textContent).toContain('AVG BST');
     expect(container.textContent).toContain('550');
+    expect(container.textContent).not.toContain('528'); // 550 * 0.96 must never be fabricated
 
-    // Tab 3: 3. SPEED & MOVEMENT
+    // Tab 3: 3. SPEED & MOVEMENT (native Unreal Units uu/s)
     await clickText(container, '3. SPEED & MOVEMENT');
     expect(container.textContent).toContain('AVG SPEED');
     expect(container.textContent).toContain('SUPERSONIC');
     expect(container.textContent).toContain('1450 uu/s');
+    expect(container.textContent).toContain('1380 uu/s');
+    expect(container.textContent).not.toContain('km/h');
 
-    // Tab 4: 4. POSITIONING & ROTATION
+    // Tab 4: 4. POSITIONING & ROTATION (2v2 shows 1ST MAN / 2ND MAN and native uu distance)
     await clickText(container, '4. POSITIONING & ROTATION');
     expect(container.textContent).toContain('DEF 1/3');
     expect(container.textContent).toContain('BEHIND BALL');
+    expect(container.textContent).toContain('1ST MAN');
+    expect(container.textContent).toContain('2ND MAN');
+    expect(container.textContent).not.toContain('3RD MAN');
+    expect(container.textContent).toContain('2450 uu');
+    expect(container.textContent).not.toContain('24.5 m');
 
-    // Tab 5: 5. TEAM HEAD-TO-HEAD
+    // Tab 5: 5. TEAM HEAD-TO-HEAD (clean AVG SUPERSONIC % without share-of-sum suffix, plus uu/s AVG SPEED)
     await clickText(container, '5. TEAM HEAD-TO-HEAD');
     expect(container.textContent).toContain('TEAM SCORE (PTS)');
     expect(container.textContent).toContain('TOTAL BOOST COLLECTED');
     expect(container.textContent).toContain('DEMOLITIONS INFLICTED');
+    expect(container.textContent).toContain('BLUE 18.5%');
+    expect(container.textContent).toContain('12% ORANGE');
+    expect(container.textContent).toContain('BLUE 1450 uu/s');
+    expect(container.textContent).toContain('1380 uu/s ORANGE');
+    expect(container.textContent).not.toContain('km/h');
 
     // Tab 6: RAW JSON tab
     await clickText(container, 'RAW JSON');
     expect(container.textContent).toContain('RAW TELEMETRY JSON');
     expect(container.textContent).toContain('COPY JSON');
+  });
+
+  it('hides teammate-relative rotation columns in 1v1 and formats UE3 arena codes in modal title', async () => {
+    const duelMatch: HistoricalMatchRecord = {
+      ...SAMPLE_HISTORICAL_MATCH,
+      map_name: 'stadium_10a_p',
+      playlist: 10,
+      stats: {
+        ...SAMPLE_HISTORICAL_MATCH.stats!,
+        map_name: 'stadium_10a_p',
+        playlist: 10,
+      },
+    };
+    const { container } = await mount(
+      <HistoricalMatchDetailModal match={duelMatch} onClose={vi.fn()} localPlayerIds={new Set(['steam_p1'])} />,
+    );
+    expect(container.textContent).toContain('DFH Stadium (10th Anniversary)');
+
+    await clickText(container, '4. POSITIONING & ROTATION');
+    expect(container.textContent).toContain('DEF 1/3');
+    expect(container.textContent).toContain('2450 uu');
+    expect(container.textContent).not.toContain('24.5 m');
+    expect(container.textContent).not.toContain('1ST MAN');
+    expect(container.textContent).not.toContain('2ND MAN');
+    expect(container.textContent).not.toContain('3RD MAN');
+    expect(container.textContent).not.toContain('MOST FWD');
+  });
+
+  it('deduplicates reconnect player entries in teamRows/playerNames and orients match summary to local player', () => {
+    const dupPlayers = [
+      { name: 'Me', platform: 'Steam', online_id: 'me_1', team: 1, score: 120, goals: 0, assists: 0, saves: 1, shots: 1, demos: 0, division: 2, rank_name: 'Grand Champion I' },
+      { name: 'Me', platform: 'Steam', online_id: 'me_1', team: 1, score: 540, goals: 2, assists: 1, saves: 3, shots: 4, demos: 1, division: 2, rank_name: 'Grand Champion I' },
+      { name: 'Mate', platform: 'Steam', online_id: 'mate_1', team: 1, score: 310, goals: 1, assists: 1, saves: 1, shots: 2, demos: 0, division: 3, rank_name: 'Champion III' },
+      { name: 'Opp', platform: 'Epic', online_id: 'opp_1', team: 0, score: 400, goals: 2, assists: 0, saves: 2, shots: 3, demos: 0 },
+      { name: 'Opp', platform: 'Epic', online_id: 'opp_1', team: 0, score: 90, goals: 0, assists: 0, saves: 0, shots: 0, demos: 0 },
+    ];
+    const localSet = new Set(['me_1']);
+    const rows = teamRows(dupPlayers, 1, localSet);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].name).toBe('You');
+    expect(rows[0].score).toBe(540);
+    expect(rows[0].division).toBe(2);
+    expect(playerNames(dupPlayers, localSet)).toBe('Opp vs You, Mate');
+
+    const oriented = orientedMatchSummary(
+      {
+        ...SAMPLE_HISTORICAL_MATCH,
+        blue_score: 2,
+        orange_score: 3,
+        stats: { ...SAMPLE_HISTORICAL_MATCH.stats!, players: dupPlayers },
+      },
+      localSet,
+    );
+    expect(oriented).toEqual({
+      myTeam: 1,
+      myScore: 3,
+      oppScore: 2,
+      myTeamInk: 'text-orange-ink',
+      rosterText: 'You + Mate vs Opp',
+    });
   });
 
   it('invokes onPlayerClick when a player row is clicked', async () => {

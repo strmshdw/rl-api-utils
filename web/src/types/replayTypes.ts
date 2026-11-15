@@ -158,7 +158,7 @@ export interface ReplayPlayer {
   car_name?: string;
   camera?: CameraSettings;
   steering_sensitivity?: number;
-  rank?: { id?: string; tier?: number; division?: number; name?: string; mmr?: number };
+  rank?: { id?: string; tier?: number; division?: number; name?: string; short_rank?: string; mmr?: number };
   mvp?: boolean;
   score: number;
   goals: number;
@@ -249,7 +249,7 @@ export interface ReplayPlayerStats {
   mvp?: boolean;
   camera?: CameraSettings;
   steering_sensitivity?: number;
-  rank?: { id?: string; tier?: number; division?: number; name?: string; mmr?: number };
+  rank?: { id?: string; tier?: number; division?: number; name?: string; short_rank?: string; mmr?: number };
   rank_name?: string;
   short_rank?: string;
   mmr?: number;

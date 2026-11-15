@@ -144,7 +144,7 @@ func MatchesRoleFilter(sRec *PlayerSummary, filter PlayerDirectoryFilter) bool {
 	case "frequent":
 		minM := filter.MinMatches
 		if minM <= 0 {
-			minM = 3
+			minM = 2
 		}
 		return sRec.TotalMatches >= minM
 	case "teammate":
@@ -154,11 +154,11 @@ func MatchesRoleFilter(sRec *PlayerSummary, filter PlayerDirectoryFilter) bool {
 	case "synergy":
 		minGames := filter.MinSynergyGames
 		if minGames <= 0 {
-			minGames = 2
+			minGames = 1
 		}
 		minWR := filter.MinSynergyWR
 		if minWR <= 0 {
-			minWR = 60.0
+			minWR = 50.0
 		}
 		tmGames := sRec.TotalWinsAsTeammate + sRec.TotalLossesAsTeammate
 		if tmGames < minGames {

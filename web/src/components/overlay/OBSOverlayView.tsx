@@ -1,11 +1,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CurrentMatchResponse, SessionResponse, SessionMatchDetail } from '../../types/api';
+import { CurrentMatchResponse, PlaylistSessionStats, SessionResponse, SessionMatchDetail } from '../../types/api';
 import { sharedSSEManager, ClockUpdatePayload } from '../../context/SSEContext';
-import { deltaInk, formatPct, formatRecord, formatSigned, playlistLabels, formatMatchClock } from '../../utils/broadcast';
+import {
+  deltaInk,
+  formatPct,
+  formatRecord,
+  formatSigned,
+  playlistFilterToParam,
+  playlistLabels,
+  formatMatchClock,
+} from '../../utils/broadcast';
+import { isDemoMode, SAMPLE_CURRENT_MATCH, SAMPLE_SESSION_RESPONSE } from '../../utils/sampleData';
 
 export const OBSOverlayView: React.FC = () => {
-  const [currentMatch, setCurrentMatch] = useState<CurrentMatchResponse | null>(null);
-  const [session, setSession] = useState<SessionResponse | null>(null);
+  const [currentMatch, setCurrentMatch] = useState<CurrentMatchResponse | null>(() =>
+    isDemoMode() ? SAMPLE_CURRENT_MATCH : null,
+  );
+  const [session, setSession] = useState<SessionResponse | null>(() =>
+    isDemoMode() ? SAMPLE_SESSION_RESPONSE : null,
+  );
 
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const theme = params.get('theme') || 'dark';
@@ -30,15 +43,42 @@ export const OBSOverlayView: React.FC = () => {
   // Poll or SSE stream for real-time match state
   useEffect(() => {
     const fetchData = async () => {
+      const demo = isDemoMode();
       try {
         const [matchRes, sessRes] = await Promise.all([
           fetch('/api/current-match'),
           fetch('/api/session'),
         ]);
-        if (matchRes.ok) setCurrentMatch(await matchRes.json());
-        if (sessRes.ok) setSession(await sessRes.json());
+        if (matchRes.ok) {
+          const mData: CurrentMatchResponse = await matchRes.json();
+          if (mData && (mData.active_match || mData.match_ended)) {
+            setCurrentMatch(mData);
+          } else if (demo) {
+            setCurrentMatch(SAMPLE_CURRENT_MATCH);
+          } else {
+            setCurrentMatch(mData);
+          }
+        } else if (demo) {
+          setCurrentMatch((prev) => prev ?? SAMPLE_CURRENT_MATCH);
+        }
+
+        if (sessRes.ok) {
+          const sData: SessionResponse = await sessRes.json();
+          if (sData && (sData.total_matches > 0 || (sData.matches && sData.matches.length > 0))) {
+            setSession(sData);
+          } else if (demo) {
+            setSession(SAMPLE_SESSION_RESPONSE);
+          } else {
+            setSession(sData);
+          }
+        } else if (demo) {
+          setSession((prev) => prev ?? SAMPLE_SESSION_RESPONSE);
+        }
       } catch {
-        // Overlay silently retries
+        if (demo) {
+          setCurrentMatch((prev) => prev ?? SAMPLE_CURRENT_MATCH);
+          setSession((prev) => prev ?? SAMPLE_SESSION_RESPONSE);
+        }
       }
     };
 
@@ -109,14 +149,40 @@ export const OBSOverlayView: React.FC = () => {
   for (const p of bluePlayers) blueScore += p.stats?.goals || 0;
   for (const p of orangePlayers) orangeScore += p.stats?.goals || 0;
 
-  const totalWins = session?.total_wins ?? 0;
-  const totalLosses = session?.total_losses ?? 0;
-  const winPct = formatPct(totalWins, totalLosses);
+  // Resolve active playlist stats so SESSION W–L and MMR delta always belong to the same playlist
+  const activePlaylistStats: PlaylistSessionStats | null = useMemo(() => {
+    const playlists = session?.playlists;
+    if (!playlists) return null;
 
-  // Active playlist MMR delta
-  const activePlaylistStats = currentMatch?.playlist_id && session?.playlists
-    ? session.playlists[currentMatch.playlist_id.toString()] || session.playlists[currentMatch.playlist_id]
-    : null;
+    if (currentMatch?.playlist_id) {
+      const direct = playlists[String(currentMatch.playlist_id)] || playlists[currentMatch.playlist_id];
+      if (direct) return direct;
+    }
+
+    try {
+      const storedMode = window.localStorage?.getItem('rlsync_active_playlist');
+      const normalized = storedMode ? playlistFilterToParam(storedMode) : '';
+      if (normalized && playlists[normalized]) {
+        return playlists[normalized];
+      }
+    } catch {
+      // Ignore storage access errors in sandboxed browser sources
+    }
+
+    if (session?.most_played_playlist?.id) {
+      const mostPlayed = playlists[String(session.most_played_playlist.id)];
+      if (mostPlayed) return mostPlayed;
+    }
+
+    const entries = Object.values(playlists);
+    if (entries.length === 0) return null;
+    return [...entries].sort((a, b) => (b.matches_played || 0) - (a.matches_played || 0))[0] ?? null;
+  }, [currentMatch?.playlist_id, session?.playlists, session?.most_played_playlist?.id]);
+
+  const scopedWins = activePlaylistStats ? activePlaylistStats.wins : (session?.total_wins ?? 0);
+  const scopedLosses = activePlaylistStats ? activePlaylistStats.losses : (session?.total_losses ?? 0);
+  const winPct = formatPct(scopedWins, scopedLosses);
+
   const mmrDelta = activePlaylistStats?.mmr_delta ?? 0;
   const playlistShort = playlistLabels(currentMatch?.playlist_id, currentMatch?.playlist_name).short;
 
@@ -124,8 +190,8 @@ export const OBSOverlayView: React.FC = () => {
     <div className="bg-panel flex flex-col justify-center px-4">
       <span className="font-semibold text-[11px] tracking-t14 text-muted-2">SESSION</span>
       <span className="font-extrabold text-[20px] leading-none whitespace-nowrap">
-        {formatRecord(totalWins, totalLosses)}
-        {winPct && <span className="text-muted text-[14px] font-semibold"> {winPct}</span>}
+        {session ? formatRecord(scopedWins, scopedLosses) : '—'}
+        {session && winPct && <span className="text-muted text-[14px] font-semibold"> {winPct}</span>}
       </span>
     </div>
   );

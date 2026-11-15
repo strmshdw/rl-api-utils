@@ -228,45 +228,6 @@ func (s *SQLiteStore) FilterPlayerSummaries(ctx context.Context, filter PlayerDi
 	return results, total, nil
 }
 
-// GetPlayerSpotlights computes dataset-wide global spotlights (Best Teammate, Most Faced, Toughest Rival).
-func (s *SQLiteStore) GetPlayerSpotlights(ctx context.Context) (*GlobalSpotlights, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, wrapContextErr(err)
-	}
-
-	const query = `
-	SELECT p.player_id, p.platform, p.player_name, p.ranks_json, p.notes, p.tags, p.first_seen_at, p.last_seen_at,
-	       COALESCE(SUM(m.wins_as_teammate), 0) AS total_wins_teammate,
-	       COALESCE(SUM(m.losses_as_teammate), 0) AS total_losses_teammate,
-	       COALESCE(SUM(m.wins_as_opponent), 0) AS total_wins_opponent,
-	       COALESCE(SUM(m.losses_as_opponent), 0) AS total_losses_opponent,
-	       COALESCE(SUM(m.total_matches), 0) AS total_matches
-	FROM players p
-	JOIN player_matchups m ON p.player_id = m.player_id
-	GROUP BY p.player_id
-	HAVING total_matches > 0
-	ORDER BY p.player_id ASC;
-	`
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, wrapContextErr(fmt.Errorf("failed to query spotlight candidates: %w", err))
-	}
-	defer rows.Close()
-
-	candidates := make([]*PlayerSummary, 0)
-	for rows.Next() {
-		sRec, scanErr := scanPlayerSummaryRow(rows)
-		if scanErr != nil {
-			return nil, wrapContextErr(fmt.Errorf("failed to scan spotlight candidate: %w", scanErr))
-		}
-		candidates = append(candidates, sRec)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, wrapContextErr(fmt.Errorf("spotlight candidate iteration error: %w", err))
-	}
-	return ComputeGlobalSpotlights(candidates), nil
-}
-
 // ComputePlayerSplitStats computes WITH YOU (teammate) and AGAINST YOU (opponent, local win/loss perspective)
 // Core + Ballchasing Mechanics stats for a player, optionally scoped to playlistIDs and [fromUnix, toUnix].
 func (s *SQLiteStore) ComputePlayerSplitStats(

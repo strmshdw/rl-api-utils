@@ -222,7 +222,11 @@ func applyMatchEnrichment(matchGUID string, playlist int, mr *MatchRecord, st *R
 			if matched.isLocal && localMMR.mmr > 0 {
 				mmr = localMMR.mmr
 				if localMMR.tier > 0 && (tier != localMMR.tier || div == 0) {
-					tier, div = localMMR.tier, localMMR.div
+					tier = localMMR.tier
+					div = localMMR.div
+					if div == 0 && tier < 22 {
+						div = 1
+					}
 				}
 			}
 			applyRankToReplayPlayer(sp, tier, div, mmr)
@@ -259,7 +263,11 @@ func applyMatchEnrichment(matchGUID string, playlist int, mr *MatchRecord, st *R
 			if mp.isLocal && localMMR.mmr > 0 {
 				mmr = localMMR.mmr
 				if localMMR.tier > 0 && (tier != localMMR.tier || div == 0) {
-					tier, div = localMMR.tier, localMMR.div
+					tier = localMMR.tier
+					div = localMMR.div
+					if div == 0 && tier < 22 {
+						div = 1
+					}
 				}
 			}
 			applyRankToReplayPlayer(&sp, tier, div, mmr)

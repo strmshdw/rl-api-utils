@@ -31,6 +31,9 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
       division: 2,
       rank_name: 'Grand Champion I',
       mmr: 1485,
+      matches_played: 165,
+      sigma: 2.5,
+      win_streak: 2,
     },
     ranks: {
       '10': {
@@ -40,6 +43,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 2,
         rank_name: 'Champion II',
         mmr: 1120,
+        matches_played: 34,
+        sigma: 2.5,
       },
       '11': {
         playlist_id: 11,
@@ -48,6 +53,9 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 2,
         rank_name: 'Grand Champion I',
         mmr: 1485,
+        matches_played: 165,
+        sigma: 2.5,
+        win_streak: 2,
       },
       '13': {
         playlist_id: 13,
@@ -56,6 +64,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 1,
         rank_name: 'Grand Champion I',
         mmr: 1460,
+        matches_played: 78,
+        sigma: 2.5,
       },
     },
     in_wins_stats: /*#__PURE__*/ synthesizeRoleStats(4, 4, 0, {
@@ -102,6 +112,9 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 3,
         rank_name: 'Grand Champion I',
         mmr: 1502,
+        matches_played: 142,
+        sigma: 2.5,
+        win_streak: 4,
       },
       ranks: {
         '11': {
@@ -111,6 +124,9 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 3,
           rank_name: 'Grand Champion I',
           mmr: 1502,
+          matches_played: 142,
+          sigma: 2.5,
+          win_streak: 4,
         },
         '13': {
           playlist_id: 13,
@@ -119,6 +135,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 2,
           rank_name: 'Grand Champion III',
           mmr: 1795,
+          matches_played: 88,
+          sigma: 2.5,
         },
       },
       matchup_record: {
@@ -130,6 +148,38 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         losses_as_opponent: 1,
         total_matches: 8,
         last_played_at: /*#__PURE__*/ isoAgo(3600000),
+      },
+      matchups_by_playlist: {
+        '11': {
+          player_id: 'Steam|76561198000000010|0',
+          playlist_id: 11,
+          wins_as_teammate: 4,
+          losses_as_teammate: 1,
+          wins_as_opponent: 2,
+          losses_as_opponent: 1,
+          total_matches: 8,
+          last_played_at: /*#__PURE__*/ isoAgo(3600000),
+        },
+        '13': {
+          player_id: 'Steam|76561198000000010|0',
+          playlist_id: 13,
+          wins_as_teammate: 2,
+          losses_as_teammate: 0,
+          wins_as_opponent: 1,
+          losses_as_opponent: 0,
+          total_matches: 3,
+          last_played_at: /*#__PURE__*/ isoAgo(7200000),
+        },
+        '10': {
+          player_id: 'Steam|76561198000000010|0',
+          playlist_id: 10,
+          wins_as_teammate: 0,
+          losses_as_teammate: 0,
+          wins_as_opponent: 0,
+          losses_as_opponent: 0,
+          total_matches: 0,
+          last_played_at: '',
+        },
       },
       with_you_stats: /*#__PURE__*/ synthesizeRoleStats(5, 4, 1, {
         avg_score: 446,
@@ -176,6 +226,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 4,
         rank_name: 'Champion III',
         mmr: 1414,
+        matches_played: 110,
+        sigma: 2.5,
       },
       ranks: {
         '11': {
@@ -185,6 +237,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 4,
           rank_name: 'Champion III',
           mmr: 1414,
+          matches_played: 110,
+          sigma: 2.5,
         },
         '13': {
           playlist_id: 13,
@@ -193,6 +247,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 1,
           rank_name: 'Supersonic Legend',
           mmr: 1890,
+          matches_played: 215,
+          sigma: 2.5,
         },
       },
       matchup_record: {
@@ -204,6 +260,38 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         losses_as_opponent: 3,
         total_matches: 6,
         last_played_at: /*#__PURE__*/ isoAgo(7200000),
+      },
+      matchups_by_playlist: {
+        '11': {
+          player_id: 'Steam|76561198000000020|0',
+          playlist_id: 11,
+          wins_as_teammate: 1,
+          losses_as_teammate: 0,
+          wins_as_opponent: 2,
+          losses_as_opponent: 3,
+          total_matches: 6,
+          last_played_at: /*#__PURE__*/ isoAgo(7200000),
+        },
+        '13': {
+          player_id: 'Steam|76561198000000020|0',
+          playlist_id: 13,
+          wins_as_teammate: 0,
+          losses_as_teammate: 1,
+          wins_as_opponent: 1,
+          losses_as_opponent: 2,
+          total_matches: 4,
+          last_played_at: /*#__PURE__*/ isoAgo(14400000),
+        },
+        '10': {
+          player_id: 'Steam|76561198000000020|0',
+          playlist_id: 10,
+          wins_as_teammate: 0,
+          losses_as_teammate: 0,
+          wins_as_opponent: 1,
+          losses_as_opponent: 2,
+          total_matches: 3,
+          last_played_at: /*#__PURE__*/ isoAgo(28800000),
+        },
       },
       with_you_stats: /*#__PURE__*/ synthesizeRoleStats(1, 1, 0, {
         avg_score: 410,
@@ -248,6 +336,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 2,
         rank_name: 'Grand Champion II',
         mmr: 1580,
+        matches_played: 190,
+        sigma: 2.5,
       },
       ranks: {
         '11': {
@@ -257,6 +347,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 2,
           rank_name: 'Grand Champion II',
           mmr: 1580,
+          matches_played: 190,
+          sigma: 2.5,
         },
         '13': {
           playlist_id: 13,
@@ -265,6 +357,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 1,
           rank_name: 'Grand Champion II',
           mmr: 1595,
+          matches_played: 95,
+          sigma: 2.5,
         },
       },
       matchup_record: {
@@ -276,6 +370,38 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         losses_as_opponent: 1,
         total_matches: 2,
         last_played_at: /*#__PURE__*/ isoAgo(86400000),
+      },
+      matchups_by_playlist: {
+        '11': {
+          player_id: 'PS4|psn_zenith99|0',
+          playlist_id: 11,
+          wins_as_teammate: 0,
+          losses_as_teammate: 0,
+          wins_as_opponent: 1,
+          losses_as_opponent: 1,
+          total_matches: 2,
+          last_played_at: /*#__PURE__*/ isoAgo(86400000),
+        },
+        '13': {
+          player_id: 'PS4|psn_zenith99|0',
+          playlist_id: 13,
+          wins_as_teammate: 1,
+          losses_as_teammate: 0,
+          wins_as_opponent: 0,
+          losses_as_opponent: 1,
+          total_matches: 2,
+          last_played_at: /*#__PURE__*/ isoAgo(172800000),
+        },
+        '10': {
+          player_id: 'PS4|psn_zenith99|0',
+          playlist_id: 10,
+          wins_as_teammate: 0,
+          losses_as_teammate: 0,
+          wins_as_opponent: 1,
+          losses_as_opponent: 0,
+          total_matches: 1,
+          last_played_at: /*#__PURE__*/ isoAgo(259200000),
+        },
       },
       with_you_stats: /*#__PURE__*/ synthesizeRoleStats(0, 0, 0),
       against_you_stats: /*#__PURE__*/ synthesizeRoleStats(2, 1, 1, {

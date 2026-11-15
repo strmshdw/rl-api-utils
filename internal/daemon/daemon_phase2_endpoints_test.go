@@ -165,8 +165,9 @@ func TestDaemon_HTTP_Phase2_PlayersMatchesSessionAndPrune(t *testing.T) {
 	if oppDetail.AgainstYouStats.AvgBPM != 465.0 {
 		t.Errorf("expected against_you_stats AvgBPM=465.0, got %v", oppDetail.AgainstYouStats.AvgBPM)
 	}
-	if oppDetail.RelationshipTag != "NEMESIS" {
-		t.Errorf("expected relationship_tag=NEMESIS on Day 2 loss, got %q", oppDetail.RelationshipTag)
+	// With Option 5 default RelationshipMinGames=3, a single 0-1 game in range is RECENT FOE (not a 1-game NEMESIS false alarm).
+	if oppDetail.RelationshipTag != "RECENT FOE" {
+		t.Errorf("expected relationship_tag=RECENT FOE on single Day 2 loss (min_games=3), got %q", oppDetail.RelationshipTag)
 	}
 
 	// 3. Verify GET /api/players/{id}/matches?result=defeat evaluates defeat from local ("US") perspective

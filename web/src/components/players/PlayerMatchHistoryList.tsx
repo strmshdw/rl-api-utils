@@ -2,8 +2,13 @@ import React, { useState } from 'react';
 import { PlayerMatchDetail } from '../../types/api';
 import { TeamBoxScore } from '../common/BoxScore';
 import { SectionLabel } from '../common/ui';
-import { teamRows } from '../historical/historyData';
-import { formatAgo, OUTCOME_SLAB, playlistLabels } from '../../utils/broadcast';
+import { orientedMatchSummary, teamRows } from '../historical/historyData';
+import {
+  formatAgo,
+  formatArenaName,
+  OUTCOME_SLAB,
+  playlistLabels,
+} from '../../utils/broadcast';
 import {
   ProfileResultFilter,
   ProfileRoleFilter,
@@ -20,8 +25,8 @@ interface PlayerMatchHistoryListProps {
   matchPage: number;
   totalPages: number;
   setMatchPage: React.Dispatch<React.SetStateAction<number>>;
-  roleFilter: ProfileRoleFilter;
-  setRoleFilter: React.Dispatch<React.SetStateAction<ProfileRoleFilter>>;
+  roleFilter?: ProfileRoleFilter;
+  setRoleFilter?: React.Dispatch<React.SetStateAction<ProfileRoleFilter>>;
   resultFilter: ProfileResultFilter;
   setResultFilter: React.Dispatch<React.SetStateAction<ProfileResultFilter>>;
   searchQuery: string;
@@ -43,8 +48,6 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
   matchPage,
   totalPages,
   setMatchPage,
-  roleFilter,
-  setRoleFilter,
   resultFilter,
   setResultFilter,
   searchQuery,
@@ -76,36 +79,13 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
               <input
                 type="search"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="SEARCH ARENA OR GUID..."
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setMatchPage(1);
+                }}
+                placeholder="SEARCH ARENA, PLAYER OR GUID..."
                 className="h-[36px] t-bg-panel bg-panel t-border border border-outline px-3 text-sm font-bold t-text-strong text-ink-strong uppercase outline-none t-radius"
               />
-
-              <div className="flex t-border border border-outline t-bg-panel bg-panel t-radius overflow-hidden">
-                {(
-                  [
-                    ['all', 'ALL ROLES'],
-                    ['teammate', 'WITH YOU'],
-                    ['opponent', 'AGAINST'],
-                  ] as const
-                ).map(([k, l]) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => {
-                      setRoleFilter(k);
-                      setMatchPage(1);
-                    }}
-                    className={`px-2.5 py-1.5 uppercase cursor-pointer ${
-                      roleFilter === k
-                        ? 't-bg-ink bg-ink text-page'
-                        : 'text-muted hover:text-ink'
-                    }`}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
 
               <div className="flex t-border border border-outline t-bg-panel bg-panel t-radius overflow-hidden">
                 {(
@@ -136,7 +116,10 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
               <select
                 aria-label="Sort player matches"
                 value={sortOption}
-                onChange={(e) => setSortOption(e.target.value as ProfileSortOption)}
+                onChange={(e) => {
+                  setSortOption(e.target.value as ProfileSortOption);
+                  setMatchPage(1);
+                }}
                 className="h-[36px] t-bg-panel bg-panel t-border border border-outline px-2.5 t-text-strong text-ink-strong font-extrabold uppercase outline-none t-radius"
               >
                 <option value="date-desc">SORT: NEWEST FIRST</option>
@@ -195,10 +178,28 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
                 ? 'L'
                 : null;
 
+            const baseOriented = orientedMatchSummary(m, localPlayerIds);
+            const hasTeamInfo =
+              Boolean(m.stats?.players?.length) ||
+              m.player_stats?.team_num === 0 ||
+              m.player_stats?.team_num === 1;
+            const flipFallback =
+              !hasTeamInfo &&
+              ((outcome === 'W' && baseOriented.myScore < baseOriented.oppScore) ||
+                (outcome === 'L' && baseOriented.myScore > baseOriented.oppScore));
+
+            const myTeam = flipFallback
+              ? (baseOriented.myTeam === 0 ? 1 : 0)
+              : baseOriented.myTeam;
+            const myScore = flipFallback ? baseOriented.oppScore : baseOriented.myScore;
+            const oppScore = flipFallback ? baseOriented.myScore : baseOriented.oppScore;
+            const myTeamInk = myTeam === 0 ? 'text-blue-ink' : 'text-orange-ink';
+            const oppTeamInk = myTeam === 0 ? 'text-orange-ink' : 'text-blue-ink';
+
             return (
               <div
                 key={m.match_guid}
-                className="t-bg-panel bg-panel t-border border border-line flex flex-col"
+                className="t-bg-panel bg-panel t-border border border-line flex flex-col t-num"
               >
                 <div
                   role="button"
@@ -207,29 +208,36 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
                   onClick={() =>
                     setOpenMatchGuid((cur) => (cur === m.match_guid ? null : m.match_guid))
                   }
-                  className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-panel-hover transition-colors"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setOpenMatchGuid((cur) => (cur === m.match_guid ? null : m.match_guid));
+                    }
+                  }}
+                  className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer hover:bg-panel-hover transition-colors"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     {outcome && (
                       <span
-                        className={`font-extrabold text-sm px-2 py-0.5 text-page rounded ${OUTCOME_SLAB[outcome]}`}
+                        className={`font-extrabold text-sm px-2 py-0.5 text-page rounded shrink-0 ${OUTCOME_SLAB[outcome]}`}
                       >
                         {outcome === 'W' ? 'WIN' : 'LOSS'}
                       </span>
                     )}
-                    <span className="font-extrabold text-lg t-font-mono">
-                      <span className="text-blue-ink">{m.blue_score}</span>
+                    <span className="font-extrabold text-lg t-font-mono whitespace-nowrap shrink-0">
+                      <span className={myTeamInk}>{myScore}</span>
                       <span className="text-muted"> – </span>
-                      <span className="text-orange-ink">{m.orange_score}</span>
+                      <span className={oppTeamInk}>{oppScore}</span>
                     </span>
                     <span className="font-bold text-base truncate uppercase">
-                      {playlistLabels(m.playlist).name} · {m.map_name || 'Arena'}
+                      {playlistLabels(m.playlist).name} ·{' '}
+                      {formatArenaName(m.map_name || m.stats?.map_name)}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     <span
-                      className={`text-sm font-bold px-2 py-0.5 rounded ${
+                      className={`text-sm font-bold px-2 py-0.5 rounded whitespace-nowrap ${
                         m.role === 'teammate'
                           ? 'bg-win/15 text-win'
                           : 'bg-orange-slab/20 text-orange-ink'
@@ -237,10 +245,12 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
                     >
                       {m.role === 'teammate' ? 'WITH YOU' : 'VS YOU'}
                     </span>
-                    <span className="text-muted text-sm">
+                    <span className="text-muted text-sm whitespace-nowrap">
                       {formatAgo(m.stats?.date || m.created_at)}
                     </span>
-                    <span className="text-muted text-sm">{isExpanded ? '▲' : '▼'}</span>
+                    <span aria-hidden="true" className="text-muted text-sm">
+                      {isExpanded ? '▲' : '▼'}
+                    </span>
                   </div>
                 </div>
 

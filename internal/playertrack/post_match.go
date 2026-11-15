@@ -155,6 +155,7 @@ func (t *Tracker) OnMatchEnded(ctx context.Context, matchGUID string, winnerTeam
 	t.mu.Lock()
 	for _, o := range outcomes {
 		delete(t.matchupCache, fmt.Sprintf("%s:%d", o.PlayerID, playlistID))
+		delete(t.matchupsByPlaylistCache, o.PlayerID)
 	}
 	t.mu.Unlock()
 
@@ -255,6 +256,19 @@ func compileMatchOutcomes(matchState *CurrentMatchResponse, localPlayerID string
 	return outcomes
 }
 
+func resolve1BasedRankDivision(r *PlayerPlaylistRank) int {
+	if r == nil || r.Tier <= 0 || r.Tier >= 22 {
+		return 0
+	}
+	if resolved := storage.Resolve1BasedDivision(r.Division, r.RankName); resolved >= 1 && resolved <= 4 {
+		return resolved
+	}
+	if r.Division == 0 {
+		return 1
+	}
+	return 0
+}
+
 func (t *Tracker) persistMMRSnapshot(
 	ctx context.Context,
 	matchGUID string,
@@ -285,7 +299,7 @@ func (t *Tracker) persistMMRSnapshot(
 		MMR:        newMMRInt,
 		MMRChange:  int(math.Round(mmrDelta)),
 		Tier:       newRank.Tier,
-		Division:   newRank.Division,
+		Division:   resolve1BasedRankDivision(newRank),
 		RecordedAt: recordedAt,
 	})
 	if reconciler, ok := listener.(PostMatchMMRReconciler); ok {

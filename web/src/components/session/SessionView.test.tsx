@@ -253,4 +253,39 @@ describe('SessionView', () => {
     );
     expect(bufferBar.textContent).toContain('RL BUFFER: 7/20 UNSYNCED');
   });
+
+  it('renders SessionModeBreakdownStrip, removes duplicate stat-mode button, and scopes KPIs, For/Against, and match rows per mode', async () => {
+    const onSelectPlaylist = vi.fn();
+    const { container } = await renderSession(SAMPLE_SESSION_RESPONSE, { onSelectPlaylist });
+
+    const strip = container.querySelector('[data-testid="session-mode-breakdown"]')!;
+    expect(strip).not.toBeNull();
+    expect(strip.textContent).toContain('2V2 DOUBLES');
+    expect(strip.textContent).toContain('3V3 STANDARD');
+    expect(strip.textContent).toContain('ALL SESSION (5)');
+
+    // SessionForAgainstTable preserves badge without duplicate SWITCH TO TOTALS button
+    const splitTable = container.querySelector('[data-testid="session-for-against-table"]')!;
+    expect(splitTable.textContent).toContain('SHOWING PER-GAME AVERAGES');
+    expect(splitTable.textContent).not.toContain('SWITCH TO');
+
+    // Click 2V2 DOUBLES in breakdown strip -> scopes KPIs (3–1, +29, +5), For/Against (4G), and match rows (4)
+    await clickText(strip, '2V2 DOUBLES');
+    expect(onSelectPlaylist).toHaveBeenCalledWith('11');
+    const kpis = container.querySelector('[data-testid="session-kpis"]')!;
+    expect(kpis.querySelector('[data-kpi="record"]')!.textContent).toContain('3–1');
+    expect(kpis.querySelector('[data-kpi="mmr"]')!.textContent).toContain('+29');
+    expect(kpis.querySelector('[data-kpi="goals"]')!.textContent).toContain('11 FOR · 6 AGAINST');
+    expect(splitTable.textContent).toContain('4G');
+    expect(rows(container)).toHaveLength(4);
+
+    // Click 3V3 STANDARD in breakdown strip -> scopes KPIs (1–0, +11, +3), For/Against (1G), and match rows (1)
+    await clickText(strip, '3V3 STANDARD');
+    expect(onSelectPlaylist).toHaveBeenCalledWith('13');
+    expect(kpis.querySelector('[data-kpi="record"]')!.textContent).toContain('1–0');
+    expect(kpis.querySelector('[data-kpi="mmr"]')!.textContent).toContain('+11');
+    expect(kpis.querySelector('[data-kpi="goals"]')!.textContent).toContain('5 FOR · 2 AGAINST');
+    expect(splitTable.textContent).toContain('1G');
+    expect(rows(container)).toHaveLength(1);
+  });
 });

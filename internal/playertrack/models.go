@@ -50,9 +50,12 @@ type LobbyPlayer struct {
 	IsBot          bool                   `json:"is_bot"`                    // True if AI bot ("Unknown|0|0")
 	IsDisconnected bool                   `json:"is_disconnected,omitempty"` // True if player left the active game early
 	Stats          PlayerStatsSummary     `json:"stats"`                     // Real-time in-game box score
-	CurrentRank    *PlayerPlaylistRank    `json:"current_rank,omitempty"`    // Rank for active match playlist
-	Ranks          PlayerRanksSnapshot    `json:"ranks,omitempty"`           // Full snapshot across all playlists
-	MatchupRecord  *storage.PlayerMatchup `json:"matchup_record,omitempty"`  // H2H record in this playlist
+	CurrentRank        *PlayerPlaylistRank               `json:"current_rank,omitempty"`         // Rank for active match playlist
+	Ranks              PlayerRanksSnapshot               `json:"ranks,omitempty"`                // Full snapshot across all playlists
+	MatchupRecord      *storage.PlayerMatchup            `json:"matchup_record,omitempty"`       // H2H record in this playlist
+	MatchupsByPlaylist map[string]*storage.PlayerMatchup `json:"matchups_by_playlist,omitempty"` // H2H records across all playlists keyed by playlist ID
+	Notes              string                            `json:"notes,omitempty"`                // User scouting notes
+	Tags               []string                          `json:"tags,omitempty"`                 // User scouting tags (e.g. "verified", "smurf")
 }
 
 // DeepClone creates a deep copy of a LobbyPlayer to ensure thread safety across reads.
@@ -72,7 +75,36 @@ func (p LobbyPlayer) DeepClone() LobbyPlayer {
 		mr := *p.MatchupRecord
 		clone.MatchupRecord = &mr
 	}
+	if p.MatchupsByPlaylist != nil {
+		clone.MatchupsByPlaylist = cloneMatchupsByPlaylist(p.MatchupsByPlaylist)
+	}
+	if p.Tags != nil {
+		clone.Tags = append([]string(nil), p.Tags...)
+	}
 	return clone
+}
+
+func cloneMatchupsByPlaylist(src map[string]*storage.PlayerMatchup) map[string]*storage.PlayerMatchup {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]*storage.PlayerMatchup, len(src))
+	for k, v := range src {
+		if v != nil {
+			cp := *v
+			dst[k] = &cp
+		} else {
+			dst[k] = nil
+		}
+	}
+	return dst
+}
+
+func cloneNonEmptyMatchupsByPlaylist(src map[string]*storage.PlayerMatchup) map[string]*storage.PlayerMatchup {
+	if len(src) == 0 {
+		return nil
+	}
+	return cloneMatchupsByPlaylist(src)
 }
 
 // ResolvedPlayer holds details of the identified local player.

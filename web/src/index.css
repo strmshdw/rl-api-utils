@@ -313,6 +313,39 @@ dialog.broadcast-modal::backdrop {
 ::-webkit-scrollbar-thumb { background: var(--t-line-2); }
 ::-webkit-scrollbar-thumb:hover { background: var(--t-outline); }
 
+/* Toolbar, ARIA-pressed states, single-row nav scroller & viewport-aware menu fallbacks */
+.dashboard-nav-scroll {
+  scrollbar-width: none;
+}
+.dashboard-nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.toolbar-btn {
+  min-inline-size: 24px;
+  min-block-size: 26px;
+}
+.toolbar-btn:focus-visible,
+[role="toolbar"] select:focus-visible {
+  outline: 2px solid var(--t-blue-ink);
+  outline-offset: 2px;
+}
+
+[role="toolbar"] button[aria-pressed="true"] {
+  background-color: var(--t-blue-ink);
+  color: var(--t-ink-on-accent);
+  outline: 1px solid var(--t-blue-ink);
+  outline-offset: -1px;
+}
+
+@media (forced-colors: active) {
+  [role="toolbar"] button[aria-pressed="true"] {
+    background-color: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+}
+
 /* Transparent OBS streaming overlay mode */
 html.overlay-mode,
 body.overlay-mode,

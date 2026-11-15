@@ -22,7 +22,11 @@ describe('sampleData compile-time preview facade', () => {
     expect(SAMPLE_SESSION_RESPONSE.total_matches).toBe(5);
     expect(SAMPLE_HISTORICAL_MATCHES.length).toBe(3);
     expect(SAMPLE_PLAYERS.length).toBe(5);
-    expect(getSamplePlayerProfile('Steam|76561198000000010|0').player_name).toBe('AeroPulse');
+    expect(SAMPLE_CURRENT_MATCH.teammates[0].matchups_by_playlist?.['11']?.wins_as_teammate).toBe(4);
+    expect(SAMPLE_CURRENT_MATCH.opponents[0].matchups_by_playlist?.['10']).toBeDefined();
+    const aeroProfile = getSamplePlayerProfile('Steam|76561198000000010|0');
+    expect(aeroProfile.player_name).toBe('AeroPulse');
+    expect(aeroProfile.playlist_breakdown?.length).toBeGreaterThanOrEqual(2);
     expect(getSamplePlayerMatches('Steam|76561198000000010|0').length).toBe(3);
   });
 

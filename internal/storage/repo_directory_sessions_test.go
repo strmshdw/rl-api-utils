@@ -163,4 +163,19 @@ func TestRepoSessions_AndTimestampHelpers(t *testing.T) {
 	if tag := ComputeRelationshipTag(4, 2, 0, 1); tag != "PRIME DUO" {
 		t.Fatalf("ComputeRelationshipTag = %q, want PRIME DUO", tag)
 	}
+	if tag := ComputeRelationshipTag(1, 0, 0, 0); tag != "RECENT ALLY" {
+		t.Fatalf("ComputeRelationshipTag(1,0,0,0) = %q, want RECENT ALLY", tag)
+	}
+	if tag := ComputeRelationshipTag(0, 0, 0, 2); tag != "RECENT FOE" {
+		t.Fatalf("ComputeRelationshipTag(0,0,0,2) = %q, want RECENT FOE", tag)
+	}
+	if tag := ComputeRelationshipTag(0, 0, 1, 3); tag != "NEMESIS" {
+		t.Fatalf("ComputeRelationshipTag(0,0,1,3) = %q, want NEMESIS", tag)
+	}
+	if tag := ComputeRelationshipTag(0, 0, 2, 2); tag != "ARCH-RIVAL" {
+		t.Fatalf("ComputeRelationshipTag(0,0,2,2) = %q, want ARCH-RIVAL", tag)
+	}
+	if tag := ComputeRelationshipTagWithMinGames(0, 0, 0, 1, 1); tag != "NEMESIS" {
+		t.Fatalf("ComputeRelationshipTagWithMinGames(0,0,0,1,1) = %q, want NEMESIS", tag)
+	}
 }

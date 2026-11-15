@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { act } from 'react';
 import App from './App';
 import { useLiveMatch } from './hooks/useLiveMatch';
 import { useSession } from './hooks/useSession';
@@ -31,6 +32,8 @@ const nav = (root: ParentNode) => root.querySelector('nav[aria-label="Dashboard"
 
 describe('App shell', () => {
   beforeEach(() => {
+    localStorage.clear();
+    window.history.replaceState(null, '', '/');
     globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ matches: [], total: 0, players: [] }) })) as unknown as typeof fetch;
   });
   afterEach(() => {
@@ -38,13 +41,13 @@ describe('App shell', () => {
     vi.clearAllMocks();
   });
 
-  it('renders a single top bar with tabs, session record, playlist MMR and overlay link', async () => {
+  it('renders a single top bar with tabs, active-mode session record, playlist MMR and overlay link', async () => {
     setHooks(null);
     const { container } = await mount(<App />);
     const header = container.querySelector('[data-testid="app-header"]')!;
     expect(nav(container).textContent).toBe('LIVESESSION5HISTORYPLAYERS');
-    expect(header.textContent).toContain('SESSION 4–1');
-    expect(header.textContent).toContain('DOUBLES 1485 +29');
+    expect(header.textContent).not.toContain('SESSION 4–1');
+    expect(header.textContent).toContain('DOUBLES 1485 +29 · 3–1');
     expect(header.querySelector('a[href="/?mode=overlay"]')?.textContent).toBe('OVERLAY ↗');
     expect(container.querySelector('footer')).toBeNull();
     expect(header.textContent).not.toContain('COLUMNS');
@@ -297,5 +300,130 @@ describe('App shell', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(container.querySelector('[data-testid="session-view"]')).not.toBeNull();
   });
+
+  it('renders Tier 2 ContextFilterBar with mode switching, EXTRA menu Escape/select, contextual AVG/TOTALS visibility, and de-triplicated SettingsPanel', async () => {
+    setHooks(null);
+    const { container } = await mount(<App />);
+
+    const header = container.querySelector('[data-testid="app-header"]')!;
+    const toolbar = header.querySelector<HTMLElement>('#context-filter-bar[role="toolbar"][aria-label="Analytics context filters"]')!;
+    expect(toolbar).not.toBeNull();
+
+    // AVG / G and TOTALS are visible on LIVE / SESSION / PLAYERS, hidden on HISTORY
+    expect(toolbar.querySelector('#btn-stat-avg')).not.toBeNull();
+    expect(toolbar.querySelector('#btn-stat-total')).not.toBeNull();
+
+    // Switch mode from 2V2 to 3V3 in ContextFilterBar: updates header MMR pill to single-mode 3V3 without cross-mode 4–1
+    await clickText(toolbar, '3V3');
+    expect(nav(container).textContent).toBe('LIVESESSION5HISTORYPLAYERS');
+    expect(header.textContent).not.toContain('SESSION 4–1');
+    expect(header.textContent).toContain('STANDARD 1421 +11 · 1–0');
+
+    // Switch mode to 1V1 (0 session games): header status pill shows DUEL · 0–0 instead of leaking DOUBLES 1485
+    await clickText(toolbar, '1V1');
+    expect(header.textContent).toContain('DUEL');
+    expect(header.textContent).toContain('0–0');
+    expect(header.textContent).not.toContain('DOUBLES 1485');
+
+    // EXTRA ▾ menu opens, supports Escape to close, and selects an Extra mode
+    const extraBtn = toolbar.querySelector<HTMLButtonElement>('#btn-mode-extra')!;
+    expect(extraBtn).not.toBeNull();
+    expect(extraBtn.getAttribute('aria-haspopup')).toBe('menu');
+    expect(extraBtn.getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => {
+      extraBtn.click();
+    });
+    expect(extraBtn.getAttribute('aria-expanded')).toBe('true');
+    const extraMenu = toolbar.querySelector<HTMLElement>('[role="menu"]')!;
+    expect(extraMenu).not.toBeNull();
+    expect(extraMenu.textContent).toContain('HOOPS');
+    expect(extraMenu.textContent).toContain('RUMBLE');
+    expect(extraMenu.textContent).toContain('DROPSHOT');
+    expect(extraMenu.textContent).toContain('SNOW DAY');
+    expect(extraMenu.textContent).toContain('TOURNAMENTS');
+
+    // Escape closes EXTRA menu
+    await act(async () => {
+      extraMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(extraBtn.getAttribute('aria-expanded')).toBe('false');
+
+    // Re-open EXTRA menu and select HOOPS
+    await act(async () => {
+      extraBtn.click();
+    });
+    await clickText(toolbar.querySelector('[role="menu"]')!, 'HOOPS');
+    expect(extraBtn.getAttribute('aria-expanded')).toBe('false');
+    expect(extraBtn.textContent).toContain('HOOPS');
+
+    // Navigate to HISTORY: AVG/G | TOTALS hides and duplicate playlist segmented bar is suppressed
+    await clickText(nav(container), 'HISTORY');
+    expect(toolbar.querySelector('#btn-stat-avg')).toBeNull();
+    expect(toolbar.querySelector('#btn-stat-total')).toBeNull();
+    expect(container.querySelector('[data-testid="history-view"] [aria-label="Filter by playlist"]')).toBeNull();
+
+    // SettingsPanel no longer duplicates HISTORICAL STAT AGGREGATION or COLUMNS
+    const settingsBtn = container.querySelector<HTMLButtonElement>('#btn-settings')!;
+    await act(async () => {
+      settingsBtn.click();
+    });
+    const settingsBody = container.querySelector('#settings-panel-body')!;
+    expect(settingsBody.textContent).not.toContain('HISTORICAL STAT AGGREGATION');
+    expect(settingsBody.textContent).not.toContain('COLUMNS');
+    expect(settingsBody.querySelector('#btn-restore-sync-banner')).not.toBeNull();
+    expect(settingsBody.textContent).toContain('OBS OVERLAY ↗');
+  });
+
+  it('scopes preview fallback session KPIs and For/Against stats cleanly when a live daemon returns an empty 0-match session', async () => {
+    const emptyLiveSession = {
+      ...SAMPLE_SESSION_RESPONSE,
+      total_matches: 0,
+      total_wins: 0,
+      total_losses: 0,
+      win_rate: 0,
+      playlists: {},
+      matches: [],
+      most_played_playlist: undefined,
+      for_stats: undefined,
+      against_stats: undefined,
+    };
+    window.history.replaceState(null, '', '/session?demo=true');
+    vi.mocked(useLiveMatch).mockReturnValue({
+      match: null,
+      status: 'connected',
+      lastUpdated: null,
+      error: null,
+    });
+    vi.mocked(useSession).mockReturnValue({
+      session: emptyLiveSession,
+      unfilteredSession: emptyLiveSession,
+      pastSessions: [],
+      isLoading: false,
+      error: null,
+      refreshSession: vi.fn(),
+      refreshPastSessions: vi.fn(),
+      resetSession: vi.fn(),
+      continueSession: vi.fn(),
+      dismissContinueSession: vi.fn(),
+      selectedMatch: null,
+      setSelectedMatch: vi.fn(),
+    });
+
+    const { container } = await mount(<App />);
+    const sessionView = container.querySelector('[data-testid="session-view"]')!;
+    expect(sessionView).not.toBeNull();
+    expect(sessionView.textContent).toContain('3–1');
+    expect(sessionView.textContent).toContain('75% WIN RATE');
+    expect(sessionView.textContent).toContain('+29');
+    expect(sessionView.textContent).toContain('11 FOR · 6 AGAINST');
+    expect(sessionView.textContent).toContain('4G');
+    expect(sessionView.textContent).not.toContain('NO RESULTS YET');
+    expect(sessionView.textContent).not.toContain('No matches recorded yet');
+    expect(
+      container.querySelector('[data-testid="app-header"] a[href="/?mode=overlay&demo=true"]')?.textContent,
+    ).toBe('OVERLAY ↗');
+  });
 });
+
 

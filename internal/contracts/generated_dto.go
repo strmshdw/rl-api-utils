@@ -16,14 +16,17 @@ type PlayerStatsSummary struct {
 
 // PlayerPlaylistRank Normalized competitive rank and skill rating for a specific playlist.
 type PlayerPlaylistRank struct {
-	PlaylistID    int     `json:"playlist_id"`
-	PlaylistName  string  `json:"playlist_name"`
-	Tier          int     `json:"tier"`
-	Division      int     `json:"division"`
-	RankName      string  `json:"rank_name"`
-	ShortRank     string  `json:"short_rank,omitempty"`
-	MMR           float64 `json:"mmr"`
-	MatchesPlayed int     `json:"matches_played"`
+	PlaylistID             int     `json:"playlist_id"`
+	PlaylistName           string  `json:"playlist_name"`
+	Tier                   int     `json:"tier"`
+	Division               int     `json:"division"`
+	RankName               string  `json:"rank_name"`
+	ShortRank              string  `json:"short_rank,omitempty"`
+	MMR                    float64 `json:"mmr"`
+	MatchesPlayed          int     `json:"matches_played"`
+	Sigma                  float64 `json:"sigma,omitempty"`
+	WinStreak              int     `json:"win_streak,omitempty"`
+	PlacementMatchesPlayed int     `json:"placement_matches_played,omitempty"`
 }
 
 // PlayerMatchup Head-to-head encounter statistics between the local player and another player.
@@ -126,4 +129,25 @@ type SyncConfigResponse struct {
 	ForceSyncOnTrigger    bool   `json:"force_sync_on_trigger"`
 	EnableToast           bool   `json:"enable_toast"`
 	SessionContinueWindow string `json:"session_continue_window"`
+}
+
+// StampingConfig User-configurable multi-signal stamping and threat evaluation thresholds.
+type StampingConfig struct {
+	AltDetectionEnabled     bool    `json:"alt_detection_enabled" yaml:"alt_detection_enabled"`
+	AltMinTier              int     `json:"alt_min_tier" yaml:"alt_min_tier"`
+	AltHighSigma            float64 `json:"alt_high_sigma" yaml:"alt_high_sigma"`
+	AltHighSigmaMaxGames    int     `json:"alt_high_sigma_max_games" yaml:"alt_high_sigma_max_games"`
+	AltStreakSigma          float64 `json:"alt_streak_sigma" yaml:"alt_streak_sigma"`
+	AltStreakMaxGames       int     `json:"alt_streak_max_games" yaml:"alt_streak_max_games"`
+	AltMinWinStreak         int     `json:"alt_min_win_streak" yaml:"alt_min_win_streak"`
+	ShowOffModePeak         bool    `json:"show_off_mode_peak" yaml:"show_off_mode_peak"`
+	OffModeMinGames         int     `json:"off_mode_min_games" yaml:"off_mode_min_games"`
+	OffModeSelfTierDiff     float64 `json:"off_mode_self_tier_diff" yaml:"off_mode_self_tier_diff"`
+	OffModeVsYouTierDiff    float64 `json:"off_mode_vs_you_tier_diff" yaml:"off_mode_vs_you_tier_diff"`
+	CarryMmrDiff            int     `json:"carry_mmr_diff" yaml:"carry_mmr_diff"`
+	HigherMmrDiff           int     `json:"higher_mmr_diff" yaml:"higher_mmr_diff"`
+	ShowHotStreak           bool    `json:"show_hot_streak" yaml:"show_hot_streak"`
+	HotStreakMinWins        int     `json:"hot_streak_min_wins" yaml:"hot_streak_min_wins"`
+	ShowTeammateOffModePeak bool    `json:"show_teammate_off_mode_peak" yaml:"show_teammate_off_mode_peak"`
+	RelationshipMinGames    int     `json:"relationship_min_games" yaml:"relationship_min_games"`
 }

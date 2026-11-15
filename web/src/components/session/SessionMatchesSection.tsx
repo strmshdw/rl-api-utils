@@ -22,18 +22,11 @@ import {
 } from '../common/ui';
 
 export type OutcomeFilter = 'all' | 'victory' | 'defeat';
-export type SessionPlaylistFilter = 'all' | '2v2' | '3v3';
 
 const OUTCOME_OPTIONS = [
   ['all', 'ALL'],
   ['victory', 'WINS'],
   ['defeat', 'LOSSES'],
-] as const;
-
-const PLAYLIST_OPTIONS = [
-  ['all', 'ALL MODES'],
-  ['2v2', '2V2'],
-  ['3v3', '3V3'],
 ] as const;
 
 const ROW_GRID = '72px 120px minmax(0,1fr) repeat(4,64px) 90px 90px';
@@ -122,21 +115,19 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
 
 interface SessionMatchesSectionProps {
   totalMatchCount: number;
+  sessionMatchCount?: number;
   rows: SessionMatchDetail[];
   outcomeFilter: OutcomeFilter;
   onOutcomeChange: (next: OutcomeFilter) => void;
-  playlistFilter: SessionPlaylistFilter;
-  onPlaylistChange: (next: SessionPlaylistFilter) => void;
   onOpenMatch: (match: SessionMatchDetail) => void;
 }
 
 export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
   totalMatchCount,
+  sessionMatchCount,
   rows,
   outcomeFilter,
   onOutcomeChange,
-  playlistFilter,
-  onPlaylistChange,
   onOpenMatch,
 }) => (
   <>
@@ -151,16 +142,10 @@ export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
           value={outcomeFilter}
           onChange={onOutcomeChange}
         />
-        <Segmented
-          label="Filter by playlist"
-          options={PLAYLIST_OPTIONS}
-          value={playlistFilter}
-          onChange={onPlaylistChange}
-        />
       </div>
     </div>
 
-    {totalMatchCount === 0 ? (
+    {(sessionMatchCount ?? totalMatchCount) === 0 ? (
       <EmptyLine>NO MATCHES THIS SESSION YET</EmptyLine>
     ) : rows.length === 0 ? (
       <EmptyLine>

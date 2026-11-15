@@ -4,8 +4,10 @@ import {
   useDashboard,
 } from '../../context/DashboardContext';
 import { useBallchasingSync } from '../../hooks/useBallchasingSync';
+import { isDemoMode } from '../../utils/sampleData';
 import { Modal } from '../common/Modal';
 import { SectionLabel } from '../common/ui';
+import { StampingSettingsSection } from './StampingSettingsSection';
 import { ThemeAppearanceSection } from './ThemeAppearanceSection';
 
 export { THEME_OPTIONS } from './ThemeAppearanceSection';
@@ -23,7 +25,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onClose,
   inMatch,
   onSwitchToLive,
-  onOpenColumns,
 }) => {
   const {
     themeStyle,
@@ -31,8 +32,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setTheme,
     fontScale,
     setFontScale,
-    statMode,
-    setStatMode,
     replayLimitPreview,
     setReplayLimitPreview,
     replayBannerDismissed,
@@ -54,6 +53,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     triggerSync,
     dismissSyncMessage,
   } = useBallchasingSync();
+
+  const overlayHref =
+    isDevBuild && (previewMode || isDemoMode()) ? '/?mode=overlay&demo=true' : '/?mode=overlay';
 
   return (
     <Modal
@@ -82,41 +84,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           onSetFontScale={setFontScale}
         />
 
-        {/* ==================== SECTION 02: TELEMETRY DISPLAY & STREAMING ==================== */}
+        <StampingSettingsSection />
+
+        {/* ==================== SECTION 03: TELEMETRY DISPLAY & STREAMING ==================== */}
         <section className="flex flex-col gap-3.5 pt-2 border-t border-line">
-          <SectionLabel>02 · TELEMETRY DISPLAY &amp; BROADCAST</SectionLabel>
+          <SectionLabel>03 · TELEMETRY DISPLAY &amp; BROADCAST</SectionLabel>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
-              <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
-                HISTORICAL STAT AGGREGATION
-              </span>
-              <div className="grid grid-cols-2 t-border t-radius overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setStatMode('avg')}
-                  className={`py-1.5 t-font-display font-bold text-xs uppercase tracking-wider cursor-pointer ${
-                    statMode === 'avg'
-                      ? 't-bg-blue-ink t-text-on-accent'
-                      : 't-bg-page t-text-muted hover:opacity-80'
-                  }`}
-                >
-                  AVG / G
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatMode('total')}
-                  className={`py-1.5 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border cursor-pointer ${
-                    statMode === 'total'
-                      ? 't-bg-blue-ink t-text-on-accent'
-                      : 't-bg-page t-text-muted hover:opacity-80'
-                  }`}
-                >
-                  TOTALS
-                </button>
-              </div>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
               <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
                 REPLAY QUEUE SYNC BANNER
@@ -140,23 +114,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
               <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
-                STREAMING &amp; TABLE LAYOUT
+                OBS STREAMING OVERLAY
               </span>
               <div className="flex items-center gap-2">
-                {onOpenColumns && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenColumns();
-                    }}
-                    className="flex-1 py-1.5 px-2.5 t-bg-page border border-outline t-font-display font-bold text-xs uppercase tracking-wider t-text-strong hover:border-ink t-radius cursor-pointer text-center whitespace-nowrap"
-                  >
-                    COLUMNS
-                  </button>
-                )}
                 <a
-                  href="/?mode=overlay"
+                  href={overlayHref}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 py-1.5 px-2.5 t-bg-page border border-outline t-font-display font-bold text-xs uppercase tracking-wider t-text-strong hover:border-ink t-radius text-center whitespace-nowrap"
@@ -209,10 +171,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </section>
 
-        {/* ==================== SECTION 03: DEVELOPER & DIAGNOSTICS (DEV BUILD ONLY) ==================== */}
+        {/* ==================== SECTION 04: DEVELOPER & DIAGNOSTICS (DEV BUILD ONLY) ==================== */}
         {isDevBuild && (
           <section className="flex flex-col gap-3.5 pt-2 border-t border-line">
-            <SectionLabel>03 · DEVELOPER &amp; TELEMETRY SIMULATOR (DEV BUILD ONLY)</SectionLabel>
+            <SectionLabel>04 · DEVELOPER &amp; TELEMETRY SIMULATOR (DEV BUILD ONLY)</SectionLabel>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">

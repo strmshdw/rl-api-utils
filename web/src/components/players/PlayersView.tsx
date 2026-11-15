@@ -1,27 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CurrentMatchResponse, PlayerSummary } from '../../types/api';
 import { usePlayerSearch } from '../../hooks/usePlayerSearch';
-import { emptyRoleStats, hasSyncedRoleTelemetry } from '../../utils/broadcast';
 import { EmptyLine, GhostButton, PageHeader, SearchInput, Segmented } from '../common/ui';
 import { PlayerProfilePage } from './PlayerProfilePage';
 import { PlayersSpotlightGrid } from './PlayersSpotlightGrid';
 import { PlayersDirectoryTable } from './PlayersDirectoryTable';
-import { matchesRole, parseRanks, primaryRank, spotlights } from './playerData';
+import { isSoloDuelPlaylist, matchesRole, spotlights } from './playerData';
 import { useDashboard } from '../../context/DashboardContext';
-
-const PLAYLIST_OPTIONS = [
-  ['all', 'ALL MODES'],
-  ['1v1', '1V1'],
-  ['2v2', '2V2'],
-  ['3v3', '3V3'],
-] as const;
-
-const PLAYLIST_ID_MAP: Record<string, number> = {
-  all: 0,
-  '1v1': 10,
-  '2v2': 11,
-  '3v3': 13,
-};
 
 const ROLE_OPTIONS = [
   ['all', 'ALL'],
@@ -56,7 +41,7 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
   onInspectPlayerChange,
   onClearInitialPlayer,
 }) => {
-  const { statMode, pinnedPlayerIds, togglePinPlayer } = useDashboard();
+  const { statMode, activePlaylist, pinnedPlayerIds, togglePinPlayer } = useDashboard();
   const isAvg = statMode === 'avg';
 
   const {
@@ -67,7 +52,6 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
     role,
     setRole,
     playlist,
-    setPlaylist,
     sort,
     order,
     toggleSort,
@@ -84,7 +68,6 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
     id: string;
     name?: string;
   } | null>(inspectedPlayer ?? initialInspectedPlayer ?? null);
-  const [playlistModeFilter, setPlaylistModeFilter] = useState<'all' | '1v1' | '2v2' | '3v3'>('all');
 
   useEffect(() => {
     if (inspectedPlayer !== undefined) {
@@ -102,13 +85,20 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
     onInspectPlayerChange?.(player);
   };
 
-  const playlistIdNum = playlist === 'all' ? 0 : Number(playlist) || 0;
+  const soloDuel = isSoloDuelPlaylist(activePlaylist);
+  const visibleRoleOptions = useMemo(
+    () =>
+      soloDuel
+        ? ROLE_OPTIONS.filter(([key]) => key !== 'teammate' && key !== 'synergy')
+        : ROLE_OPTIONS,
+    [soloDuel],
+  );
 
-  const handlePlaylistModeChange = (mode: 'all' | '1v1' | '2v2' | '3v3') => {
-    setPlaylistModeFilter(mode);
-    const id = PLAYLIST_ID_MAP[mode] || 0;
-    setPlaylist(id > 0 ? String(id) : 'all');
-  };
+  useEffect(() => {
+    if (soloDuel && (role === 'teammate' || role === 'synergy')) {
+      setRole('all');
+    }
+  }, [soloDuel, role, setRole]);
 
   const spots = useMemo(() => {
     if (
@@ -117,14 +107,23 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
       serverSpotlights?.toughest_rival
     ) {
       return [
-        {
-          key: 'mate' as const,
-          label: 'BEST TEAMMATE',
-          player: serverSpotlights.best_teammate?.player ?? null,
-          value: serverSpotlights.best_teammate?.value ?? '—',
-          sub: serverSpotlights.best_teammate?.sub ?? 'NOT ENOUGH GAMES YET',
-          tone: (serverSpotlights.best_teammate?.tone as 'win' | 'neutral' | 'loss') ?? 'win',
-        },
+        soloDuel
+          ? {
+              key: 'mate' as const,
+              label: 'SOLO DUEL MODE',
+              player: null,
+              value: '1V1',
+              sub: 'NO TEAMMATES IN 1V1',
+              tone: 'neutral' as const,
+            }
+          : {
+              key: 'mate' as const,
+              label: 'BEST TEAMMATE',
+              player: serverSpotlights.best_teammate?.player ?? null,
+              value: serverSpotlights.best_teammate?.value ?? '—',
+              sub: serverSpotlights.best_teammate?.sub ?? 'NOT ENOUGH GAMES YET',
+              tone: (serverSpotlights.best_teammate?.tone as 'win' | 'neutral' | 'loss') ?? 'win',
+            },
         {
           key: 'faced' as const,
           label: 'MOST FACED',
@@ -143,8 +142,8 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
         },
       ];
     }
-    return spotlights(players);
-  }, [serverSpotlights, players]);
+    return spotlights(players, activePlaylist);
+  }, [serverSpotlights, players, activePlaylist, soloDuel]);
 
   const pinnedSlots = useMemo(() => {
     const matchedPinned = pinnedPlayerIds
@@ -167,6 +166,8 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
       let player: PlayerSummary | null = null;
       if (idx < matchedPinned.length) {
         player = matchedPinned[idx];
+      } else if (soloDuel && spot?.key === 'mate') {
+        player = null;
       } else if (spot?.player && !usedIds.has(spot.player.player_id)) {
         player = spot.player;
         usedIds.add(player.player_id);
@@ -183,121 +184,15 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
       const isPinned = player ? pinnedPlayerIds.includes(player.player_id) : false;
       return { idx, player, spot, isPinned };
     });
-  }, [pinnedPlayerIds, players, spots]);
+  }, [pinnedPlayerIds, players, spots, soloDuel]);
 
   const rows = useMemo(
     () =>
-      players
-        .filter((p) => {
-          if (playlistIdNum > 0 && p.total_matches === 0) return false;
-          return matchesRole(p, role);
-        })
-        .sort((a, b) => {
-          if (sort === 'player_name') {
-            const comp = (a.player_name || '').localeCompare(b.player_name || '');
-            return order === 'asc' ? comp : -comp;
-          }
-          if (sort === 'platform') {
-            const comp = (a.platform || '').localeCompare(b.platform || '');
-            return order === 'asc' ? comp : -comp;
-          }
-          if (sort === 'mmr') {
-            const rankA =
-              playlistIdNum > 0
-                ? parseRanks(a.ranks_json).find((r) => r.playlist_id === playlistIdNum) ||
-                  primaryRank(a.ranks_json)
-                : primaryRank(a.ranks_json);
-            const rankB =
-              playlistIdNum > 0
-                ? parseRanks(b.ranks_json).find((r) => r.playlist_id === playlistIdNum) ||
-                  primaryRank(b.ranks_json)
-                : primaryRank(b.ranks_json);
-            const mA = rankA?.mmr ?? 0;
-            const mB = rankB?.mmr ?? 0;
-            return order === 'asc' ? mA - mB : mB - mA;
-          }
-          if (sort === 'total_matches') {
-            return order === 'asc'
-              ? a.total_matches - b.total_matches
-              : b.total_matches - a.total_matches;
-          }
-          if (sort === 'win_rate') {
-            const wrA =
-              a.total_matches > 0
-                ? a.total_wins_as_teammate /
-                  (a.total_wins_as_teammate + a.total_losses_as_teammate || 1)
-                : 0;
-            const wrB =
-              b.total_matches > 0
-                ? b.total_wins_as_teammate /
-                  (b.total_wins_as_teammate + b.total_losses_as_teammate || 1)
-                : 0;
-            return order === 'asc' ? wrA - wrB : wrB - wrA;
-          }
-          if (sort === 'vs_win_rate' || sort === 'against_wr') {
-            const wrA =
-              a.total_matches > 0
-                ? a.total_wins_as_opponent /
-                  (a.total_wins_as_opponent + a.total_losses_as_opponent || 1)
-                : 0;
-            const wrB =
-              b.total_matches > 0
-                ? b.total_wins_as_opponent /
-                  (b.total_wins_as_opponent + b.total_losses_as_opponent || 1)
-                : 0;
-            return order === 'asc' ? wrA - wrB : wrB - wrA;
-          }
-          if (sort === 'with_pts') {
-            const wGamesA = a.total_wins_as_teammate + a.total_losses_as_teammate;
-            const wGamesB = b.total_wins_as_teammate + b.total_losses_as_teammate;
-            const wStatsA =
-              a.with_you_stats ||
-              emptyRoleStats(wGamesA, a.total_wins_as_teammate, a.total_losses_as_teammate);
-            const wStatsB =
-              b.with_you_stats ||
-              emptyRoleStats(wGamesB, b.total_wins_as_teammate, b.total_losses_as_teammate);
-            const ptsA =
-              wGamesA > 0 && hasSyncedRoleTelemetry(wStatsA)
-                ? isAvg
-                  ? wStatsA.avg_score
-                  : wStatsA.score || wStatsA.total_score || 0
-                : 0;
-            const ptsB =
-              wGamesB > 0 && hasSyncedRoleTelemetry(wStatsB)
-                ? isAvg
-                  ? wStatsB.avg_score
-                  : wStatsB.score || wStatsB.total_score || 0
-                : 0;
-            return order === 'asc' ? ptsA - ptsB : ptsB - ptsA;
-          }
-          if (sort === 'vs_pts') {
-            const aGamesA = a.total_wins_as_opponent + a.total_losses_as_opponent;
-            const aGamesB = b.total_wins_as_opponent + b.total_losses_as_opponent;
-            const aStatsA =
-              a.against_you_stats ||
-              emptyRoleStats(aGamesA, a.total_wins_as_opponent, a.total_losses_as_opponent);
-            const aStatsB =
-              b.against_you_stats ||
-              emptyRoleStats(aGamesB, b.total_wins_as_opponent, b.total_losses_as_opponent);
-            const ptsA =
-              aGamesA > 0 && hasSyncedRoleTelemetry(aStatsA)
-                ? isAvg
-                  ? aStatsA.avg_score
-                  : aStatsA.score || aStatsA.total_score || 0
-                : 0;
-            const ptsB =
-              aGamesB > 0 && hasSyncedRoleTelemetry(aStatsB)
-                ? isAvg
-                  ? aStatsB.avg_score
-                  : aStatsB.score || aStatsB.total_score || 0
-                : 0;
-            return order === 'asc' ? ptsA - ptsB : ptsB - ptsA;
-          }
-          const timeA = new Date(a.last_seen_at).getTime();
-          const timeB = new Date(b.last_seen_at).getTime();
-          return order === 'asc' ? timeA - timeB : timeB - timeA;
-        }),
-    [players, playlistIdNum, role, sort, order, isAvg],
+      players.filter((p) => {
+        if (playlist !== 'all' && p.total_matches === 0) return false;
+        return matchesRole(p, role);
+      }),
+    [players, playlist, role],
   );
 
   if (selectedFullPagePlayer) {
@@ -341,6 +236,7 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
       <PlayersSpotlightGrid
         pinnedSlots={pinnedSlots}
         isAvg={isAvg}
+        activePlaylist={activePlaylist}
         onTogglePin={togglePinPlayer}
         onOpenPlayer={(p) =>
           handleSelectPlayer({ id: p.player_id, name: p.player_name })
@@ -357,14 +253,8 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
         />
         <div className="flex flex-wrap items-center gap-3">
           <Segmented
-            label="Filter by playlist"
-            options={PLAYLIST_OPTIONS}
-            value={playlistModeFilter}
-            onChange={handlePlaylistModeChange}
-          />
-          <Segmented
             label="Filter by role"
-            options={ROLE_OPTIONS}
+            options={visibleRoleOptions}
             value={role}
             onChange={setRole}
           />
@@ -388,7 +278,7 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
           rows={rows}
           pinnedPlayerIds={pinnedPlayerIds}
           isAvg={isAvg}
-          playlistScopeId={playlistIdNum}
+          activePlaylist={activePlaylist}
           sort={sort}
           order={order}
           onToggleSort={toggleSort}

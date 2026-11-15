@@ -14,14 +14,17 @@ dtos:
     ts_name: PlayerPlaylistRank
     doc: "Normalized competitive rank and skill rating for a specific playlist."
     fields:
-      - { name: PlaylistID,    go_type: int,     ts_type: number,  json: playlist_id }
-      - { name: PlaylistName,  go_type: string,  ts_type: string,  json: playlist_name }
-      - { name: Tier,          go_type: int,     ts_type: number,  json: tier }
-      - { name: Division,      go_type: int,     ts_type: number,  json: division }
-      - { name: RankName,      go_type: string,  ts_type: string,  json: rank_name }
-      - { name: ShortRank,     go_type: string,  ts_type: "string?", json: short_rank, omitempty: true }
-      - { name: MMR,           go_type: float64, ts_type: number,  json: mmr }
-      - { name: MatchesPlayed, go_type: int,     ts_type: number,  json: matches_played }
+      - { name: PlaylistID,             go_type: int,     ts_type: number,    json: playlist_id }
+      - { name: PlaylistName,           go_type: string,  ts_type: string,    json: playlist_name }
+      - { name: Tier,                   go_type: int,     ts_type: number,    json: tier }
+      - { name: Division,               go_type: int,     ts_type: number,    json: division }
+      - { name: RankName,               go_type: string,  ts_type: string,    json: rank_name }
+      - { name: ShortRank,              go_type: string,  ts_type: "string?", json: short_rank, omitempty: true }
+      - { name: MMR,                    go_type: float64, ts_type: number,    json: mmr }
+      - { name: MatchesPlayed,          go_type: int,     ts_type: number,    json: matches_played }
+      - { name: Sigma,                  go_type: float64, ts_type: "number?", json: sigma, omitempty: true }
+      - { name: WinStreak,              go_type: int,     ts_type: "number?", json: win_streak, omitempty: true }
+      - { name: PlacementMatchesPlayed, go_type: int,     ts_type: "number?", json: placement_matches_played, omitempty: true }
 
   - name: PlayerMatchup
     ts_name: PlayerMatchup
@@ -133,3 +136,25 @@ dtos:
       - { name: ForceSyncOnTrigger,   go_type: bool,   ts_type: boolean, json: force_sync_on_trigger }
       - { name: EnableToast,          go_type: bool,   ts_type: boolean, json: enable_toast }
       - { name: SessionContinueWindow,go_type: string, ts_type: string,  json: session_continue_window }
+
+  - name: StampingConfig
+    ts_name: StampingConfig
+    doc: "User-configurable multi-signal stamping and threat evaluation thresholds."
+    fields:
+      - { name: AltDetectionEnabled,     go_type: bool,    ts_type: boolean, json: alt_detection_enabled,      yaml: alt_detection_enabled }
+      - { name: AltMinTier,              go_type: int,     ts_type: number,  json: alt_min_tier,               yaml: alt_min_tier }
+      - { name: AltHighSigma,            go_type: float64, ts_type: number,  json: alt_high_sigma,             yaml: alt_high_sigma }
+      - { name: AltHighSigmaMaxGames,    go_type: int,     ts_type: number,  json: alt_high_sigma_max_games,   yaml: alt_high_sigma_max_games }
+      - { name: AltStreakSigma,          go_type: float64, ts_type: number,  json: alt_streak_sigma,           yaml: alt_streak_sigma }
+      - { name: AltStreakMaxGames,       go_type: int,     ts_type: number,  json: alt_streak_max_games,       yaml: alt_streak_max_games }
+      - { name: AltMinWinStreak,         go_type: int,     ts_type: number,  json: alt_min_win_streak,         yaml: alt_min_win_streak }
+      - { name: ShowOffModePeak,         go_type: bool,    ts_type: boolean, json: show_off_mode_peak,         yaml: show_off_mode_peak }
+      - { name: OffModeMinGames,         go_type: int,     ts_type: number,  json: off_mode_min_games,         yaml: off_mode_min_games }
+      - { name: OffModeSelfTierDiff,     go_type: float64, ts_type: number,  json: off_mode_self_tier_diff,    yaml: off_mode_self_tier_diff }
+      - { name: OffModeVsYouTierDiff,    go_type: float64, ts_type: number,  json: off_mode_vs_you_tier_diff,  yaml: off_mode_vs_you_tier_diff }
+      - { name: CarryMmrDiff,            go_type: int,     ts_type: number,  json: carry_mmr_diff,             yaml: carry_mmr_diff }
+      - { name: HigherMmrDiff,           go_type: int,     ts_type: number,  json: higher_mmr_diff,            yaml: higher_mmr_diff }
+      - { name: ShowHotStreak,           go_type: bool,    ts_type: boolean, json: show_hot_streak,            yaml: show_hot_streak }
+      - { name: HotStreakMinWins,        go_type: int,     ts_type: number,  json: hot_streak_min_wins,        yaml: hot_streak_min_wins }
+      - { name: ShowTeammateOffModePeak, go_type: bool,    ts_type: boolean, json: show_teammate_off_mode_peak,yaml: show_teammate_off_mode_peak }
+      - { name: RelationshipMinGames,    go_type: int,     ts_type: number,  json: relationship_min_games,     yaml: relationship_min_games }
