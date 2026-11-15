@@ -41,12 +41,14 @@ describe('App shell', () => {
     vi.clearAllMocks();
   });
 
-  it('renders a single top bar with tabs, active-mode session record, playlist MMR and overlay link', async () => {
+  it('renders a single top bar with tabs, active-mode session count & record, playlist MMR and overlay link without cross-mode ALL pills', async () => {
     setHooks(null);
     const { container } = await mount(<App />);
     const header = container.querySelector('[data-testid="app-header"]')!;
-    expect(nav(container).textContent).toBe('LIVESESSION5HISTORYPLAYERS');
+    expect(nav(container).textContent).toBe('LIVESESSION4HISTORYPLAYERS');
     expect(header.textContent).not.toContain('SESSION 4–1');
+    expect(header.textContent).not.toContain('ALL MODES');
+    expect(header.querySelector('#btn-mode-all')).toBeNull();
     expect(header.textContent).toContain('DOUBLES 1485 +29 · 3–1');
     expect(header.querySelector('a[href="/?mode=overlay"]')?.textContent).toBe('OVERLAY ↗');
     expect(container.querySelector('footer')).toBeNull();
@@ -60,7 +62,7 @@ describe('App shell', () => {
     expect(container.querySelector('[data-testid="live-idle"]')).not.toBeNull();
 
     await clickText(nav(container), 'SESSION');
-    expect(nav(container).querySelector('[aria-current="page"]')?.textContent).toBe('SESSION5');
+    expect(nav(container).querySelector('[aria-current="page"]')?.textContent).toBe('SESSION4');
     expect(container.querySelector('[data-testid="session-view"]')).not.toBeNull();
 
     await clickText(nav(container), 'HISTORY');
@@ -313,19 +315,20 @@ describe('App shell', () => {
     expect(toolbar.querySelector('#btn-stat-avg')).not.toBeNull();
     expect(toolbar.querySelector('#btn-stat-total')).not.toBeNull();
 
-    // Switch mode from 2V2 to 3V3 in ContextFilterBar: updates header MMR pill to single-mode 3V3 without cross-mode 4–1
+    // Switch mode from 2V2 to 3V3 in ContextFilterBar: updates SESSION badge (1) and header MMR pill to single-mode 3V3 without cross-mode 4–1
     await clickText(toolbar, '3V3');
-    expect(nav(container).textContent).toBe('LIVESESSION5HISTORYPLAYERS');
+    expect(nav(container).textContent).toBe('LIVESESSION1HISTORYPLAYERS');
     expect(header.textContent).not.toContain('SESSION 4–1');
     expect(header.textContent).toContain('STANDARD 1421 +11 · 1–0');
 
-    // Switch mode to 1V1 (0 session games): header status pill shows DUEL · 0–0 instead of leaking DOUBLES 1485
+    // Switch mode to 1V1 (0 session games): SESSION badge hides (0) and status pill shows DUEL · 0–0 instead of leaking DOUBLES 1485
     await clickText(toolbar, '1V1');
+    expect(nav(container).textContent).toBe('LIVESESSIONHISTORYPLAYERS');
     expect(header.textContent).toContain('DUEL');
     expect(header.textContent).toContain('0–0');
     expect(header.textContent).not.toContain('DOUBLES 1485');
 
-    // EXTRA ▾ menu opens, supports Escape to close, and selects an Extra mode
+    // EXTRA ▾ menu opens, supports Escape to close, and exposes only concrete individual Extra modes (no ALL EXTRA MODES)
     const extraBtn = toolbar.querySelector<HTMLButtonElement>('#btn-mode-extra')!;
     expect(extraBtn).not.toBeNull();
     expect(extraBtn.getAttribute('aria-haspopup')).toBe('menu');
@@ -342,6 +345,7 @@ describe('App shell', () => {
     expect(extraMenu.textContent).toContain('DROPSHOT');
     expect(extraMenu.textContent).toContain('SNOW DAY');
     expect(extraMenu.textContent).toContain('TOURNAMENTS');
+    expect(extraMenu.textContent).not.toContain('ALL EXTRA');
 
     // Escape closes EXTRA menu
     await act(async () => {

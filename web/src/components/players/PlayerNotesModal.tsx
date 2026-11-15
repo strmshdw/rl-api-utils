@@ -10,7 +10,17 @@ interface PlayerNotesModalProps {
   onSave: (notes: string, tags: string[]) => Promise<void>;
 }
 
-const SUGGESTED_TAGS = ['smurf', 'toxic', 'reliable', 'clutch', 'freestyler', 'passer', 'party'];
+const SUGGESTED_TAGS = [
+  'smurf',
+  'verified',
+  'not-smurf',
+  'toxic',
+  'reliable',
+  'clutch',
+  'freestyler',
+  'passer',
+  'party',
+];
 
 export const PlayerNotesModal: React.FC<PlayerNotesModalProps> = ({
   isOpen,

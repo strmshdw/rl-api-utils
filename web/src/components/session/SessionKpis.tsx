@@ -10,6 +10,7 @@ import {
   formatSigned,
   hasSyncedRoleTelemetry,
   matchesPlaylistFilter,
+  normalizeActiveModeKey,
   playlistFilterToParam,
   playlistLabels,
   summarizeSessionPlaylists,
@@ -80,7 +81,7 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
   return (
     <div
       data-testid="session-kpis"
-      className={`grid surface-plaque border border-outline t-radius font-display ${
+      className={`grid surface-plaque border border-outline t-radius font-display lg:grid-rows-[auto_auto_auto] ${
         page
           ? 'grid-cols-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.35fr)]'
           : 'grid-cols-2 lg:grid-cols-4'
@@ -93,21 +94,19 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
           <div
             key={k.key}
             data-kpi={k.key}
-            className={`flex flex-col justify-between gap-1.5 min-w-0 border-r border-page t-border ${
-              page ? 'px-5 py-4' : 'px-5 py-4'
-            }`}
+            className="flex flex-col justify-between gap-1.5 lg:row-span-3 lg:grid lg:grid-rows-subgrid min-w-0 border-r border-page t-border px-5 py-4"
           >
-            <div className="flex items-center justify-between gap-2 min-w-0">
-              <span className={`${PANEL_LABEL} whitespace-nowrap ${isMmr ? 'shrink-0' : 'truncate'}`}>
+            <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 min-w-0">
+              <span className={`${PANEL_LABEL} leading-tight break-words`}>
                 {isRecord ? `${k.label} (${dateRangeLabel})` : isMmr ? 'NET MMR' : k.label}
               </span>
               {isMmr && mostPlayed && (
-                <span className="text-[11px] t-font-display font-bold px-1.5 py-0 t-bg-page t-border t-text-blue uppercase whitespace-nowrap truncate">
+                <span className="text-[11px] t-font-display font-bold px-1.5 py-0 t-bg-page t-border t-text-blue uppercase leading-tight break-words">
                   {playlistLabels(mostPlayed.id, mostPlayed.name).mode}
                 </span>
               )}
             </div>
-            <div className="flex items-baseline gap-2.5">
+            <div className="flex items-baseline gap-2.5 self-end">
               <span
                 className={`t-font-display font-extrabold leading-none ${
                   page ? 'text-4xl sm:text-[44px]' : 'text-4xl'
@@ -119,7 +118,7 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
                 <RecordCells wins={wins} losses={losses} cellClass="w-2.5 h-3.5" />
               )}
             </div>
-            <span className="font-semibold text-sm tracking-t6 text-muted">
+            <span className="font-semibold text-sm tracking-t6 text-muted leading-snug break-words">
               {isMmr && mostPlayed
                 ? `${playlistLabels(mostPlayed.id, mostPlayed.name).name} (${mostPlayed.wins}–${mostPlayed.losses}) · ${k.sub}`
                 : k.sub}
@@ -128,18 +127,18 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
         );
       })}
       {page && (
-        <div className="col-span-2 lg:col-span-1 px-5 py-4 flex flex-col gap-2.5 border-t border-page lg:border-t-0 min-w-0">
-          <span className={PANEL_LABEL}>PLAYLIST MMR PROGRESSION</span>
+        <div className="col-span-2 lg:col-span-1 lg:row-span-3 px-5 py-4 flex flex-col gap-2.5 border-t border-page lg:border-t-0 min-w-0">
+          <span className={`${PANEL_LABEL} leading-tight break-words`}>PLAYLIST MMR PROGRESSION</span>
           {playlists.length === 0 && (
             <span className="font-semibold text-base tracking-t4 text-faint">—</span>
           )}
           {playlists.map((pl) => (
             <div
               key={pl.playlist_id}
-              className="flex justify-between items-center gap-2 font-semibold text-base tracking-t4"
+              className="flex flex-wrap justify-between items-center gap-x-2 gap-y-1 font-semibold text-base tracking-t4"
             >
               <span
-                className="min-w-0 truncate"
+                className="min-w-0 leading-tight break-words"
                 title={playlistLabels(pl.playlist_id, pl.playlist_name).name}
               >
                 {playlistLabels(pl.playlist_id, pl.playlist_name).short}{' '}
@@ -202,7 +201,7 @@ export const SessionForAgainstTable: React.FC<{
           borderBottom ? 'border-b t-border border-line ' : ''
         }items-center text-base t-font-mono t-hover-panel`}
       >
-        <div className={`col-span-2 t-font-display font-extrabold text-sm uppercase tracking-wider ${labelColor}`}>
+        <div className={`col-span-2 t-font-display font-extrabold text-sm uppercase tracking-wider leading-tight break-words ${labelColor}`}>
           {rowLabel}
         </div>
         <div className="col-span-1 text-right font-bold t-text-ink2">{s.games}G</div>
@@ -252,7 +251,7 @@ export const SessionForAgainstTable: React.FC<{
       className="surface-plaque border border-outline t-radius overflow-hidden font-display"
     >
       <div className="px-4 py-2 border-b t-border border-line flex flex-wrap items-center justify-between gap-2 t-bg-page">
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <span className="t-font-display font-bold text-xs uppercase tracking-widest t-text-strong">
             ◆ HISTORICAL PERFORMANCE SPLIT ({dateRangeLabel})
           </span>
@@ -262,23 +261,32 @@ export const SessionForAgainstTable: React.FC<{
         </div>
       </div>
 
-      {/* Shared Column Header */}
-      <div className="grid grid-cols-12 px-4 py-1.5 border-b t-border border-line text-sm t-font-display font-bold uppercase tracking-wider t-text-muted">
-        <div className="col-span-2">TEAM SPLIT</div>
-        <div className="col-span-1 text-right">GAMES</div>
-        <div className="col-span-1 text-right">{isAvg ? 'PTS/G' : 'PTS'}</div>
-        <div className="col-span-1 text-right">{isAvg ? 'GOALS/G' : 'GOALS'}</div>
-        <div className="col-span-1 text-right">{isAvg ? 'ASSISTS/G' : 'ASSISTS'}</div>
-        <div className="col-span-1 text-right">{isAvg ? 'SAVES/G' : 'SAVES'}</div>
-        <div className="col-span-1 text-right">SHOT %</div>
-        <div className="col-span-1 text-right">{isAvg ? 'DEMOS/G' : 'DEMOS'}</div>
-        <div className="col-span-1 text-right">BPM</div>
-        <div className="col-span-1 text-right">BOOST</div>
-        <div className="col-span-1 text-right">SUPER %</div>
-      </div>
+      <div
+        role="region"
+        aria-label="Historical performance split"
+        tabIndex={0}
+        className="overflow-x-auto"
+      >
+        <div className="min-w-[760px]">
+          {/* Shared Column Header */}
+          <div className="grid grid-cols-12 px-4 py-1.5 border-b t-border border-line text-sm t-font-display font-bold uppercase tracking-wider t-text-muted">
+            <div className="col-span-2">TEAM SPLIT</div>
+            <div className="col-span-1 text-right">GAMES</div>
+            <div className="col-span-1 text-right">{isAvg ? 'PTS/G' : 'PTS'}</div>
+            <div className="col-span-1 text-right">{isAvg ? 'GOALS/G' : 'GOALS'}</div>
+            <div className="col-span-1 text-right">{isAvg ? 'ASSISTS/G' : 'ASSISTS'}</div>
+            <div className="col-span-1 text-right">{isAvg ? 'SAVES/G' : 'SAVES'}</div>
+            <div className="col-span-1 text-right">SHOT %</div>
+            <div className="col-span-1 text-right">{isAvg ? 'DEMOS/G' : 'DEMOS'}</div>
+            <div className="col-span-1 text-right">BPM</div>
+            <div className="col-span-1 text-right">BOOST</div>
+            <div className="col-span-1 text-right">SUPER %</div>
+          </div>
 
-      {renderSplitRow('YOUR STATS (FOR)', 't-text-blue', 't-text-win', 't-text-blue', forStats, true)}
-      {renderSplitRow('OPPONENTS (AGAINST)', 't-text-orange', 't-text-loss', 't-text-orange', againstStats, false)}
+          {renderSplitRow('YOUR STATS (FOR)', 't-text-blue', 't-text-win', 't-text-blue', forStats, true)}
+          {renderSplitRow('OPPONENTS (AGAINST)', 't-text-orange', 't-text-loss', 't-text-orange', againstStats, false)}
+        </div>
+      </div>
     </div>
   );
 };
@@ -294,7 +302,8 @@ function breakdownModeTitle(item: SessionPlaylistBreakdownItem): string {
 }
 
 /**
- * Clickable per-mode session breakdown strip (`2V2 DOUBLES · 3–1 · 1485 (+29)` | `3V3 STANDARD ...` | `◆ ALL SESSION (5)`).
+ * Clickable per-mode session breakdown strip (`2V2 DOUBLES · 3–1 · 1485 (+29)` | `3V3 STANDARD ...`).
+ * Strictly surfaces concrete game modes played in the session without cross-mode rollups.
  */
 export const SessionModeBreakdownStrip: React.FC<{
   session: SessionResponse | null;
@@ -304,12 +313,7 @@ export const SessionModeBreakdownStrip: React.FC<{
   const items = React.useMemo(() => summarizeSessionPlaylists(session), [session]);
   if (items.length === 0) return null;
 
-  const normalizedActive = playlistFilterToParam(activeFilter) || 'all';
-  const totalMatches =
-    session?.matches?.length ??
-    session?.total_matches ??
-    items.reduce((acc, x) => acc + x.matches, 0);
-  const isAllActive = normalizedActive === 'all';
+  const normalizedActive = normalizeActiveModeKey(activeFilter);
 
   return (
     <div
@@ -321,8 +325,7 @@ export const SessionModeBreakdownStrip: React.FC<{
       {items.map((item) => {
         const itemParam = playlistFilterToParam(item.filterKey) || item.filterKey;
         const isActive =
-          normalizedActive !== 'all' &&
-          (normalizedActive === itemParam || matchesPlaylistFilter(item.playlistId, normalizedActive));
+          normalizedActive === itemParam || matchesPlaylistFilter(item.playlistId, normalizedActive);
         return (
           <button
             key={item.playlistId}
@@ -352,19 +355,6 @@ export const SessionModeBreakdownStrip: React.FC<{
           </button>
         );
       })}
-
-      <button
-        type="button"
-        aria-pressed={isAllActive}
-        onClick={() => onSelectFilter('all')}
-        className={`toolbar-btn px-3 py-1.5 t-border border t-radius t-font-display font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-colors duration-120 ${
-          isAllActive
-            ? 't-bg-blue-ink t-text-on-accent border-blue-ink'
-            : 'surface-plaque border-outline t-text-muted hover:text-ink hover:border-ink'
-        }`}
-      >
-        <span>◆ ALL SESSION ({totalMatches})</span>
-      </button>
     </div>
   );
 };
@@ -378,10 +368,10 @@ export const PlaylistRows: React.FC<{
     {playlists.map((pl) => (
       <div
         key={pl.playlist_id}
-        className="surface-plaque border border-outline px-5 py-3.5 flex items-center justify-between gap-4 font-display t-radius"
+        className="surface-plaque border border-outline px-5 py-3.5 flex flex-wrap items-center justify-between gap-4 font-display t-radius"
       >
         <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="font-bold text-xl tracking-t4 truncate">
+          <span className="font-bold text-xl tracking-t4 leading-tight break-words">
             {playlistLabels(pl.playlist_id, pl.playlist_name).name}
           </span>
           <span className="font-semibold text-sm tracking-t8 text-muted">

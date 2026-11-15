@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { DashboardTab, SessionResponse } from '../../types/api';
 import {
   deltaInk,
+  filterSessionByPlaylist,
   formatMmr,
   formatRecord,
   formatSigned,
   matchesPlaylistFilter,
-  playlistFilterToParam,
+  normalizeActiveModeKey,
   playlistLabels,
 } from '../../utils/broadcast';
 import { isDemoMode } from '../../utils/sampleData';
@@ -23,6 +24,7 @@ interface TopBarProps {
   onTabChange: (tab: DashboardTab) => void;
   inMatch: boolean;
   session: SessionResponse | null;
+  scopedSession?: SessionResponse | null;
   /** Playlist whose MMR is shown on the right (current match, active mode, else most played). */
   playlistId?: number;
   /** Shown while a live match is on screen; opens the column customiser. */
@@ -45,6 +47,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onTabChange,
   inMatch,
   session,
+  scopedSession,
   playlistId,
   onOpenColumns,
   onRefreshSession,
@@ -64,26 +67,34 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const matchCount = session?.matches?.length ?? session?.total_matches ?? 0;
-  const activeParam = playlistFilterToParam(activePlaylist);
+  const activeParam = normalizeActiveModeKey(activePlaylist);
+  const effectiveScopedSession = scopedSession ?? filterSessionByPlaylist(session, activeParam);
+  const matchCount =
+    effectiveScopedSession?.matches?.length ?? effectiveScopedSession?.total_matches ?? 0;
   const numericActiveId = Number(activeParam);
-  const isAllModes = activeParam === '';
+  const targetPlaylistId =
+    playlistId != null && matchesPlaylistFilter(playlistId, activeParam)
+      ? playlistId
+      : Number.isInteger(numericActiveId) && numericActiveId > 0
+      ? numericActiveId
+      : undefined;
   const playlist =
-    !isAllModes && playlistId != null ? session?.playlists?.[String(playlistId)] : undefined;
-  const groupPlaylists = !isAllModes
-    ? Object.values(session?.playlists ?? {}).filter((p) =>
-        matchesPlaylistFilter(p.playlist_id, activeParam),
-      )
-    : [];
+    targetPlaylistId != null
+      ? effectiveScopedSession?.playlists?.[String(targetPlaylistId)] ??
+        session?.playlists?.[String(targetPlaylistId)]
+      : undefined;
+  const groupPlaylists = Object.values(
+    effectiveScopedSession?.playlists ?? session?.playlists ?? {},
+  ).filter((p) => matchesPlaylistFilter(p.playlist_id, activeParam));
   const groupWins = groupPlaylists.reduce((s, p) => s + p.wins, 0);
   const groupLosses = groupPlaylists.reduce((s, p) => s + p.losses, 0);
   const modeShortLabel =
     Number.isInteger(numericActiveId) && numericActiveId > 0
       ? playlistLabels(numericActiveId).short
-      : activeParam === 'extra'
-      ? 'EXTRA'
       : activeParam === 'casual'
       ? 'CASUAL'
+      : activeParam === 'private'
+      ? 'PRIVATE'
       : activeParam.toUpperCase();
   const activeDemo = isDevBuild && (previewMode || isDemoMode());
   const overlayHref = activeDemo ? '/?mode=overlay&demo=true' : '/?mode=overlay';
@@ -156,17 +167,10 @@ export const TopBar: React.FC<TopBarProps> = ({
           <div className="flex flex-wrap items-center gap-1.5 text-xs shrink-0 ml-auto">
             {(session || playlist) && (
               <div className="hidden sm:flex items-center gap-2.5 px-2.5 py-1 surface-plaque t-border font-semibold text-xs tracking-wider text-muted whitespace-nowrap">
-                {isAllModes && session ? (
-                  <span>
-                    ALL MODES · SESSION{' '}
-                    <span className="text-ink-strong t-font-mono">
-                      {formatRecord(session.total_wins, session.total_losses)}
-                    </span>
-                  </span>
-                ) : playlist &&
-                  (Number.isInteger(numericActiveId) && numericActiveId > 0
-                    ? true
-                    : groupPlaylists.length === 1) ? (
+                {playlist &&
+                (Number.isInteger(numericActiveId) && numericActiveId > 0
+                  ? true
+                  : groupPlaylists.length === 1) ? (
                   <span>
                     {playlistLabels(playlist.playlist_id, playlist.playlist_name).short}{' '}
                     <span className="text-ink-strong t-font-mono">

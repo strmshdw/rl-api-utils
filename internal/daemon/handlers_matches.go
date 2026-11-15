@@ -283,7 +283,7 @@ func (d *Daemon) handlePruneMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
@@ -344,7 +344,7 @@ func (d *Daemon) handlePruneMatches(w http.ResponseWriter, r *http.Request) {
 
 // handleRetryMatch handles POST /api/matches/{guid}/retry.
 func (d *Daemon) handleRetryMatch(w http.ResponseWriter, r *http.Request) {
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}

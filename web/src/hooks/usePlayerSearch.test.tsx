@@ -81,7 +81,7 @@ describe('usePlayerSearch connection & pagination lifecycle', () => {
     expect(requests[3].signal.aborted).toBe(false);
   });
 
-  it('syncs playlist query param synchronously with DashboardContext activePlaylist and omits playlist when all', async () => {
+  it('syncs playlist query param synchronously with DashboardContext activePlaylist and always scopes to a concrete single game mode', async () => {
     localStorage.clear();
     const requests: RecordedFetch[] = [];
     globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -128,11 +128,11 @@ describe('usePlayerSearch connection & pagination lifecycle', () => {
     expect(requests[2].url).toContain('playlist=13');
     expect(requests[2].signal.aborted).toBe(false);
 
-    // Switch to 'all' -> omits playlist= param
+    // Passing legacy 'all' normalizes to concrete '11' (Ranked 2v2) instead of cross-mode unfiltered query
     await act(async () => setActivePlaylistFn('all'));
     await flush();
     expect(requests).toHaveLength(4);
-    expect(requests[3].url).not.toContain('playlist=');
+    expect(requests[3].url).toContain('playlist=11');
     expect(requests[3].signal.aborted).toBe(false);
   });
 });

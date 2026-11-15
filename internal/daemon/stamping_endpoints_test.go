@@ -147,3 +147,148 @@ func TestStampingConfigEndpointsAndLiveScoutingPatch(t *testing.T) {
 		t.Fatalf("live match opponent did not receive immediate scouting update: %+v", liveSnap.Opponents)
 	}
 }
+
+func TestNonLoopbackWebHost_AllowsSameOriginLANAndHostname_BlocksCSRFAndDNSRebinding(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lan_origin.db")
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	if err := os.WriteFile(cfgPath, []byte("auth:\n  provider: epic\nballchasing:\n  api_key: test-key\nweb:\n  host: \"0.0.0.0\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := storage.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	playerID := "Steam|lan_test_player|0"
+	now := time.Now().UTC()
+	_ = store.UpsertPlayer(ctx, &storage.PlayerRecord{
+		PlayerID:    playerID,
+		Platform:    "Steam",
+		PlayerName:  "LANPlayer",
+		RanksJSON:   "{}",
+		FirstSeenAt: now,
+		LastSeenAt:  now,
+	})
+
+	cfg := makeTestConfig(5*time.Minute, false)
+	cfg.ConfigPath = cfgPath
+	cfg.Web.Host = "0.0.0.0"
+
+	d, err := daemon.New(newMockSyncer(), cfg, daemon.WithStateStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := d.Handler(ctx)
+
+	sendReq := func(method, path, host, origin, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "http://"+host+path, bytes.NewReader([]byte(body)))
+		req.Host = host
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// 1. Same-origin LAN IPv4 saves succeed across mutating endpoints when web.host == "0.0.0.0"
+	lanEndpoints := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPatch, "/api/stamping/config", `{"carry_mmr_diff":125}`},
+		{http.MethodPost, "/api/stamping/config/reset", `{}`},
+		{http.MethodPatch, "/api/players/Steam%7Clan_test_player%7C0", `{"notes":"LAN save ok","tags":["clutch"]}`},
+		{http.MethodPost, "/api/sync/config", `{"trigger_threshold":6}`},
+		{http.MethodPost, "/api/session/reset", `{}`},
+	}
+	for _, ep := range lanEndpoints {
+		rec := sendReq(ep.method, ep.path, "192.168.1.42:49125", "http://192.168.1.42:49125", ep.body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for same-origin LAN %s %s, got %d: %s", ep.method, ep.path, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 2. Same-origin Tailscale IPv4 & IPv6 literals succeed
+	for _, tc := range []struct {
+		host   string
+		origin string
+	}{
+		{"100.88.12.5:49125", "http://100.88.12.5:49125"},
+		{"[fd7a:115c:a1e0::1]:49125", "http://[fd7a:115c:a1e0::1]:49125"},
+	} {
+		rec := sendReq(http.MethodPatch, "/api/stamping/config", tc.host, tc.origin, `{"higher_mmr_diff":80}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for same-origin IP literal %s, got %d: %s", tc.origin, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 3. Same-origin local machine hostname and router/mDNS aliases (.local, .lan, .home) succeed
+	if hostName, hErr := os.Hostname(); hErr == nil && hostName != "" {
+		for _, h := range []string{hostName + ":49125", hostName + ".local:49125"} {
+			rec := sendReq(http.MethodPatch, "/api/stamping/config", h, "http://"+h, `{"higher_mmr_diff":70}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK for same-origin machine hostname %s, got %d: %s", h, rec.Code, rec.Body.String())
+			}
+		}
+	}
+	for _, aliasHost := range []string{"rl-box.lan:49125", "rl-box.home:49125", "rl-box.local:49125", "rl-box.tail99.ts.net:49125"} {
+		rec := sendReq(http.MethodPatch, "/api/stamping/config", aliasHost, "http://"+aliasHost, `{"higher_mmr_diff":72}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for same-origin private/local alias %s, got %d: %s", aliasHost, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 3b. Loopback reverse proxy (e.g. Tailscale Serve / Caddy) forwarding X-Forwarded-Host succeeds even on default loopback daemon
+	loopbackCfg := makeTestConfig(5*time.Minute, false)
+	loopbackDaemon, err := daemon.New(newMockSyncer(), loopbackCfg, daemon.WithStateStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyReq := httptest.NewRequest(http.MethodPatch, "http://127.0.0.1:49125/api/stamping/config", bytes.NewReader([]byte(`{"higher_mmr_diff":68}`)))
+	proxyReq.RemoteAddr = "127.0.0.1:55123"
+	proxyReq.Host = "127.0.0.1:49125"
+	proxyReq.Header.Set("X-Forwarded-Host", "my-pc.tail99.ts.net")
+	proxyReq.Header.Set("Origin", "https://my-pc.tail99.ts.net")
+	proxyReq.Header.Set("Content-Type", "application/json")
+	proxyRec := httptest.NewRecorder()
+	loopbackDaemon.Handler(ctx).ServeHTTP(proxyRec, proxyReq)
+	if proxyRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for loopback reverse-proxy X-Forwarded-Host, got %d: %s", proxyRec.Code, proxyRec.Body.String())
+	}
+
+	// 4. Vite dev proxy over local interface IP succeeds when web.host is non-loopback
+	if lanIP, ipErr := daemon.DiscoverLANIPv4(); ipErr == nil && lanIP != "" {
+		rec := sendReq(http.MethodPatch, "/api/stamping/config", "localhost:49125", "http://"+lanIP+":5173", `{"higher_mmr_diff":65}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for local interface dev-proxy Origin %s, got %d: %s", lanIP, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 5. Cross-origin CSRF and DNS-rebinding attacks still return 403 Forbidden
+	blocked := []struct {
+		name   string
+		host   string
+		origin string
+	}{
+		{"cross-origin external site", "192.168.1.42:49125", "https://evil.example"},
+		{"cross-origin neighbor LAN IP", "192.168.1.42:49125", "http://192.168.1.250:49125"},
+		{"null sandboxed origin", "192.168.1.42:49125", "null"},
+		{"DNS rebinding public domain", "rebind.attacker.example:49125", "http://rebind.attacker.example:49125"},
+		{"DNS rebinding subdomain spoof", "my-pc.attacker.example:49125", "http://my-pc.attacker.example:49125"},
+	}
+	for _, tc := range blocked {
+		rec := sendReq(http.MethodPatch, "/api/stamping/config", tc.host, tc.origin, `{"carry_mmr_diff":200}`)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s: expected 403 Forbidden for Host=%q Origin=%q, got %d: %s", tc.name, tc.host, tc.origin, rec.Code, rec.Body.String())
+		}
+	}
+}

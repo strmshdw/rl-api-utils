@@ -72,7 +72,7 @@ func (d *Daemon) handleResetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
@@ -96,7 +96,7 @@ func (d *Daemon) handleContinueSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
@@ -137,7 +137,7 @@ func (d *Daemon) handleDismissContinueSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}

@@ -29,7 +29,7 @@ func (d *Daemon) handleUpdateStampingConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
@@ -75,7 +75,7 @@ func (d *Daemon) handleResetStampingConfig(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}

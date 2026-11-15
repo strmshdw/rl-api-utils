@@ -15,6 +15,8 @@ import {
   formatArenaName,
   formatMmr,
   matchesPlaylistFilter,
+  modeKeyFromPlaylistId,
+  normalizeActiveModeKey,
   playlistFilterToParam,
   playlistLabels,
   shortRank,
@@ -97,34 +99,46 @@ const CORE_SPECS: ReadonlyArray<{ id: number; label: string }> = [
 ];
 
 export function playlistIdToScope(playlistId: number): ProfilePlaylistScope {
-  if (playlistId === 11) return '2v2';
-  if (playlistId === 13) return '3v3';
-  if (playlistId === 10) return '1v1';
-  return 'all';
+  const modeKey = modeKeyFromPlaylistId(playlistId);
+  if (modeKey === '11') return '2v2';
+  if (modeKey === '13') return '3v3';
+  if (modeKey === '10') return '1v1';
+  if (
+    modeKey === '27' ||
+    modeKey === '28' ||
+    modeKey === '29' ||
+    modeKey === '30' ||
+    modeKey === '34'
+  ) {
+    return modeKey;
+  }
+  if (modeKey === 'casual') return 'casual';
+  return '2v2';
 }
 
 export function parseDashboardPlaylist(activePlaylist: string): {
   scope: ProfilePlaylistScope;
   customId: number | null;
 } {
-  const f = (activePlaylist || '').trim().toLowerCase();
-  if (!f || f === 'all' || f === '0') return { scope: 'all', customId: null };
-  if (f === '11' || f === '2v2' || f === 'doubles' || f === 'ranked_2v2') {
-    return { scope: '2v2', customId: null };
+  const norm = normalizeActiveModeKey(activePlaylist);
+  if (norm === '11') return { scope: '2v2', customId: null };
+  if (norm === '13') return { scope: '3v3', customId: null };
+  if (norm === '10') return { scope: '1v1', customId: null };
+  if (
+    norm === '27' ||
+    norm === '28' ||
+    norm === '29' ||
+    norm === '30' ||
+    norm === '34'
+  ) {
+    return { scope: norm, customId: null };
   }
-  if (f === '13' || f === '12' || f === '3v3' || f === 'standard' || f === 'ranked_3v3') {
-    return { scope: '3v3', customId: null };
-  }
-  if (f === '10' || f === '1v1' || f === 'duel' || f === 'ranked_1v1') {
-    return { scope: '1v1', customId: null };
-  }
-  if (f === 'extra') return { scope: 'extra', customId: null };
-  if (f === 'casual' || f === 'unranked') return { scope: 'casual', customId: null };
-  const num = Number(playlistFilterToParam(f));
+  if (norm === 'casual') return { scope: 'casual', customId: null };
+  const num = Number(norm);
   if (Number.isInteger(num) && num > 0) {
-    return { scope: 'all', customId: num };
+    return { scope: '2v2', customId: num };
   }
-  return { scope: 'all', customId: null };
+  return { scope: '2v2', customId: null };
 }
 
 function mapSortOptionToQuery(opt: ProfileSortOption): { sortBy: string; sortDir: 'asc' | 'desc' } {
@@ -154,7 +168,11 @@ export function usePlayerDossierData(
   const { enabled = true, pageSize = 20 } = options;
   const { activePlaylist, dateRangeQueryParams, stampingConfig } = useDashboard();
 
-  const [profile, setProfile] = useState<PlayerDetailResponse | null>(null);
+  const [profileEntry, setProfileEntry] = useState<{
+    reqPlayerId: string;
+    scopeKey: string;
+    data: PlayerDetailResponse;
+  } | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -258,25 +276,35 @@ export function usePlayerDossierData(
   };
 
   const setPlaylistById = (playlistId: number) => {
-    if (playlistId === 0 || activePlaylistId === playlistId) {
-      handleSetStatPlaylist('all');
-      return;
-    }
+    if (playlistId <= 0) return;
+    const modeKey = modeKeyFromPlaylistId(playlistId);
     const mapped = playlistIdToScope(playlistId);
-    if (mapped !== 'all') {
-      handleSetStatPlaylist(mapped);
-    } else {
+    if (modeKey === 'private' || (mapped === '2v2' && playlistId !== 11)) {
       setScopeTracker({
         playerId,
         activePlaylist,
-        statPlaylist: 'all',
+        statPlaylist: '2v2',
         customPlaylistId: playlistId,
       });
+      return;
     }
+    handleSetStatPlaylist(mapped);
   };
 
+  const profileScopeKey = [
+    playerId ?? '',
+    activePlaylistParam,
+    dateRangeQueryParams.from ?? '',
+    dateRangeQueryParams.to ?? '',
+  ].join('\x1f');
+
+  const profile =
+    enabled && playerId && profileEntry?.reqPlayerId === playerId
+      ? profileEntry.data
+      : null;
+  const isFreshProfileScope = Boolean(profile && profileEntry?.scopeKey === profileScopeKey);
+
   useEffect(() => {
-    setProfile(null);
     if (!enabled || !playerId) return;
 
     const controller = new AbortController();
@@ -295,11 +323,17 @@ export function usePlayerDossierData(
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load player`);
         return res.json();
       })
-      .then((data: PlayerDetailResponse) => setProfile(data))
+      .then((data: PlayerDetailResponse) =>
+        setProfileEntry({ reqPlayerId: playerId, scopeKey: profileScopeKey, data }),
+      )
       .catch((err) => {
         if (!controller.signal.aborted) {
           if (isDemoMode()) {
-            setProfile(getSamplePlayerProfile(playerId, playerName));
+            setProfileEntry({
+              reqPlayerId: playerId,
+              scopeKey: profileScopeKey,
+              data: getSamplePlayerProfile(playerId, playerName),
+            });
           } else {
             setError(err instanceof Error ? err.message : 'Error fetching profile');
           }
@@ -315,6 +349,7 @@ export function usePlayerDossierData(
     playerId,
     playerName,
     activePlaylistParam,
+    profileScopeKey,
     dateRangeQueryParams.from,
     dateRangeQueryParams.to,
   ]);
@@ -427,25 +462,27 @@ export function usePlayerDossierData(
   );
 
   const scopedMatchups = useMemo(() => {
-    const list = profile?.matchups ?? [];
+    const list = isFreshProfileScope
+      ? profile?.matchups ?? []
+      : profile?.playlist_breakdown ?? profile?.matchups ?? [];
     if (!activePlaylistParam) return list;
     return list.filter((m) => matchesPlaylistFilter(m.playlist_id, activePlaylistParam));
-  }, [profile?.matchups, activePlaylistParam]);
+  }, [isFreshProfileScope, profile?.matchups, profile?.playlist_breakdown, activePlaylistParam]);
 
   const totals = useMemo(() => sumMatchups(scopedMatchups), [scopedMatchups]);
 
   const withStats = useMemo(
     () =>
-      profile?.with_you_stats ??
+      (isFreshProfileScope ? profile?.with_you_stats : undefined) ??
       emptyRoleStats(totals.mate.wins + totals.mate.losses, totals.mate.wins, totals.mate.losses),
-    [profile?.with_you_stats, totals.mate.wins, totals.mate.losses],
+    [isFreshProfileScope, profile?.with_you_stats, totals.mate.wins, totals.mate.losses],
   );
 
   const vsStats = useMemo(
     () =>
-      profile?.against_you_stats ??
+      (isFreshProfileScope ? profile?.against_you_stats : undefined) ??
       emptyRoleStats(totals.vs.wins + totals.vs.losses, totals.vs.wins, totals.vs.losses),
-    [profile?.against_you_stats, totals.vs.wins, totals.vs.losses],
+    [isFreshProfileScope, profile?.against_you_stats, totals.vs.wins, totals.vs.losses],
   );
 
   const isOwnProfile = useMemo(() => {
@@ -552,10 +589,8 @@ export function usePlayerDossierData(
         return p?.mmr || p?.rank?.mmr || 0;
       })
       .filter((v) => v > 0);
-    if (fromMatches.length >= 2) return fromMatches;
-    const rankPoints = allRanks.map((r) => r.mmr).filter((v) => v > 0);
-    return rankPoints;
-  }, [matches, id, name, allRanks]);
+    return fromMatches.length >= 2 ? fromMatches : [];
+  }, [matches, id, name]);
 
   const saveNotes = async (newNotes: string, newTags: string[]) => {
     const res = await fetch(`/api/players/${encodeURIComponent(id)}`, {
@@ -564,17 +599,13 @@ export function usePlayerDossierData(
       body: JSON.stringify({ notes: newNotes, tags: newTags }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to update player`);
-    setProfile((prev) => (prev ? { ...prev, notes: newNotes, tags: newTags } : null));
+    setProfileEntry((prev) =>
+      prev ? { ...prev, data: { ...prev.data, notes: newNotes, tags: newTags } } : null,
+    );
   };
 
   const clearFilters = () => {
     setRoleFilter('all');
-    setScopeTracker({
-      playerId,
-      activePlaylist,
-      statPlaylist: 'all',
-      customPlaylistId: null,
-    });
     setResultFilter('all');
     setSearchQuery('');
   };

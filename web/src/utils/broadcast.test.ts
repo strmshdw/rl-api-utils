@@ -15,6 +15,7 @@ import {
   formatSigned,
   matchesPlaylistFilter,
   modeKeyFromPlaylistId,
+  normalizeActiveModeKey,
   onlineIdOf,
   platformLabel,
   playlistFilterToParam,
@@ -191,6 +192,17 @@ describe('labels', () => {
     expect(modeKeyFromPlaylistId(12)).toBe('13');
     expect(modeKeyFromPlaylistId(2)).toBe('casual');
 
+    expect(normalizeActiveModeKey(undefined)).toBe('11');
+    expect(normalizeActiveModeKey('')).toBe('11');
+    expect(normalizeActiveModeKey('all')).toBe('11');
+    expect(normalizeActiveModeKey('0')).toBe('11');
+    expect(normalizeActiveModeKey('extra')).toBe('27');
+    expect(normalizeActiveModeKey('2v2')).toBe('11');
+    expect(normalizeActiveModeKey('3v3')).toBe('13');
+    expect(normalizeActiveModeKey('hoops')).toBe('27');
+    expect(normalizeActiveModeKey('28')).toBe('28');
+    expect(normalizeActiveModeKey('casual')).toBe('casual');
+
     expect(positioningRoleLabels(10)).toEqual({
       showRotation: false,
       forwardLabel: 'MOST FWD',
@@ -330,10 +342,13 @@ describe('summarizeSession', () => {
     expect(s.kpis.find((k) => k.key === 'streak')?.value).toBe('—');
   });
 
-  it('handles a missing session', () => {
-    const s = summarizeSession(null);
+  it('handles a missing or 0-match mode-scoped session without cross-mode ALL PLAYLISTS sublabels', () => {
+    const s = summarizeSession(null, '28');
     expect(s.kpis.find((k) => k.key === 'record')?.value).toBe('—');
-    expect(s.kpis.find((k) => k.key === 'mmr')?.value).toBe('±0');
+    const mmr = s.kpis.find((k) => k.key === 'mmr')!;
+    expect(mmr.value).toBe('±0');
+    expect(mmr.sub).toBe('RANKED RUMBLE');
+    expect(mmr.sub).not.toContain('ALL PLAYLISTS');
   });
 
   it('does not sum incompatible playlist MMRs together in multi-playlist sessions and filters by playlist cleanly', () => {

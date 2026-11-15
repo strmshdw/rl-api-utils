@@ -267,7 +267,7 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 
 // handlePatchPlayer handles PATCH /players/{id...} and PATCH /api/players/{id...}.
 func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}

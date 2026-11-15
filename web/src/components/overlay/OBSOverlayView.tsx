@@ -6,7 +6,7 @@ import {
   formatPct,
   formatRecord,
   formatSigned,
-  playlistFilterToParam,
+  normalizeActiveModeKey,
   playlistLabels,
   formatMatchClock,
 } from '../../utils/broadcast';
@@ -149,38 +149,26 @@ export const OBSOverlayView: React.FC = () => {
   for (const p of bluePlayers) blueScore += p.stats?.goals || 0;
   for (const p of orangePlayers) orangeScore += p.stats?.goals || 0;
 
-  // Resolve active playlist stats so SESSION W–L and MMR delta always belong to the same playlist
+  // Resolve active playlist stats strictly for a single playlist (never falling back across modes)
   const activePlaylistStats: PlaylistSessionStats | null = useMemo(() => {
     const playlists = session?.playlists;
     if (!playlists) return null;
 
     if (currentMatch?.playlist_id) {
-      const direct = playlists[String(currentMatch.playlist_id)] || playlists[currentMatch.playlist_id];
-      if (direct) return direct;
+      return playlists[String(currentMatch.playlist_id)] || playlists[currentMatch.playlist_id] || null;
     }
 
     try {
       const storedMode = window.localStorage?.getItem('rlsync_active_playlist');
-      const normalized = storedMode ? playlistFilterToParam(storedMode) : '';
-      if (normalized && playlists[normalized]) {
-        return playlists[normalized];
-      }
+      const normalized = normalizeActiveModeKey(storedMode);
+      return playlists[normalized] || null;
     } catch {
-      // Ignore storage access errors in sandboxed browser sources
+      return playlists['11'] || null;
     }
+  }, [currentMatch?.playlist_id, session?.playlists]);
 
-    if (session?.most_played_playlist?.id) {
-      const mostPlayed = playlists[String(session.most_played_playlist.id)];
-      if (mostPlayed) return mostPlayed;
-    }
-
-    const entries = Object.values(playlists);
-    if (entries.length === 0) return null;
-    return [...entries].sort((a, b) => (b.matches_played || 0) - (a.matches_played || 0))[0] ?? null;
-  }, [currentMatch?.playlist_id, session?.playlists, session?.most_played_playlist?.id]);
-
-  const scopedWins = activePlaylistStats ? activePlaylistStats.wins : (session?.total_wins ?? 0);
-  const scopedLosses = activePlaylistStats ? activePlaylistStats.losses : (session?.total_losses ?? 0);
+  const scopedWins = activePlaylistStats ? activePlaylistStats.wins : 0;
+  const scopedLosses = activePlaylistStats ? activePlaylistStats.losses : 0;
   const winPct = formatPct(scopedWins, scopedLosses);
 
   const mmrDelta = activePlaylistStats?.mmr_delta ?? 0;

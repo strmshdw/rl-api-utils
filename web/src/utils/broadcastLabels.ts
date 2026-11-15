@@ -5,6 +5,7 @@ export {
   formatArenaName,
   matchesPlaylistFilter,
   modeKeyFromPlaylistId,
+  normalizeActiveModeKey,
   playlistFilterToParam,
   positioningRoleLabels,
   type PositioningRoleLabels,

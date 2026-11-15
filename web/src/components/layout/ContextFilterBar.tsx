@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DateRangePreset, useDashboard } from '../../context/DashboardContext';
-import { playlistFilterToParam } from '../../utils/broadcast';
+import { normalizeActiveModeKey } from '../../utils/broadcast';
 import type { DashboardTab } from '../../types/api';
 
 interface ContextFilterBarProps {
@@ -15,14 +15,12 @@ const EXTRA_MODE_ITEMS: ReadonlyArray<{ id: string; label: string; shortLabel: s
   { id: '29', label: 'DROPSHOT', shortLabel: 'DROPSHOT' },
   { id: '30', label: 'SNOW DAY', shortLabel: 'SNOW DAY' },
   { id: '34', label: 'TOURNAMENTS', shortLabel: 'TOURNAMENT' },
-  { id: 'extra', label: 'ALL EXTRA MODES', shortLabel: 'ALL EXTRA' },
 ];
 
 const EXTRA_MODE_SET = new Set(EXTRA_MODE_ITEMS.map((item) => item.id));
 
 function normalizeModeKey(raw: string): string {
-  const param = playlistFilterToParam(raw);
-  return param || 'all';
+  return normalizeActiveModeKey(raw);
 }
 
 const TOOLBAR_TOGGLE_BTN =
@@ -192,13 +190,8 @@ export const ContextFilterBar: React.FC<ContextFilterBarProps> = ({
     setActivePlaylist(mode);
   };
 
-  const defaultModeForTab = activeTab === 'history' ? 'all' : '11';
-  const showReset =
-    dateRange !== 'all' ||
-    showCustomCalendar ||
-    (activeTab === 'history'
-      ? normalizedMode !== 'all'
-      : normalizedMode !== '11' && normalizedMode !== 'all');
+  const defaultModeForTab = '11';
+  const showReset = dateRange !== 'all' || showCustomCalendar || normalizedMode !== '11';
 
   const handleResetScope = () => {
     setDateRange('all');
@@ -300,32 +293,28 @@ export const ContextFilterBar: React.FC<ContextFilterBarProps> = ({
                     alignExtraRight ? 'right-0' : 'left-0'
                   }`}
                 >
-                  {EXTRA_MODE_ITEMS.map((item, idx) => {
+                  {EXTRA_MODE_ITEMS.map((item) => {
                     const checked = normalizedMode === item.id;
                     return (
-                      <React.Fragment key={item.id}>
-                        {idx === EXTRA_MODE_ITEMS.length - 1 && (
-                          <hr className="border-t border-line my-1" />
-                        )}
-                        <button
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={checked}
-                          onClick={(e) => {
-                            const fromPointer = e.detail !== 0;
-                            setActivePlaylist(item.id);
-                            closeExtraAndRestoreFocus(fromPointer);
-                          }}
-                          className={`toolbar-btn w-full px-3 py-1.5 text-left t-font-display font-bold text-xs uppercase tracking-wider flex items-center justify-between gap-3 cursor-pointer ${
-                            checked
-                              ? 't-bg-blue-ink t-text-on-accent'
-                              : 't-text-ink hover:bg-panel-hover'
-                          }`}
-                        >
-                          <span>{item.label}</span>
-                          {checked && <span aria-hidden="true">✓</span>}
-                        </button>
-                      </React.Fragment>
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={checked}
+                        onClick={(e) => {
+                          const fromPointer = e.detail !== 0;
+                          setActivePlaylist(item.id);
+                          closeExtraAndRestoreFocus(fromPointer);
+                        }}
+                        className={`toolbar-btn w-full px-3 py-1.5 text-left t-font-display font-bold text-xs uppercase tracking-wider flex items-center justify-between gap-3 cursor-pointer ${
+                          checked
+                            ? 't-bg-blue-ink t-text-on-accent'
+                            : 't-text-ink hover:bg-panel-hover'
+                        }`}
+                      >
+                        <span>{item.label}</span>
+                        {checked && <span aria-hidden="true">✓</span>}
+                      </button>
                     );
                   })}
                 </div>
@@ -340,15 +329,6 @@ export const ContextFilterBar: React.FC<ContextFilterBarProps> = ({
               className={`${TOOLBAR_TOGGLE_BTN} border-l t-border`}
             >
               CASUAL
-            </button>
-            <button
-              type="button"
-              id="btn-mode-all"
-              aria-pressed={normalizedMode === 'all'}
-              onClick={() => selectMode('all')}
-              className={`${TOOLBAR_TOGGLE_BTN} border-l t-border`}
-            >
-              {activeTab === 'history' ? 'ALL MATCHES' : 'ALL'}
             </button>
           </div>
         </div>

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/dank/rl-api-utils/internal/domain"
@@ -54,24 +56,146 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 }
 
 func isLoopbackHost(host string) bool {
-	h := strings.ToLower(strings.TrimSpace(host))
+	h := strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
 	return h == "localhost" || h == "127.0.0.1" || h == "::1"
 }
 
-func isAllowedMutatingOrigin(r *http.Request) bool {
+func isLocalInterfaceIP(host string) bool {
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		var ifaceIP net.IP
+		switch v := addr.(type) {
+		case *net.IPNet:
+			ifaceIP = v.IP
+		case *net.IPAddr:
+			ifaceIP = v.IP
+		}
+		if ifaceIP != nil && ifaceIP.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTrustedNonLoopbackHostname(originHostname, configuredHost string) bool {
+	if net.ParseIP(originHostname) != nil {
+		return true
+	}
+	if configuredHost != "" && configuredHost != "0.0.0.0" && configuredHost != "::" && strings.EqualFold(originHostname, configuredHost) {
+		return true
+	}
+	// Single-label intranet/NetBIOS hostnames cannot be registered on public DNS (immune to DNS rebinding).
+	if !strings.Contains(originHostname, ".") {
+		return true
+	}
+	for _, suffix := range []string{".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain", ".ts.net"} {
+		if strings.HasSuffix(originHostname, suffix) {
+			return true
+		}
+	}
+	if machineHost, err := os.Hostname(); err == nil && machineHost != "" {
+		mh := strings.ToLower(strings.TrimSpace(machineHost))
+		if originHostname == mh {
+			return true
+		}
+	}
+	return false
+}
+
+func isLoopbackOrLocalPeer(remoteAddr string) bool {
+	raw := strings.TrimSpace(remoteAddr)
+	if raw == "" {
+		return false
+	}
+	host := raw
+	if h, _, err := net.SplitHostPort(raw); err == nil {
+		host = h
+	}
+	return isLoopbackHost(host) || isLocalInterfaceIP(host)
+}
+
+func normalizeOriginHostPort(scheme, rawHost string) string {
+	h := strings.ToLower(strings.TrimSpace(rawHost))
+	if h == "" {
+		return ""
+	}
+	host, port, err := net.SplitHostPort(h)
+	if err != nil {
+		return h
+	}
+	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
+		if strings.Contains(host, ":") {
+			return "[" + host + "]"
+		}
+		return host
+	}
+	return h
+}
+
+func isAllowedMutatingOriginForHost(r *http.Request, configuredHost string) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
 		return true // non-browser clients (curl, Go HTTP clients)
 	}
 	u, err := url.Parse(origin)
-	if err != nil {
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return false
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme != "http" && scheme != "https" {
 		return false
 	}
-	return isLoopbackHost(u.Hostname())
+	originHostname := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if originHostname == "" {
+		return false
+	}
+	if isLoopbackHost(originHostname) {
+		return true
+	}
+
+	cfgHost := strings.Trim(strings.ToLower(strings.TrimSpace(configuredHost)), "[]")
+	origHost := normalizeOriginHostPort(scheme, u.Host)
+
+	if isLoopbackOrLocalPeer(r.RemoteAddr) {
+		if xfh := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0]); xfh != "" {
+			if normalizeOriginHostPort(scheme, xfh) == origHost && isTrustedNonLoopbackHostname(originHostname, cfgHost) {
+				return true
+			}
+		}
+		if isLocalInterfaceIP(originHostname) {
+			return true
+		}
+	}
+
+	if cfgHost == "" || isLoopbackHost(cfgHost) {
+		return false
+	}
+
+	// When web.host is non-loopback (e.g. "0.0.0.0"), allow same-origin requests over IP literals
+	// or trusted local/tailnet hostnames, plus dev-proxy origins on this machine's own NIC IPs.
+	reqHost := normalizeOriginHostPort(scheme, r.Host)
+	if reqHost != "" && origHost == reqHost && isTrustedNonLoopbackHostname(originHostname, cfgHost) {
+		return true
+	}
+	return isLocalInterfaceIP(originHostname)
+}
+
+func isAllowedMutatingOrigin(r *http.Request) bool {
+	return isAllowedMutatingOriginForHost(r, "127.0.0.1")
+}
+
+func (d *Daemon) isAllowedMutatingOrigin(r *http.Request) bool {
+	if d == nil || d.cfg == nil {
+		return isAllowedMutatingOrigin(r)
+	}
+	return isAllowedMutatingOriginForHost(r, d.httpHost())
 }
 
 func isMutatingMethod(method string) bool {
@@ -118,8 +242,12 @@ func isPathTraversal(r *http.Request) bool {
 }
 
 // corsMiddleware enforces path traversal rejection, standard CORS headers, preflight
-// handling, and loopback Origin CSRF checks on mutating HTTP methods.
-func corsMiddleware(next http.Handler) http.Handler {
+// handling, and Origin CSRF / DNS-rebinding checks on mutating HTTP methods.
+func corsMiddleware(next http.Handler, allowOriginFn ...func(*http.Request) bool) http.Handler {
+	originCheck := isAllowedMutatingOrigin
+	if len(allowOriginFn) > 0 && allowOriginFn[0] != nil {
+		originCheck = allowOriginFn[0]
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Reject path traversal attempts immediately before ServeMux canonicalization redirects
 		if isPathTraversal(r) {
@@ -136,7 +264,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if isMutatingMethod(r.Method) && !isAllowedMutatingOrigin(r) {
+		if isMutatingMethod(r.Method) && !originCheck(r) {
 			writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 			return
 		}

@@ -7,9 +7,11 @@ import {
   formatElapsed,
   formatShortDate,
   matchesPlaylistFilter,
+  normalizeActiveModeKey,
   onlineIdOf,
   summarizeSession,
 } from '../../utils/broadcast';
+import { useDashboard } from '../../context/DashboardContext';
 import { EmptyLine, GhostButton, PageHeader, PrimaryButton } from '../common/ui';
 import {
   SessionForAgainstTable,
@@ -57,8 +59,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
   onDismissContinueSession,
   onInspectPlayer,
 }) => {
+  const { activePlaylist: contextActivePlaylist } = useDashboard();
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
-  const [playlistFilter, setPlaylistFilter] = useState<string>(() => activePlaylist ?? 'all');
+  const [playlistFilter, setPlaylistFilter] = useState<string>(() =>
+    normalizeActiveModeKey(activePlaylist ?? contextActivePlaylist),
+  );
   const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
   const [inspectedSessionId, setInspectedSessionId] = useState<string | null>(null);
   const [clearedPendingSnapshot, setClearedPendingSnapshot] = useState<{
@@ -75,13 +80,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   useEffect(() => {
     if (activePlaylist !== undefined) {
-      setPlaylistFilter(activePlaylist);
+      setPlaylistFilter(normalizeActiveModeKey(activePlaylist));
     }
   }, [activePlaylist]);
 
   const handlePlaylistSelect = (next: string) => {
-    setPlaylistFilter(next);
-    onSelectPlaylist?.(next);
+    const normalized = normalizeActiveModeKey(next);
+    setPlaylistFilter(normalized);
+    onSelectPlaylist?.(normalized);
   };
 
   useEffect(() => {
@@ -136,19 +142,31 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const activeSession = inspectedSession ?? session;
   const effectiveScopedSession = useMemo(() => {
     if (!activeSession) return null;
-    if (!playlistFilter || playlistFilter === 'all') return activeSession;
-    if (!inspectedSession && scopedSession && playlistFilter === activePlaylist) {
+    if (
+      !inspectedSession &&
+      scopedSession &&
+      activePlaylist !== undefined &&
+      normalizeActiveModeKey(activePlaylist) === playlistFilter
+    ) {
       return scopedSession;
     }
     return filterSessionByPlaylist(activeSession, playlistFilter);
   }, [activeSession, playlistFilter, inspectedSession, scopedSession, activePlaylist]);
 
+  const scopedContinuableSession = useMemo(() => {
+    if (!session?.continuable_session) return null;
+    const scoped = filterSessionByPlaylist(session.continuable_session, playlistFilter);
+    return scoped && scoped.total_matches > 0 ? scoped : null;
+  }, [session?.continuable_session, playlistFilter]);
+
   const summary = useMemo(
-    () => summarizeSession(effectiveScopedSession),
-    [effectiveScopedSession],
+    () => summarizeSession(effectiveScopedSession, playlistFilter),
+    [effectiveScopedSession, playlistFilter],
   );
-  const matches = activeSession?.matches ?? [];
-  const playlists = activeSession?.playlists ? Object.values(activeSession.playlists) : [];
+  const matches = effectiveScopedSession?.matches ?? [];
+  const playlists = effectiveScopedSession?.playlists
+    ? Object.values(effectiveScopedSession.playlists)
+    : [];
 
   const localPlayerIds = useMemo(() => {
     const ids = new Set<string>();
@@ -327,9 +345,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     <div data-testid="session-view" className="font-display flex flex-col gap-4">
       {header}
 
-      {session.continuable_session && (
+      {scopedContinuableSession && (
         <ContinueSessionBanner
-          continuableSession={session.continuable_session}
+          continuableSession={scopedContinuableSession}
           onContinue={(id) => {
             setInspectedSessionId(null);
             onContinueSession?.(id);
@@ -348,8 +366,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
               VIEWING PAST SESSION
             </span>
             <span className="font-semibold text-sm tracking-t8 text-muted uppercase">
-              {formatShortDate(inspectedSession.started_at)} · {inspectedSession.total_wins}W–
-              {inspectedSession.total_losses}L
+              {formatShortDate(inspectedSession.started_at)} · {effectiveScopedSession?.total_wins ?? 0}W–
+              {effectiveScopedSession?.total_losses ?? 0}L
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -388,7 +406,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       <SessionForAgainstTable session={effectiveScopedSession} />
 
       <SessionMatchesSection
-        totalMatchCount={effectiveScopedSession?.matches?.length ?? 0}
+        totalMatchCount={matches.length}
         sessionMatchCount={matches.length}
         rows={rows}
         outcomeFilter={outcomeFilter}
@@ -400,6 +418,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         pastSessions={pastSessions}
         currentSessionId={session.session_id}
         activeSessionId={activeSession?.session_id}
+        activePlaylist={playlistFilter}
         onSelectSession={setInspectedSessionId}
         onContinueSession={onContinueSession}
       />

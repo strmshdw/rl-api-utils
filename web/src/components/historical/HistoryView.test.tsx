@@ -131,23 +131,32 @@ describe('HistoryView', () => {
     vi.restoreAllMocks();
   });
 
-  it('fetches /api/matches and renders a row per match', async () => {
-    const calls = mockFetch([record({ match_guid: 'a', upload_status: 'UPLOADED', ballchasing_url: 'https://ballchasing.com/replay/a' })]);
+  it('fetches /api/matches scoped to default 2v2 mode and renders a row per match without ALL MODES or blended EXTRA pills', async () => {
+    const calls = mockFetch([record({ match_guid: 'a', playlist: 11, upload_status: 'UPLOADED', ballchasing_url: 'https://ballchasing.com/replay/a' })]);
     const { container } = await mount(<HistoryView />);
-    expect(calls.some((c) => c.startsWith('GET /api/matches?limit=20&offset=0'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('GET /api/matches?limit=20&offset=0&playlist=11'))).toBe(true);
+    const playlistFilterGroup = container.querySelector('[aria-label="Filter by playlist"]')!;
+    const labels = Array.from(playlistFilterGroup.querySelectorAll('button')).map((b) => b.textContent?.trim());
+    expect(labels).not.toContain('ALL MODES');
+    expect(labels).not.toContain('EXTRA');
+    expect(labels).toContain('2V2');
+    expect(labels).toContain('HOOPS');
+    expect(container.querySelector('[role="region"][aria-label="Match history"]')).not.toBeNull();
     const [row] = rows(container);
-    expect(row.textContent).toContain('RANKED STANDARD');
+    expect(row.textContent).toContain('RANKED DOUBLES');
     expect(row.textContent).toContain('Neo Tokyo');
     expect(row.querySelector('a[href="https://ballchasing.com/replay/a"]')?.textContent).toBe('BALLCHASING ↗');
   });
 
-  it('sends the playlist filter to the API and resets to page 1', async () => {
+  it('sends concrete playlist filters (including individual extra modes) to the API and resets to page 1', async () => {
     const calls = mockFetch([record({})]);
     const { container } = await mount(<HistoryView />);
-    await clickText(container, '2V2');
-    expect(calls.some((c) => c.includes('playlist=11'))).toBe(true);
+    await clickText(container, '3V3');
+    expect(calls.some((c) => c.includes('playlist=13'))).toBe(true);
     await clickText(container, '1V1');
     expect(calls.some((c) => c.includes('playlist=10'))).toBe(true);
+    await clickText(container, 'HOOPS');
+    expect(calls.some((c) => c.includes('playlist=27'))).toBe(true);
   });
 
   it('filters by result and strict LOCAL status (downloaded && !uploaded) and preserves short_rank divisions in box scores', async () => {
@@ -252,15 +261,20 @@ describe('HistoryView', () => {
     expect(button.disabled).toBe(true);
   });
 
-  it('falls back to demo matches in preview mode when the store is empty', async () => {
+  it('falls back to mode-scoped demo matches in preview mode when the store is empty', async () => {
     setSearch('?preview=true');
     mockFetch([]);
     const { container } = await mount(<HistoryView />);
     const text = container.textContent || '';
     expect(text).toContain('DFH Stadium');
-    expect(text).toContain('Champions Field');
     expect(text).toContain('Utopia Coliseum');
+    expect(text).not.toContain('Champions Field');
     expect(text).not.toContain('SIMULATED PREVIEW');
+
+    await clickText(container, '3V3');
+    const text3v3 = container.textContent || '';
+    expect(text3v3).toContain('Champions Field');
+    expect(text3v3).not.toContain('DFH Stadium');
   });
 
   it('shows an empty state on the page-title layout', async () => {

@@ -27,6 +27,7 @@ interface ThresholdNumberFieldProps {
   value: number;
   bounds: NumericStampingBounds;
   disabled?: boolean;
+  pairedRow?: boolean;
   onCommit: (key: keyof StampingConfig, nextValue: number) => void;
   onAnnounceError: (msg: string) => void;
 }
@@ -39,6 +40,7 @@ const ThresholdNumberField: React.FC<ThresholdNumberFieldProps> = ({
   value,
   bounds,
   disabled = false,
+  pairedRow = false,
   onCommit,
   onAnnounceError,
 }) => {
@@ -98,16 +100,25 @@ const ThresholdNumberField: React.FC<ThresholdNumberFieldProps> = ({
   const describedBy = error ? `${hintId} ${errorId}` : hintId;
 
   return (
-    <div className="flex flex-col gap-1">
-      <label
-        htmlFor={id}
-        className="t-font-display font-bold text-xs uppercase tracking-wider t-text-strong"
-      >
-        {label}
-      </label>
-      <span id={hintId} className="text-[11px] text-muted leading-tight">
-        {hint} ({bounds.min}–{bounds.max})
-      </span>
+    <div
+      data-testid={`threshold-field-${name}`}
+      className={
+        pairedRow
+          ? 'row-span-3 grid grid-rows-subgrid gap-y-1 min-w-0'
+          : 'flex flex-col gap-1 min-w-0'
+      }
+    >
+      <div className="flex flex-col justify-between gap-1 min-w-0">
+        <label
+          htmlFor={id}
+          className="t-font-display font-bold text-xs uppercase tracking-wider t-text-strong leading-tight break-words"
+        >
+          {label}
+        </label>
+        <span id={hintId} className="text-[11px] text-muted leading-tight break-words">
+          {hint} ({bounds.min}–{bounds.max})
+        </span>
+      </div>
       <input
         ref={inputRef}
         type="number"
@@ -139,13 +150,26 @@ const ThresholdNumberField: React.FC<ThresholdNumberFieldProps> = ({
           error ? 'border-loss' : 'border-outline'
         }`}
       />
-      {error && (
-        <div id={errorId} className="text-[11px] font-bold text-loss flex items-center gap-1">
-          <span role="img" aria-label="Error">
-            ⚠
-          </span>
-          <span>{error}</span>
+      {pairedRow ? (
+        <div className="min-h-0">
+          {error && (
+            <div id={errorId} className="text-[11px] font-bold text-loss flex items-center gap-1">
+              <span role="img" aria-label="Error">
+                ⚠
+              </span>
+              <span>{error}</span>
+            </div>
+          )}
         </div>
+      ) : (
+        error && (
+          <div id={errorId} className="text-[11px] font-bold text-loss flex items-center gap-1">
+            <span role="img" aria-label="Error">
+              ⚠
+            </span>
+            <span>{error}</span>
+          </div>
+        )
       )}
     </div>
   );
@@ -234,6 +258,8 @@ export const StampingSettingsSection: React.FC = () => {
       ? 'SAVED ✓'
       : stampingSyncState === 'reset'
       ? 'DEFAULTS RESTORED ✓'
+      : stampingSyncState === 'error'
+      ? '⚠ SAVE FAILED'
       : 'MULTI-SIGNAL ENGINE';
 
   return (
@@ -246,7 +272,9 @@ export const StampingSettingsSection: React.FC = () => {
           <span
             role="status"
             data-testid="stamping-sync-status"
-            className="t-font-mono text-[11px] font-bold uppercase tracking-wider text-muted"
+            className={`t-font-mono text-[11px] font-bold uppercase tracking-wider ${
+              stampingSyncState === 'error' ? 'text-loss' : 'text-muted'
+            }`}
           >
             {statusText}
           </span>
@@ -321,7 +349,7 @@ export const StampingSettingsSection: React.FC = () => {
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-2 gap-x-2.5">
             <ThresholdNumberField
               id="stamping-alt-high-sigma"
               name="alt_high_sigma"
@@ -330,6 +358,7 @@ export const StampingSettingsSection: React.FC = () => {
               value={stampingConfig.alt_high_sigma}
               bounds={STAMPING_BOUNDS.alt_high_sigma}
               disabled={!stampingConfig.alt_detection_enabled}
+              pairedRow
               onCommit={handleCommitNumber}
               onAnnounceError={setLiveAnnouncement}
             />
@@ -341,9 +370,13 @@ export const StampingSettingsSection: React.FC = () => {
               value={stampingConfig.alt_high_sigma_max_games}
               bounds={STAMPING_BOUNDS.alt_high_sigma_max_games}
               disabled={!stampingConfig.alt_detection_enabled}
+              pairedRow
               onCommit={handleCommitNumber}
               onAnnounceError={setLiveAnnouncement}
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-2.5">
             <ThresholdNumberField
               id="stamping-alt-streak-sigma"
               name="alt_streak_sigma"
@@ -352,6 +385,7 @@ export const StampingSettingsSection: React.FC = () => {
               value={stampingConfig.alt_streak_sigma}
               bounds={STAMPING_BOUNDS.alt_streak_sigma}
               disabled={!stampingConfig.alt_detection_enabled}
+              pairedRow
               onCommit={handleCommitNumber}
               onAnnounceError={setLiveAnnouncement}
             />
@@ -363,6 +397,7 @@ export const StampingSettingsSection: React.FC = () => {
               value={stampingConfig.alt_streak_max_games}
               bounds={STAMPING_BOUNDS.alt_streak_max_games}
               disabled={!stampingConfig.alt_detection_enabled}
+              pairedRow
               onCommit={handleCommitNumber}
               onAnnounceError={setLiveAnnouncement}
             />
@@ -415,7 +450,7 @@ export const StampingSettingsSection: React.FC = () => {
             onAnnounceError={setLiveAnnouncement}
           />
 
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-2 gap-x-2.5">
             <ThresholdNumberField
               id="stamping-off-mode-self-tier-diff"
               name="off_mode_self_tier_diff"
@@ -424,6 +459,7 @@ export const StampingSettingsSection: React.FC = () => {
               value={stampingConfig.off_mode_self_tier_diff}
               bounds={STAMPING_BOUNDS.off_mode_self_tier_diff}
               disabled={!stampingConfig.show_off_mode_peak && !stampingConfig.show_teammate_off_mode_peak}
+              pairedRow
               onCommit={handleCommitNumber}
               onAnnounceError={setLiveAnnouncement}
             />
@@ -435,6 +471,7 @@ export const StampingSettingsSection: React.FC = () => {
               value={stampingConfig.off_mode_vs_you_tier_diff}
               bounds={STAMPING_BOUNDS.off_mode_vs_you_tier_diff}
               disabled={!stampingConfig.show_off_mode_peak}
+              pairedRow
               onCommit={handleCommitNumber}
               onAnnounceError={setLiveAnnouncement}
             />
@@ -446,7 +483,7 @@ export const StampingSettingsSection: React.FC = () => {
           <legend className="px-1 t-font-display font-bold text-xs uppercase tracking-wider text-muted">
             LOBBY MMR &amp; MOMENTUM STAMPS
           </legend>
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-2 gap-x-2.5">
             <ThresholdNumberField
               id="stamping-higher-mmr-diff"
               name="higher_mmr_diff"
@@ -454,6 +491,7 @@ export const StampingSettingsSection: React.FC = () => {
               hint="Active MMR lead over you"
               value={stampingConfig.higher_mmr_diff}
               bounds={STAMPING_BOUNDS.higher_mmr_diff}
+              pairedRow
               onCommit={handleCommitNumber}
               onAnnounceError={setLiveAnnouncement}
             />
@@ -464,6 +502,7 @@ export const StampingSettingsSection: React.FC = () => {
               hint="Same-team MMR gap"
               value={stampingConfig.carry_mmr_diff}
               bounds={STAMPING_BOUNDS.carry_mmr_diff}
+              pairedRow
               onCommit={handleCommitNumber}
               onAnnounceError={setLiveAnnouncement}
             />

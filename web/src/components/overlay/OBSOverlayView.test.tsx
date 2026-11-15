@@ -98,4 +98,44 @@ describe('OBSOverlayView', () => {
     expect(overlay?.textContent).not.toContain('+29'); // Delta hidden
     expect(overlay?.textContent).not.toContain('4–1'); // Session hidden
   });
+
+  it('never leaks another playlist session record into an active match whose playlist has 0 prior session games', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/current-match')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ...SAMPLE_CURRENT_MATCH,
+              playlist_id: 27,
+              playlist_name: 'Ranked Hoops',
+              time_remaining: 240,
+              is_overtime: false,
+            }),
+          } as Response;
+        }
+        if (url.includes('/api/session')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => SAMPLE_SESSION_RESPONSE,
+          } as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({}) } as Response;
+      }),
+    );
+
+    setSearch('overlay=true');
+    const { container } = await mount(<OBSOverlayView />);
+    await flush(10);
+
+    const overlay = container.querySelector('[data-testid="obs-overlay-view"]')!;
+    expect(overlay.textContent).toContain('HOOPS');
+    expect(overlay.textContent).not.toContain('3–1');
+    expect(overlay.textContent).not.toContain('4–1');
+    expect(overlay.textContent).not.toContain('+29');
+  });
 });

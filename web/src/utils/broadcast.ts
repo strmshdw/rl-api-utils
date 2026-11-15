@@ -21,6 +21,7 @@ export {
   localTeamOf,
   matchesPlaylistFilter,
   modeKeyFromPlaylistId,
+  normalizeActiveModeKey,
   onlineIdOf,
   outcomeOf,
   platformLabel,
