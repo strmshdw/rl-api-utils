@@ -31,6 +31,9 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
       division: 2,
       rank_name: 'Grand Champion I',
       mmr: 1485,
+      matches_played: 165,
+      sigma: 2.5,
+      win_streak: 2,
     },
     ranks: {
       '10': {
@@ -40,6 +43,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 2,
         rank_name: 'Champion II',
         mmr: 1120,
+        matches_played: 34,
+        sigma: 2.5,
       },
       '11': {
         playlist_id: 11,
@@ -48,6 +53,9 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 2,
         rank_name: 'Grand Champion I',
         mmr: 1485,
+        matches_played: 165,
+        sigma: 2.5,
+        win_streak: 2,
       },
       '13': {
         playlist_id: 13,
@@ -56,6 +64,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 1,
         rank_name: 'Grand Champion I',
         mmr: 1460,
+        matches_played: 78,
+        sigma: 2.5,
       },
     },
     in_wins_stats: /*#__PURE__*/ synthesizeRoleStats(4, 4, 0, {
@@ -102,6 +112,9 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 3,
         rank_name: 'Grand Champion I',
         mmr: 1502,
+        matches_played: 142,
+        sigma: 2.5,
+        win_streak: 4,
       },
       ranks: {
         '11': {
@@ -111,6 +124,9 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 3,
           rank_name: 'Grand Champion I',
           mmr: 1502,
+          matches_played: 142,
+          sigma: 2.5,
+          win_streak: 4,
         },
         '13': {
           playlist_id: 13,
@@ -119,6 +135,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 2,
           rank_name: 'Grand Champion III',
           mmr: 1795,
+          matches_played: 88,
+          sigma: 2.5,
         },
       },
       matchup_record: {
@@ -208,6 +226,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 4,
         rank_name: 'Champion III',
         mmr: 1414,
+        matches_played: 110,
+        sigma: 2.5,
       },
       ranks: {
         '11': {
@@ -217,6 +237,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 4,
           rank_name: 'Champion III',
           mmr: 1414,
+          matches_played: 110,
+          sigma: 2.5,
         },
         '13': {
           playlist_id: 13,
@@ -225,6 +247,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 1,
           rank_name: 'Supersonic Legend',
           mmr: 1890,
+          matches_played: 215,
+          sigma: 2.5,
         },
       },
       matchup_record: {
@@ -312,6 +336,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
         division: 2,
         rank_name: 'Grand Champion II',
         mmr: 1580,
+        matches_played: 190,
+        sigma: 2.5,
       },
       ranks: {
         '11': {
@@ -321,6 +347,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 2,
           rank_name: 'Grand Champion II',
           mmr: 1580,
+          matches_played: 190,
+          sigma: 2.5,
         },
         '13': {
           playlist_id: 13,
@@ -329,6 +357,8 @@ export const SAMPLE_CURRENT_MATCH: CurrentMatchResponse = {
           division: 1,
           rank_name: 'Grand Champion II',
           mmr: 1595,
+          matches_played: 95,
+          sigma: 2.5,
         },
       },
       matchup_record: {

@@ -1,5 +1,11 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { modeKeyFromPlaylistId } from '../utils/broadcast';
+import type { StampingConfig } from '../types/api';
+import {
+  DEFAULT_STAMPING_CONFIG,
+  isStampingConfigPayload,
+  modeKeyFromPlaylistId,
+  normalizeStampingConfig,
+} from '../utils/broadcast';
 import {
   getAppVersion,
   isDemoMode,
@@ -14,7 +20,13 @@ import {
   buildDateRangeQueryParams,
   getDateRangeLabel,
 } from './dateRange';
-import { STORAGE_KEYS, loadPinnedPlayerIds, safeStorageGet, safeStorageSet } from './storage';
+import {
+  STORAGE_KEYS,
+  loadPinnedPlayerIds,
+  loadStampingConfig,
+  safeStorageGet,
+  safeStorageSet,
+} from './storage';
 import { ColorMode, FontScale, THEME_STYLES, ThemeStyleKey } from './themeRegistry';
 
 export { THEME_STYLES, buildDateRangeQueryParams, getDateRangeLabel };
@@ -23,6 +35,7 @@ export type { ThemeStyleKey, ColorMode, FontScale, DateRangePreset };
 export type StatMode = 'avg' | 'total';
 export type ReplayLimitPreviewState = 'auto' | 'warn' | 'error' | 'ok';
 export type LiveViewMode = 'match' | 'idle';
+export type StampingSyncState = 'idle' | 'saving' | 'saved' | 'reset' | 'error';
 
 export interface DashboardContextValue {
   themeStyle: ThemeStyleKey;
@@ -56,6 +69,11 @@ export interface DashboardContextValue {
   pinnedPlayerIds: string[];
   togglePinPlayer: (playerId: string) => void;
   isPlayerPinned: (playerId: string) => boolean;
+  stampingConfig: StampingConfig;
+  stampingSyncState: StampingSyncState;
+  refreshStampingConfig: () => Promise<void>;
+  updateStampingConfig: (patch: Partial<StampingConfig>) => Promise<void>;
+  resetStampingConfig: () => Promise<void>;
   isDevBuild: boolean;
   appVersion: string;
   previewMode: boolean;
@@ -94,6 +112,11 @@ const DEFAULT_CONTEXT: DashboardContextValue = {
   pinnedPlayerIds: [],
   togglePinPlayer: () => {},
   isPlayerPinned: () => false,
+  stampingConfig: DEFAULT_STAMPING_CONFIG,
+  stampingSyncState: 'idle',
+  refreshStampingConfig: async () => {},
+  updateStampingConfig: async () => {},
+  resetStampingConfig: async () => {},
   isDevBuild: false,
   appVersion: '2.0.0',
   previewMode: false,
@@ -128,6 +151,76 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [liveModeOverride, setLiveModeOverride] = useState<'auto' | 'match' | 'idle'>('auto');
   const [showLiveHistData, setShowLiveHistData] = useState<boolean>(true);
   const [pinnedPlayerIds, setPinnedPlayerIds] = useState<string[]>(() => loadPinnedPlayerIds());
+  const [stampingConfig, setStampingConfig] = useState<StampingConfig>(() => loadStampingConfig());
+  const [stampingSyncState, setStampingSyncState] = useState<StampingSyncState>('idle');
+
+  const refreshStampingConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/stamping/config');
+      if (!res.ok) return;
+      const data: unknown = await res.json();
+      if (isStampingConfigPayload(data)) {
+        const normalized = normalizeStampingConfig(data);
+        setStampingConfig(normalized);
+        safeStorageSet(STORAGE_KEYS.stampingConfig, JSON.stringify(normalized));
+      }
+    } catch {
+      // Offline / static demo mode falls back to localStorage or defaults.
+    }
+  }, []);
+
+  const updateStampingConfig = useCallback(async (patch: Partial<StampingConfig>) => {
+    setStampingSyncState('saving');
+    setStampingConfig((prev) => {
+      const merged = normalizeStampingConfig({ ...prev, ...patch });
+      safeStorageSet(STORAGE_KEYS.stampingConfig, JSON.stringify(merged));
+      return merged;
+    });
+    try {
+      const res = await fetch('/api/stamping/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) {
+        const data: unknown = await res.json();
+        if (isStampingConfigPayload(data)) {
+          const normalized = normalizeStampingConfig(data);
+          setStampingConfig(normalized);
+          safeStorageSet(STORAGE_KEYS.stampingConfig, JSON.stringify(normalized));
+        }
+        setStampingSyncState('saved');
+      } else {
+        setStampingSyncState('saved');
+      }
+    } catch {
+      setStampingSyncState('saved');
+    }
+  }, []);
+
+  const resetStampingConfig = useCallback(async () => {
+    setStampingSyncState('saving');
+    setStampingConfig(DEFAULT_STAMPING_CONFIG);
+    safeStorageSet(STORAGE_KEYS.stampingConfig, JSON.stringify(DEFAULT_STAMPING_CONFIG));
+    try {
+      const res = await fetch('/api/stamping/config/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      if (res.ok) {
+        const data: unknown = await res.json();
+        if (isStampingConfigPayload(data)) {
+          const normalized = normalizeStampingConfig(data);
+          setStampingConfig(normalized);
+          safeStorageSet(STORAGE_KEYS.stampingConfig, JSON.stringify(normalized));
+        }
+      }
+      setStampingSyncState('reset');
+    } catch {
+      setStampingSyncState('reset');
+    }
+  }, []);
 
   const setDateRange = useCallback((range: DateRangePreset) => {
     setDateRangeState(range);
@@ -266,6 +359,11 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
       pinnedPlayerIds,
       togglePinPlayer,
       isPlayerPinned,
+      stampingConfig,
+      stampingSyncState,
+      refreshStampingConfig,
+      updateStampingConfig,
+      resetStampingConfig,
       isDevBuild,
       appVersion,
       previewMode,
@@ -299,6 +397,11 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
       pinnedPlayerIds,
       togglePinPlayer,
       isPlayerPinned,
+      stampingConfig,
+      stampingSyncState,
+      refreshStampingConfig,
+      updateStampingConfig,
+      resetStampingConfig,
       isDevBuild,
       appVersion,
       previewMode,

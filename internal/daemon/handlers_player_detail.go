@@ -216,7 +216,13 @@ func (d *Daemon) handleGetPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playerCopy := *player
-	relTag := storage.ComputeRelationshipTag(withYouStats.Wins, withYouStats.Losses, againstYouStats.Wins, againstYouStats.Losses)
+	relTag := storage.ComputeRelationshipTagWithMinGames(
+		withYouStats.Wins,
+		withYouStats.Losses,
+		againstYouStats.Wins,
+		againstYouStats.Losses,
+		d.stampingConfig().RelationshipMinGames,
+	)
 	if isLocalPlayer {
 		relTag = "YOU"
 	}

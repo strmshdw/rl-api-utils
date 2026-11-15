@@ -13,6 +13,7 @@ import {
   recordInk,
   shortRank,
 } from '../../utils/broadcast';
+import { useDashboard } from '../../context/DashboardContext';
 import { COLUMN_HEADER, RecordCells } from '../common/ui';
 import { rankForPlaylist } from './playerData';
 
@@ -35,6 +36,7 @@ const DirectoryRow: React.FC<DirectoryRowProps> = ({
   onTogglePin,
   onOpen,
 }) => {
+  const { stampingConfig } = useDashboard();
   const rank = rankForPlaylist(player.ranks_json, activePlaylist || playlistScopeId);
 
   const mate = {
@@ -48,7 +50,9 @@ const DirectoryRow: React.FC<DirectoryRowProps> = ({
   const wGames = mate.wins + mate.losses;
   const aGames = vs.wins + vs.losses;
 
-  const rel = computeDynamicRelationshipTag(mate.wins, mate.losses, vs.wins, vs.losses, false);
+  const rel = computeDynamicRelationshipTag(mate.wins, mate.losses, vs.wins, vs.losses, false, {
+    minGames: stampingConfig.relationship_min_games,
+  });
   const wStats = player.with_you_stats || emptyRoleStats(wGames, mate.wins, mate.losses);
   const aStats = player.against_you_stats || emptyRoleStats(aGames, vs.wins, vs.losses);
 

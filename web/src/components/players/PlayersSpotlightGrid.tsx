@@ -8,6 +8,7 @@ import {
   platformLabel,
   shortRank,
 } from '../../utils/broadcast';
+import { useDashboard } from '../../context/DashboardContext';
 import { isSoloDuelPlaylist, rankForPlaylist, Spotlight } from './playerData';
 
 export interface PinnedSlot {
@@ -38,6 +39,7 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
   onTogglePin,
   onOpen,
 }) => {
+  const { stampingConfig } = useDashboard();
   const testId =
     spot?.key === 'mate'
       ? 'spotlight-mate'
@@ -78,7 +80,9 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
   const aGames = aWins + aLosses;
   const aWr = aGames > 0 ? Math.round((aWins / aGames) * 100) : 0;
 
-  const rel = computeDynamicRelationshipTag(wWins, wLosses, aWins, aLosses, false);
+  const rel = computeDynamicRelationshipTag(wWins, wLosses, aWins, aLosses, false, {
+    minGames: stampingConfig.relationship_min_games,
+  });
   const wStats = player.with_you_stats || emptyRoleStats(wGames, wWins, wLosses);
   const aStats = player.against_you_stats || emptyRoleStats(aGames, aWins, aLosses);
   const wSynced = wGames > 0 && hasSyncedRoleTelemetry(wStats);

@@ -125,6 +125,17 @@ func (t *Tracker) boundMatchupCacheLocked() {
 			}
 		}
 	}
+	if len(t.scoutingCache) > maxMatchupCacheEntries {
+		toEvict := len(t.scoutingCache) - maxMatchupCacheEntries
+		count := 0
+		for k := range t.scoutingCache {
+			delete(t.scoutingCache, k)
+			count++
+			if count >= toEvict {
+				break
+			}
+		}
+	}
 }
 
 func (t *Tracker) fetchRanksBatch(ctx context.Context, playerIDs []rlapi.PlayerID) {

@@ -73,7 +73,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
   playlistScope = 'all',
   onInspectPlayer,
 }) => {
-  const { statMode, showLiveHistData } = useDashboard();
+  const { statMode, showLiveHistData, stampingConfig } = useDashboard();
   const isAvg = statMode === 'avg';
 
   const param = playlistFilterToParam(playlistScope);
@@ -136,12 +136,13 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
 
   const strip = STRIP_STATS.filter((s) => columns[s.key]);
 
-  // Compute Live Threat, Carry & Smurf Badges
+  // Compute Live Threat, Carry, Off-Mode Peak & Streak Badges
   const threatBadges = computeLiveThreatBadges(
     player,
     localPlayer,
     opposingTeamPlayers,
     scopedPlaylistId > 0 ? scopedPlaylistId : activePlaylistId,
+    stampingConfig,
   );
 
   // Build historical split rows without fabricated cross-playlist telemetry fallbacks
@@ -341,10 +342,8 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
               {threatBadges.map((b, idx) => {
                 const badgeStyle =
                   b.type === 'smurf'
-                    ? 'hanko-seal-vermilion font-extrabold'
-                    : b.type === 'carry'
-                    ? 'cartouche-carry font-bold'
-                    : 'cartouche-gold font-bold';
+                    ? `${b.classes} font-extrabold`
+                    : `${b.classes} font-bold`;
                 return (
                   <span
                     key={`${b.type}-${idx}`}

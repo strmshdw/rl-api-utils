@@ -401,12 +401,18 @@ export interface RelationshipTagInfo {
   border: string;
 }
 
+export interface RelationshipTagOptions {
+  minGames?: number;
+  activeRole?: 'teammate' | 'opponent';
+}
+
 export function computeDynamicRelationshipTag(
   tw: number,
   tl: number,
   ow: number,
   ol: number,
   overrideLabel?: string | boolean,
+  options?: RelationshipTagOptions,
 ): RelationshipTagInfo {
   const make = (label: string, colorClass: string, border: string): RelationshipTagInfo => ({
     label,
@@ -419,6 +425,9 @@ export function computeDynamicRelationshipTag(
   if (typeof overrideLabel === 'string' && overrideLabel) {
     const up = overrideLabel.toUpperCase();
     if (up === 'YOU') return make('YOU', 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
+    if (up === 'RECENT ALLY' || up === 'RECENT FOE') {
+      return make(up, 't-text-muted text-muted t-border-2', 'border-line');
+    }
     if (up.includes('PRIME') || up.includes('SYNERGY')) return make(up, 't-text-win text-win t-border-win', 'border-win');
     if (up.includes('FAVORABLE')) return make(up, 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
     if (up.includes('NEMESIS') || up.includes('COLD')) return make(up, 't-text-loss text-loss t-border-loss', 'border-loss');
@@ -428,15 +437,31 @@ export function computeDynamicRelationshipTag(
   const tG = (tw || 0) + (tl || 0);
   const oG = (ow || 0) + (ol || 0);
   if (tG + oG === 0) return make('NO GAMES IN RANGE', 't-text-muted text-muted t-border-2', 'border-line');
-  const tWR = tG ? Math.round((tw / tG) * 100) : 0;
-  const oWR = oG ? Math.round((ow / oG) * 100) : 0;
 
-  if (tG >= oG) {
-    if (tWR >= 65 && tG >= 2) return make('PRIME DUO', 't-text-win text-win t-border-win', 'border-win');
-    if (tWR >= 50) return make('SYNERGY ALLY', 't-text-win text-win t-border-win', 'border-win');
+  const minGames = Math.max(1, options?.minGames ?? 3);
+  const tWR = tG ? (tw || 0) / tG : 0;
+  const oWR = oG ? (ow || 0) / oG : 0;
+
+  const evalTeammate = (): RelationshipTagInfo => {
+    if (tG < minGames) return make('RECENT ALLY', 't-text-muted text-muted t-border-2', 'border-line');
+    if (tWR >= 0.65) return make('PRIME DUO', 't-text-win text-win t-border-win', 'border-win');
+    if (tWR >= 0.5) return make('SYNERGY ALLY', 't-text-win text-win t-border-win', 'border-win');
     return make('COLD DUO', 't-text-loss text-loss t-border-loss', 'border-loss');
+  };
+
+  const evalOpponent = (): RelationshipTagInfo => {
+    if (oG < minGames) return make('RECENT FOE', 't-text-muted text-muted t-border-2', 'border-line');
+    if (oWR <= 0.4) return make('NEMESIS', 't-text-loss text-loss t-border-loss', 'border-loss');
+    if (oWR >= 0.6) return make('FAVORABLE FOE', 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
+    return make('ARCH-RIVAL', 't-text-orange text-orange-ink t-border-orange', 'border-orange-ink');
+  };
+
+  if (options?.activeRole === 'opponent' && oG > 0) {
+    return evalOpponent();
   }
-  if (oWR <= 40 && oG >= 2) return make('NEMESIS', 't-text-loss text-loss t-border-loss', 'border-loss');
-  if (oWR >= 60) return make('FAVORABLE FOE', 't-text-blue text-blue-ink t-border-blue', 'border-blue-ink');
-  return make('ARCH-RIVAL', 't-text-orange text-orange-ink t-border-orange', 'border-orange-ink');
+  if (options?.activeRole === 'teammate' && tG > 0) {
+    return evalTeammate();
+  }
+
+  return tG >= oG ? evalTeammate() : evalOpponent();
 }

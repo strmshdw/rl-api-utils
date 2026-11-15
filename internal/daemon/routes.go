@@ -56,6 +56,10 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 	mux.HandleFunc("POST /api/sync/config", d.handleUpdateSyncConfig)
 	mux.HandleFunc("PATCH /api/sync/config", d.handleUpdateSyncConfig)
 	mux.HandleFunc("POST /api/sync/now", d.handleManualSyncNow)
+	mux.HandleFunc("GET /api/stamping/config", d.handleGetStampingConfig)
+	mux.HandleFunc("POST /api/stamping/config", d.handleUpdateStampingConfig)
+	mux.HandleFunc("PATCH /api/stamping/config", d.handleUpdateStampingConfig)
+	mux.HandleFunc("POST /api/stamping/config/reset", d.handleResetStampingConfig)
 	mux.HandleFunc("GET /api/events", d.handleEvents)
 
 	// Backward Compatible Player Tracking Aliases

@@ -252,16 +252,30 @@ func NormalizeRoleFilter(raw string) string {
 	}
 }
 
+// DefaultRelationshipMinGames is the default minimum role encounters before assigning a non-neutral relationship stamp.
+const DefaultRelationshipMinGames = 3
+
 // ComputeRelationshipTag returns the dynamic broadcast relationship badge for a player based on W-L records.
 func ComputeRelationshipTag(tmWins, tmLosses, oppWins, oppLosses int) string {
+	return ComputeRelationshipTagWithMinGames(tmWins, tmLosses, oppWins, oppLosses, DefaultRelationshipMinGames)
+}
+
+// ComputeRelationshipTagWithMinGames returns the dynamic relationship badge using a configurable minimum role game floor.
+func ComputeRelationshipTagWithMinGames(tmWins, tmLosses, oppWins, oppLosses, minGames int) string {
+	if minGames < 1 {
+		minGames = DefaultRelationshipMinGames
+	}
 	tmGames := tmWins + tmLosses
 	oppGames := oppWins + oppLosses
 	if tmGames == 0 && oppGames == 0 {
 		return ""
 	}
 	if tmGames >= oppGames && tmGames > 0 {
+		if tmGames < minGames {
+			return "RECENT ALLY"
+		}
 		tmWR := float64(tmWins) / float64(tmGames)
-		if tmGames >= 3 && tmWR >= 0.65 {
+		if tmWR >= 0.65 {
 			return "PRIME DUO"
 		}
 		if tmWR >= 0.50 {
@@ -269,14 +283,17 @@ func ComputeRelationshipTag(tmWins, tmLosses, oppWins, oppLosses int) string {
 		}
 		return "COLD DUO"
 	}
-	oppWR := float64(oppWins) / float64(oppGames)
-	if oppGames >= 3 && oppWR >= 0.40 && oppWR <= 0.60 {
-		return "ARCH-RIVAL"
+	if oppGames < minGames {
+		return "RECENT FOE"
 	}
-	if oppWR < 0.50 {
+	oppWR := float64(oppWins) / float64(oppGames)
+	if oppWR <= 0.40 {
 		return "NEMESIS"
 	}
-	return "FAVORABLE FOE"
+	if oppWR >= 0.60 {
+		return "FAVORABLE FOE"
+	}
+	return "ARCH-RIVAL"
 }
 
 // Resolve1BasedDivision normalizes a division value to 1..4 (or 0 if none), resolving 0-based PsyNet vs 1-based Ballchasing payloads.

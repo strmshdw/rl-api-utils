@@ -141,9 +141,19 @@ func (t *Tracker) OnUpdateGameState(ctx context.Context, matchGUID string, playl
 
 		var matchupRecord *storage.PlayerMatchup
 		var matchupsByPlaylist map[string]*storage.PlayerMatchup
+		var notes string
+		var tags []string
+		hasScouting := false
 		if !isBot && !isLocal && strings.TrimSpace(p.PrimaryId) != "" {
 			if byMap, ok := t.matchupsByPlaylistCache[p.PrimaryId]; ok {
 				matchupsByPlaylist = cloneNonEmptyMatchupsByPlaylist(byMap)
+			}
+			if sc, ok := t.scoutingCache[p.PrimaryId]; ok && sc.loaded {
+				hasScouting = true
+				notes = sc.notes
+				if len(sc.tags) > 0 {
+					tags = append([]string(nil), sc.tags...)
+				}
 			}
 		}
 		if activePlaylistID != 0 && !isBot {
@@ -162,14 +172,15 @@ func (t *Tracker) OnUpdateGameState(ctx context.Context, matchGUID string, playl
 			if !isLocal && strings.TrimSpace(p.PrimaryId) != "" {
 				_, hasSingle := t.matchupCache[mKey]
 				_, hasAll := t.matchupsByPlaylistCache[p.PrimaryId]
-				if (!hasSingle || !hasAll) && t.matchupInFlight[mKey].IsZero() {
+				if (!hasSingle || !hasAll || !hasScouting) && t.matchupInFlight[mKey].IsZero() {
 					t.matchupInFlight[mKey] = now
 					playersToQueryMatchup = append(playersToQueryMatchup, p)
 				}
 			}
 		} else if !isBot && !isLocal && strings.TrimSpace(p.PrimaryId) != "" {
 			mKey := fmt.Sprintf("%s:0", p.PrimaryId)
-			if _, hasAll := t.matchupsByPlaylistCache[p.PrimaryId]; !hasAll && t.matchupInFlight[mKey].IsZero() {
+			_, hasAll := t.matchupsByPlaylistCache[p.PrimaryId]
+			if (!hasAll || !hasScouting) && t.matchupInFlight[mKey].IsZero() {
 				t.matchupInFlight[mKey] = now
 				playersToQueryMatchup = append(playersToQueryMatchup, p)
 			}
@@ -194,6 +205,8 @@ func (t *Tracker) OnUpdateGameState(ctx context.Context, matchGUID string, playl
 			Ranks:              ranksSnapshot,
 			MatchupRecord:      matchupRecord,
 			MatchupsByPlaylist: matchupsByPlaylist,
+			Notes:              notes,
+			Tags:               tags,
 		}
 
 		if isLocal {
@@ -336,6 +349,23 @@ func (t *Tracker) warmMatchupCache(ctx context.Context, matchGUID string, playli
 			}
 		}
 
+		var (
+			scoutingNotes  string
+			scoutingTags   []string
+			scoutingLoaded bool
+		)
+		if t.store != nil {
+			if playerRec, pErr := t.store.GetPlayer(ctx, p.PrimaryId); pErr == nil && playerRec != nil {
+				scoutingNotes = playerRec.Notes
+				if len(playerRec.Tags) > 0 {
+					scoutingTags = append([]string(nil), playerRec.Tags...)
+				}
+				scoutingLoaded = true
+			} else if errors.Is(pErr, storage.ErrPlayerNotFound) {
+				scoutingLoaded = true
+			}
+		}
+
 		t.mu.Lock()
 		delete(t.matchupInFlight, mKey)
 		if byPlaylist != nil {
@@ -344,9 +374,26 @@ func (t *Tracker) warmMatchupCache(ctx context.Context, matchGUID string, playli
 		if playlistID != 0 && err == nil && matchup != nil {
 			t.matchupCache[mKey] = matchup
 		}
+		if scoutingLoaded {
+			// Only seed cache if an explicit live UpdatePlayerScouting didn't win the race while querying
+			if existingSc, ok := t.scoutingCache[p.PrimaryId]; !ok || !existingSc.loaded {
+				t.scoutingCache[p.PrimaryId] = cachedScoutingEntry{
+					notes:  scoutingNotes,
+					tags:   scoutingTags,
+					loaded: true,
+				}
+			} else {
+				scoutingNotes = existingSc.notes
+				scoutingTags = existingSc.tags
+			}
+		}
 		t.boundMatchupCacheLocked()
-		if t.currentMatch != nil && t.currentMatch.MatchGUID == matchGUID && (matchup != nil || len(byPlaylist) > 0) {
+		hasScoutingPayload := scoutingNotes != "" || len(scoutingTags) > 0
+		if t.currentMatch != nil && t.currentMatch.MatchGUID == matchGUID && (matchup != nil || len(byPlaylist) > 0 || hasScoutingPayload) {
 			t.updateLobbyPlayerMatchupLocked(p.PrimaryId, matchup, byPlaylist)
+			if scoutingLoaded {
+				t.updateLobbyPlayerScoutingLocked(p.PrimaryId, scoutingNotes, scoutingTags)
+			}
 			updatedSnapshot = t.currentMatch.DeepClone()
 		}
 		t.mu.Unlock()
@@ -425,6 +472,19 @@ func (t *Tracker) updateLobbyPlayerMatchupLocked(playerID string, matchup *stora
 		}
 		if !p.IsLocal {
 			p.MatchupsByPlaylist = cloneNonEmptyMatchupsByPlaylist(byPlaylist)
+		}
+	})
+}
+
+func (t *Tracker) updateLobbyPlayerScoutingLocked(playerID string, notes string, tags []string) {
+	visitMatchPlayers(t.currentMatch, playerID, func(p *LobbyPlayer) {
+		if !p.IsLocal {
+			p.Notes = notes
+			if len(tags) > 0 {
+				p.Tags = append([]string(nil), tags...)
+			} else {
+				p.Tags = nil
+			}
 		}
 	})
 }

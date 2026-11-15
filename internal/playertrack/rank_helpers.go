@@ -131,14 +131,17 @@ func ConvertSkillRatingToMMR(skillRating float64) float64 {
 // FromSkill constructs a PlayerPlaylistRank from an rlapi.Skill telemetry entry.
 func FromSkill(s rlapi.Skill) PlayerPlaylistRank {
 	return PlayerPlaylistRank{
-		PlaylistID:    s.Playlist,
-		PlaylistName:  FormatPlaylist(s.Playlist),
-		Tier:          s.Tier,
-		Division:      s.Division,
-		RankName:      FormatRank(s.Tier, s.Division),
-		ShortRank:     FormatShortRank(s.Tier, s.Division),
-		MMR:           ConvertSkillRatingToMMR(s.MMR),
-		MatchesPlayed: s.MatchesPlayed,
+		PlaylistID:             s.Playlist,
+		PlaylistName:           FormatPlaylist(s.Playlist),
+		Tier:                   s.Tier,
+		Division:               s.Division,
+		RankName:               FormatRank(s.Tier, s.Division),
+		ShortRank:              FormatShortRank(s.Tier, s.Division),
+		MMR:                    ConvertSkillRatingToMMR(s.MMR),
+		MatchesPlayed:          s.MatchesPlayed,
+		Sigma:                  s.Sigma,
+		WinStreak:              s.WinStreak,
+		PlacementMatchesPlayed: s.PlacementMatchesPlayed,
 	}
 }
 

@@ -87,6 +87,7 @@ type Config struct {
 	Ballchasing    BallchasingConfig    `yaml:"ballchasing" json:"ballchasing"`
 	Sync           SyncConfig           `yaml:"sync" json:"sync"`
 	StatsAPI       StatsAPIConfig       `yaml:"stats_api" json:"stats_api"`
+	Stamping       StampingConfig       `yaml:"stamping" json:"stamping"`
 	Logging        LoggingConfig        `yaml:"logging" json:"logging"`
 	Web            WebConfig            `yaml:"web" json:"web"`
 }

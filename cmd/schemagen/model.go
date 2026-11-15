@@ -60,6 +60,7 @@ type FieldDef struct {
 	GoType    string `yaml:"go_type"`
 	TSType    string `yaml:"ts_type"`
 	JSON      string `yaml:"json"`
+	YAML      string `yaml:"yaml"`
 	Omitempty bool   `yaml:"omitempty"`
 }
 

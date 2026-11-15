@@ -43,6 +43,7 @@ const DashboardShell: React.FC = () => {
     setActivePlaylist,
     syncLivePlaylist,
     liveModeOverride,
+    refreshStampingConfig,
     isDevBuild,
     previewMode,
   } = useDashboard();
@@ -72,6 +73,12 @@ const DashboardShell: React.FC = () => {
 
   // Preview / demo mode (dev/debug build only) falls back to sample data when enabled.
   const activePreview = isDevBuild && (previewMode || isDemoMode());
+
+  useEffect(() => {
+    if (!activePreview) {
+      void refreshStampingConfig();
+    }
+  }, [activePreview, refreshStampingConfig]);
 
   const rawSession = useMemo(() => {
     const candidate = liveUnfilteredSession ?? liveSession;

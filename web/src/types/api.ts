@@ -24,6 +24,7 @@ export {
   type SessionMatchDetail,
   type SessionMatchPlayer,
   type SessionResponse,
+  type StampingConfig,
   type StatsAPIStatus,
   type SyncConfig,
   type SyncMode,

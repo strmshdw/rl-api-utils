@@ -20,6 +20,9 @@ export interface PlayerPlaylistRank {
   short_rank?: string;
   mmr: number;
   matches_played: number;
+  sigma?: number;
+  win_streak?: number;
+  placement_matches_played?: number;
 }
 
 /** Head-to-head encounter statistics between the local player and another player. */
@@ -122,5 +125,26 @@ export interface SyncConfig {
   force_sync_on_trigger: boolean;
   enable_toast: boolean;
   session_continue_window: string;
+}
+
+/** User-configurable multi-signal stamping and threat evaluation thresholds. */
+export interface StampingConfig {
+  alt_detection_enabled: boolean;
+  alt_min_tier: number;
+  alt_high_sigma: number;
+  alt_high_sigma_max_games: number;
+  alt_streak_sigma: number;
+  alt_streak_max_games: number;
+  alt_min_win_streak: number;
+  show_off_mode_peak: boolean;
+  off_mode_min_games: number;
+  off_mode_self_tier_diff: number;
+  off_mode_vs_you_tier_diff: number;
+  carry_mmr_diff: number;
+  higher_mmr_diff: number;
+  show_hot_streak: boolean;
+  hot_streak_min_wins: number;
+  show_teammate_off_mode_peak: boolean;
+  relationship_min_games: number;
 }
 

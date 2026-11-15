@@ -178,11 +178,12 @@ describe('LiveGameView — in match', () => {
     expect(container.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 
-  it('renders Threat, Carry, and Smurf detection badges and toggles historical split tables', async () => {
+  it('renders Threat, Carry, and Off-Mode Peak / Streak badges and toggles historical split tables', async () => {
     const { container } = await renderLive(liveMatch());
     expect(container.textContent).toContain('◆ HIGHER MMR');
-    expect(container.textContent).toContain('◆ CARRYING');
-    expect(container.textContent).toContain('◆ SMURF');
+    expect(container.textContent).toContain('◆ PARTY CARRY');
+    expect(container.textContent).toContain('◆ OFF-MODE PEAK');
+    expect(container.textContent).toContain('◆ HOT STREAK');
 
     const youCard = cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
     expect(youCard.textContent).toContain('YOU · ACTIVE SESSION');

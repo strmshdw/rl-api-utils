@@ -40,6 +40,7 @@ export {
   type PlaylistLabels,
   type PositioningRoleLabels,
   type RelationshipTagInfo,
+  type RelationshipTagOptions,
 } from './broadcastLabels';
 
 export {
@@ -54,8 +55,18 @@ export {
 
 export {
   computeLiveThreatBadges,
+  soccarEquivalentTier,
   type LiveThreatBadge,
 } from './threatBadges';
+
+export {
+  DEFAULT_STAMPING_CONFIG,
+  STAMPING_BOUNDS,
+  isStampingConfigPayload,
+  normalizeStampingConfig,
+  type NumericStampingBounds,
+  type StampingConfig,
+} from './stampingConfig';
 
 export {
   emptyRoleStats,

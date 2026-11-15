@@ -143,6 +143,18 @@ func (d *Daemon) handleListPlayers(w http.ResponseWriter, r *http.Request) {
 	if summaries == nil {
 		summaries = make([]*storage.PlayerSummary, 0)
 	}
+	relMinGames := d.stampingConfig().RelationshipMinGames
+	for _, sRec := range summaries {
+		if sRec != nil {
+			sRec.RelationshipTag = storage.ComputeRelationshipTagWithMinGames(
+				sRec.TotalWinsAsTeammate,
+				sRec.TotalLossesAsTeammate,
+				sRec.TotalWinsAsOpponent,
+				sRec.TotalLossesAsOpponent,
+				relMinGames,
+			)
+		}
+	}
 	if isClientDisconnect(r.Context(), nil) {
 		return
 	}
@@ -321,6 +333,10 @@ func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
 		updated = existing
 		updated.Notes = newNotes
 		updated.Tags = newTags
+	}
+
+	if d.playerTracker != nil {
+		d.playerTracker.UpdatePlayerScouting(playerID, newNotes, newTags)
 	}
 
 	d.writeJSONResponse(w, r, http.StatusOK, map[string]any{

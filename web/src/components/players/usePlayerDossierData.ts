@@ -152,7 +152,7 @@ export function usePlayerDossierData(
   options: { enabled?: boolean; pageSize?: number; liveMatch?: CurrentMatchResponse | null } = {},
 ): PlayerDossierDataState {
   const { enabled = true, pageSize = 20 } = options;
-  const { activePlaylist, dateRangeQueryParams } = useDashboard();
+  const { activePlaylist, dateRangeQueryParams, stampingConfig } = useDashboard();
 
   const [profile, setProfile] = useState<PlayerDetailResponse | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
@@ -468,8 +468,9 @@ export function usePlayerDossierData(
         totals.vs.wins,
         totals.vs.losses,
         isOwnProfile ? 'YOU' : false,
+        { minGames: stampingConfig.relationship_min_games },
       ),
-    [totals, isOwnProfile],
+    [totals, isOwnProfile, stampingConfig.relationship_min_games],
   );
 
   const threatBadges = useMemo(() => {
@@ -494,8 +495,9 @@ export function usePlayerDossierData(
       activeMatch.local_player,
       allLobby,
       activeMatch.playlist_id,
+      stampingConfig,
     );
-  }, [id, name, options.liveMatch]);
+  }, [id, name, options.liveMatch, stampingConfig]);
 
   const filteredAndSortedMatches = useMemo(() => {
     if (!isDemoMatches) {

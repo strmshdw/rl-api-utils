@@ -1,9 +1,16 @@
+import {
+  DEFAULT_STAMPING_CONFIG,
+  normalizeStampingConfig,
+  type StampingConfig,
+} from '../utils/stampingConfig';
+
 export const STORAGE_KEYS = {
   themeStyle: 'rlsync_theme_style',
   colorMode: 'rlsync_color_mode',
   fontScale: 'rlsync_font_scale',
   replayBannerDismissed: 'rlsync_replay_banner_dismissed',
   pinnedPlayers: 'rlsync_pinned_players',
+  stampingConfig: 'rlsync_stamping_config',
 } as const;
 
 export function safeStorageGet(key: string): string | null {
@@ -34,4 +41,14 @@ export function loadPinnedPlayerIds(): string[] {
     // ignore invalid json
   }
   return [];
+}
+
+export function loadStampingConfig(): StampingConfig {
+  const saved = safeStorageGet(STORAGE_KEYS.stampingConfig);
+  if (!saved) return DEFAULT_STAMPING_CONFIG;
+  try {
+    return normalizeStampingConfig(JSON.parse(saved));
+  } catch {
+    return DEFAULT_STAMPING_CONFIG;
+  }
 }

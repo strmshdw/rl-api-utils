@@ -51,6 +51,7 @@ func NewDefaultConfig() *Config {
 			HTTPTriggerPort:    49125,
 			AutoSyncOnExit:     true,
 		},
+		Stamping: DefaultStampingConfig(),
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "text",

@@ -7,6 +7,7 @@ import { useBallchasingSync } from '../../hooks/useBallchasingSync';
 import { isDemoMode } from '../../utils/sampleData';
 import { Modal } from '../common/Modal';
 import { SectionLabel } from '../common/ui';
+import { StampingSettingsSection } from './StampingSettingsSection';
 import { ThemeAppearanceSection } from './ThemeAppearanceSection';
 
 export { THEME_OPTIONS } from './ThemeAppearanceSection';
@@ -83,9 +84,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           onSetFontScale={setFontScale}
         />
 
-        {/* ==================== SECTION 02: TELEMETRY DISPLAY & STREAMING ==================== */}
+        <StampingSettingsSection />
+
+        {/* ==================== SECTION 03: TELEMETRY DISPLAY & STREAMING ==================== */}
         <section className="flex flex-col gap-3.5 pt-2 border-t border-line">
-          <SectionLabel>02 · TELEMETRY DISPLAY &amp; BROADCAST</SectionLabel>
+          <SectionLabel>03 · TELEMETRY DISPLAY &amp; BROADCAST</SectionLabel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
@@ -168,10 +171,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </section>
 
-        {/* ==================== SECTION 03: DEVELOPER & DIAGNOSTICS (DEV BUILD ONLY) ==================== */}
+        {/* ==================== SECTION 04: DEVELOPER & DIAGNOSTICS (DEV BUILD ONLY) ==================== */}
         {isDevBuild && (
           <section className="flex flex-col gap-3.5 pt-2 border-t border-line">
-            <SectionLabel>03 · DEVELOPER &amp; TELEMETRY SIMULATOR (DEV BUILD ONLY)</SectionLabel>
+            <SectionLabel>04 · DEVELOPER &amp; TELEMETRY SIMULATOR (DEV BUILD ONLY)</SectionLabel>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">

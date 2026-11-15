@@ -54,6 +54,8 @@ type LobbyPlayer struct {
 	Ranks              PlayerRanksSnapshot               `json:"ranks,omitempty"`                // Full snapshot across all playlists
 	MatchupRecord      *storage.PlayerMatchup            `json:"matchup_record,omitempty"`       // H2H record in this playlist
 	MatchupsByPlaylist map[string]*storage.PlayerMatchup `json:"matchups_by_playlist,omitempty"` // H2H records across all playlists keyed by playlist ID
+	Notes              string                            `json:"notes,omitempty"`                // User scouting notes
+	Tags               []string                          `json:"tags,omitempty"`                 // User scouting tags (e.g. "verified", "smurf")
 }
 
 // DeepClone creates a deep copy of a LobbyPlayer to ensure thread safety across reads.
@@ -75,6 +77,9 @@ func (p LobbyPlayer) DeepClone() LobbyPlayer {
 	}
 	if p.MatchupsByPlaylist != nil {
 		clone.MatchupsByPlaylist = cloneMatchupsByPlaylist(p.MatchupsByPlaylist)
+	}
+	if p.Tags != nil {
+		clone.Tags = append([]string(nil), p.Tags...)
 	}
 	return clone
 }

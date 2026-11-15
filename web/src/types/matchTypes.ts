@@ -10,6 +10,7 @@ export type {
   MatchClock,
   PendingMatch,
   RoleStatsBreakdown,
+  StampingConfig,
   StatsAPIStatus,
   SyncConfig,
   SyncProgress,
