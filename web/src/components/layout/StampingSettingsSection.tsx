@@ -234,6 +234,8 @@ export const StampingSettingsSection: React.FC = () => {
       ? 'SAVED ✓'
       : stampingSyncState === 'reset'
       ? 'DEFAULTS RESTORED ✓'
+      : stampingSyncState === 'error'
+      ? '⚠ SAVE FAILED'
       : 'MULTI-SIGNAL ENGINE';
 
   return (
@@ -246,7 +248,9 @@ export const StampingSettingsSection: React.FC = () => {
           <span
             role="status"
             data-testid="stamping-sync-status"
-            className="t-font-mono text-[11px] font-bold uppercase tracking-wider text-muted"
+            className={`t-font-mono text-[11px] font-bold uppercase tracking-wider ${
+              stampingSyncState === 'error' ? 'text-loss' : 'text-muted'
+            }`}
           >
             {statusText}
           </span>

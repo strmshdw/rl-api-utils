@@ -190,11 +190,13 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
           safeStorageSet(STORAGE_KEYS.stampingConfig, JSON.stringify(normalized));
         }
         setStampingSyncState('saved');
-      } else {
+      } else if (res.status === 404 && isDemoMode()) {
         setStampingSyncState('saved');
+      } else {
+        setStampingSyncState('error');
       }
     } catch {
-      setStampingSyncState('saved');
+      setStampingSyncState(isDemoMode() ? 'saved' : 'error');
     }
   }, []);
 
@@ -215,10 +217,14 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
           setStampingConfig(normalized);
           safeStorageSet(STORAGE_KEYS.stampingConfig, JSON.stringify(normalized));
         }
+        setStampingSyncState('reset');
+      } else if (res.status === 404 && isDemoMode()) {
+        setStampingSyncState('reset');
+      } else {
+        setStampingSyncState('error');
       }
-      setStampingSyncState('reset');
     } catch {
-      setStampingSyncState('reset');
+      setStampingSyncState(isDemoMode() ? 'reset' : 'error');
     }
   }, []);
 

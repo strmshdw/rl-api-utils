@@ -141,4 +141,44 @@ describe('StampingSettingsSection — UI Configuration & Live Reactivity', () =>
     expect(container.textContent).toContain('◆ HIGHER MMR (+95 VS YOU)');
     expect(container.textContent).toContain('◆ OFF-MODE PEAK');
   });
+
+  it('surfaces honest SAVE FAILED status when backend rejects PATCH /api/stamping/config with 403 Forbidden', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const method = init?.method || 'GET';
+        if (url.endsWith('/api/stamping/config') && method === 'PATCH') {
+          return {
+            ok: false,
+            status: 403,
+            json: async () => ({ error: 'forbidden: invalid origin' }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ running: false, total_replays: 0, synced_matches: 0, synced_players: 0 }),
+        } as Response;
+      }),
+    );
+
+    await mount(
+      <DashboardProvider>
+        <SettingsPanel isOpen={true} onClose={() => {}} inMatch={false} onSwitchToLive={() => {}} />
+      </DashboardProvider>,
+    );
+    await flush(20);
+
+    const offModeToggle = document.querySelector<HTMLInputElement>('#stamping-show-off-mode-peak')!;
+    expect(offModeToggle).not.toBeNull();
+    await act(async () => {
+      offModeToggle.click();
+    });
+    await flush(15);
+
+    const statusBadge = document.querySelector('[data-testid="stamping-sync-status"]');
+    expect(statusBadge?.textContent).toContain('SAVE FAILED');
+    expect(statusBadge?.textContent).not.toContain('SAVED ✓');
+  });
 });

@@ -16,7 +16,7 @@ func (d *Daemon) handleSync(ctx context.Context) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !isAllowedMutatingOrigin(r) {
+		if !d.isAllowedMutatingOrigin(r) {
 			writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 			return
 		}
@@ -33,7 +33,7 @@ func (d *Daemon) handleSync(ctx context.Context) http.HandlerFunc {
 
 // handleTriggerBallchasingSync handles POST /api/sync/ballchasing.
 func (d *Daemon) handleTriggerBallchasingSync(w http.ResponseWriter, r *http.Request) {
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
@@ -170,7 +170,7 @@ func (d *Daemon) handleUpdateSyncConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
@@ -246,7 +246,7 @@ func (d *Daemon) handleManualSyncNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isAllowedMutatingOrigin(r) {
+	if !d.isAllowedMutatingOrigin(r) {
 		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
