@@ -95,18 +95,30 @@ func isTrustedNonLoopbackHostname(originHostname, configuredHost string) bool {
 	if !strings.Contains(originHostname, ".") {
 		return true
 	}
-	if strings.HasSuffix(originHostname, ".ts.net") {
-		return true
+	for _, suffix := range []string{".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain", ".ts.net"} {
+		if strings.HasSuffix(originHostname, suffix) {
+			return true
+		}
 	}
 	if machineHost, err := os.Hostname(); err == nil && machineHost != "" {
 		mh := strings.ToLower(strings.TrimSpace(machineHost))
-		for _, suffix := range []string{"", ".local", ".lan", ".home.arpa", ".internal"} {
-			if originHostname == mh+suffix {
-				return true
-			}
+		if originHostname == mh {
+			return true
 		}
 	}
 	return false
+}
+
+func isLoopbackOrLocalPeer(remoteAddr string) bool {
+	raw := strings.TrimSpace(remoteAddr)
+	if raw == "" {
+		return false
+	}
+	host := raw
+	if h, _, err := net.SplitHostPort(raw); err == nil {
+		host = h
+	}
+	return isLoopbackHost(host) || isLocalInterfaceIP(host)
 }
 
 func normalizeOriginHostPort(scheme, rawHost string) string {
@@ -149,6 +161,19 @@ func isAllowedMutatingOriginForHost(r *http.Request, configuredHost string) bool
 	}
 
 	cfgHost := strings.Trim(strings.ToLower(strings.TrimSpace(configuredHost)), "[]")
+	origHost := normalizeOriginHostPort(scheme, u.Host)
+
+	if isLoopbackOrLocalPeer(r.RemoteAddr) {
+		if xfh := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0]); xfh != "" {
+			if normalizeOriginHostPort(scheme, xfh) == origHost && isTrustedNonLoopbackHostname(originHostname, cfgHost) {
+				return true
+			}
+		}
+		if isLocalInterfaceIP(originHostname) {
+			return true
+		}
+	}
+
 	if cfgHost == "" || isLoopbackHost(cfgHost) {
 		return false
 	}
@@ -156,7 +181,6 @@ func isAllowedMutatingOriginForHost(r *http.Request, configuredHost string) bool
 	// When web.host is non-loopback (e.g. "0.0.0.0"), allow same-origin requests over IP literals
 	// or trusted local/tailnet hostnames, plus dev-proxy origins on this machine's own NIC IPs.
 	reqHost := normalizeOriginHostPort(scheme, r.Host)
-	origHost := normalizeOriginHostPort(scheme, u.Host)
 	if reqHost != "" && origHost == reqHost && isTrustedNonLoopbackHostname(originHostname, cfgHost) {
 		return true
 	}

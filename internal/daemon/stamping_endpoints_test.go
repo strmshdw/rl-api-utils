@@ -231,7 +231,7 @@ func TestNonLoopbackWebHost_AllowsSameOriginLANAndHostname_BlocksCSRFAndDNSRebin
 		}
 	}
 
-	// 3. Same-origin local machine hostname and .local mDNS hostname succeed
+	// 3. Same-origin local machine hostname and router/mDNS aliases (.local, .lan, .home) succeed
 	if hostName, hErr := os.Hostname(); hErr == nil && hostName != "" {
 		for _, h := range []string{hostName + ":49125", hostName + ".local:49125"} {
 			rec := sendReq(http.MethodPatch, "/api/stamping/config", h, "http://"+h, `{"higher_mmr_diff":70}`)
@@ -239,6 +239,30 @@ func TestNonLoopbackWebHost_AllowsSameOriginLANAndHostname_BlocksCSRFAndDNSRebin
 				t.Fatalf("expected 200 OK for same-origin machine hostname %s, got %d: %s", h, rec.Code, rec.Body.String())
 			}
 		}
+	}
+	for _, aliasHost := range []string{"rl-box.lan:49125", "rl-box.home:49125", "rl-box.local:49125", "rl-box.tail99.ts.net:49125"} {
+		rec := sendReq(http.MethodPatch, "/api/stamping/config", aliasHost, "http://"+aliasHost, `{"higher_mmr_diff":72}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for same-origin private/local alias %s, got %d: %s", aliasHost, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 3b. Loopback reverse proxy (e.g. Tailscale Serve / Caddy) forwarding X-Forwarded-Host succeeds even on default loopback daemon
+	loopbackCfg := makeTestConfig(5*time.Minute, false)
+	loopbackDaemon, err := daemon.New(newMockSyncer(), loopbackCfg, daemon.WithStateStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyReq := httptest.NewRequest(http.MethodPatch, "http://127.0.0.1:49125/api/stamping/config", bytes.NewReader([]byte(`{"higher_mmr_diff":68}`)))
+	proxyReq.RemoteAddr = "127.0.0.1:55123"
+	proxyReq.Host = "127.0.0.1:49125"
+	proxyReq.Header.Set("X-Forwarded-Host", "my-pc.tail99.ts.net")
+	proxyReq.Header.Set("Origin", "https://my-pc.tail99.ts.net")
+	proxyReq.Header.Set("Content-Type", "application/json")
+	proxyRec := httptest.NewRecorder()
+	loopbackDaemon.Handler(ctx).ServeHTTP(proxyRec, proxyReq)
+	if proxyRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for loopback reverse-proxy X-Forwarded-Host, got %d: %s", proxyRec.Code, proxyRec.Body.String())
 	}
 
 	// 4. Vite dev proxy over local interface IP succeeds when web.host is non-loopback
