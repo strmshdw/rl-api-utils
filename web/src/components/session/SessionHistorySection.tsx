@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { SessionResponse } from '../../types/api';
 import {
   deltaInk,
+  filterSessionByPlaylist,
   formatAgo,
   formatRecord,
   formatShortDate,
   formatSigned,
+  normalizeActiveModeKey,
   playlistLabels,
   recordInk,
   summarizeSession,
@@ -66,6 +68,7 @@ interface SessionHistoryListProps {
   pastSessions: SessionResponse[];
   currentSessionId: string;
   activeSessionId?: string;
+  activePlaylist?: string;
   onSelectSession: (sessionId: string | null) => void;
   onContinueSession?: (sessionId?: string) => void;
 }
@@ -74,41 +77,53 @@ export const SessionHistoryList: React.FC<SessionHistoryListProps> = ({
   pastSessions,
   currentSessionId,
   activeSessionId,
+  activePlaylist,
   onSelectSession,
   onContinueSession,
 }) => {
-  if (pastSessions.length === 0) return null;
+  const modeKey = normalizeActiveModeKey(activePlaylist);
+
+  const visibleEntries = useMemo(() => {
+    return pastSessions
+      .map((raw) => {
+        const scoped = filterSessionByPlaylist(raw, modeKey) ?? raw;
+        const isCurrent = raw.session_id === currentSessionId;
+        const isSelected = raw.session_id === activeSessionId;
+        return { raw, scoped, isCurrent, isSelected };
+      })
+      .filter(({ scoped, isCurrent, isSelected }) => isCurrent || isSelected || scoped.total_matches > 0);
+  }, [pastSessions, modeKey, currentSessionId, activeSessionId]);
+
+  if (visibleEntries.length === 0) return null;
 
   return (
     <div data-testid="session-history-section" className="pt-8">
       <div className="flex flex-wrap justify-between items-center gap-4 pb-3.5">
         <SectionLabel>
-          SESSION HISTORY · SESSIONS OVER TIME ({pastSessions.length})
+          SESSION HISTORY · SESSIONS OVER TIME ({visibleEntries.length})
         </SectionLabel>
       </div>
       <div className="flex flex-col gap-1.5">
-        {pastSessions.map((hist) => {
-          const isCurrent = hist.session_id === currentSessionId;
-          const isSelected = hist.session_id === activeSessionId;
-          const histSummary = summarizeSession(hist);
-          const histPlaylists = hist.playlists
-            ? Object.values(hist.playlists)
+        {visibleEntries.map(({ raw, scoped, isCurrent, isSelected }) => {
+          const histSummary = summarizeSession(scoped, modeKey);
+          const histPlaylists = scoped.playlists
+            ? Object.values(scoped.playlists)
                 .map((p) => playlistLabels(p.playlist_id, p.playlist_name).short)
                 .join(', ')
             : '';
-          const lastPlayed = hist.last_match_at || hist.ended_at || hist.started_at;
+          const lastPlayed = raw.last_match_at || raw.ended_at || raw.started_at;
 
           return (
             <div
-              key={hist.session_id}
+              key={raw.session_id}
               role="button"
               tabIndex={0}
               data-testid="session-history-row"
-              onClick={() => onSelectSession(isCurrent ? null : hist.session_id)}
+              onClick={() => onSelectSession(isCurrent ? null : raw.session_id)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  onSelectSession(isCurrent ? null : hist.session_id);
+                  onSelectSession(isCurrent ? null : raw.session_id);
                 }
               }}
               className={`flex flex-wrap items-center justify-between gap-4 px-6 py-4 bg-panel hover:bg-panel-hover cursor-pointer transition-colors duration-120 border-l-4 ${
@@ -116,33 +131,33 @@ export const SessionHistoryList: React.FC<SessionHistoryListProps> = ({
               }`}
             >
               <div className="flex items-center gap-5 min-w-0">
-                <RecordCells wins={hist.total_wins} losses={hist.total_losses} />
+                <RecordCells wins={scoped.total_wins} losses={scoped.total_losses} />
                 <span
                   className={`font-extrabold text-[26px] leading-none min-w-[64px] t-font-mono ${recordInk(
-                    hist.total_wins,
-                    hist.total_losses,
+                    scoped.total_wins,
+                    scoped.total_losses,
                   )}`}
                 >
-                  {formatRecord(hist.total_wins, hist.total_losses)}
+                  {formatRecord(scoped.total_wins, scoped.total_losses)}
                 </span>
                 <div className="flex flex-col gap-0.5 min-w-0">
-                  <div className="flex items-center gap-2.5 font-bold text-base tracking-t6 text-ink">
-                    <span>{formatShortDate(hist.started_at)}</span>
+                  <div className="flex flex-wrap items-center gap-2.5 font-bold text-base tracking-t6 text-ink">
+                    <span>{formatShortDate(raw.started_at)}</span>
                     <span className="text-muted text-sm font-semibold">
-                      · {hist.total_matches} {hist.total_matches === 1 ? 'MATCH' : 'MATCHES'}
+                      · {scoped.total_matches} {scoped.total_matches === 1 ? 'MATCH' : 'MATCHES'}
                     </span>
                     {isCurrent && (
                       <span className="bg-blue-ink/20 text-blue-ink text-sm font-extrabold px-2 py-0.5 tracking-t10 uppercase">
                         CURRENT
                       </span>
                     )}
-                    {!isCurrent && hist.can_continue && (
+                    {!isCurrent && raw.can_continue && (
                       <span className="bg-win/20 text-win text-sm font-extrabold px-2 py-0.5 tracking-t10 uppercase">
                         CONTINUABLE
                       </span>
                     )}
                   </div>
-                  <div className="font-semibold text-sm tracking-t8 text-muted uppercase truncate">
+                  <div className="font-semibold text-sm tracking-t8 text-muted uppercase break-words">
                     LAST ACTIVITY {formatAgo(lastPlayed)}
                     {histPlaylists ? ` · ${histPlaylists}` : ''}
                   </div>
@@ -162,13 +177,13 @@ export const SessionHistoryList: React.FC<SessionHistoryListProps> = ({
                     NET MMR
                   </div>
                 </div>
-                {!isCurrent && hist.can_continue && onContinueSession && (
+                {!isCurrent && raw.can_continue && onContinueSession && (
                   <GhostButton
                     data-testid="continue-history-row-btn"
                     tone="ink"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onContinueSession(hist.session_id);
+                      onContinueSession(raw.session_id);
                       onSelectSession(null);
                     }}
                   >

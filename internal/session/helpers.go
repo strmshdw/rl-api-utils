@@ -314,6 +314,8 @@ func FilterSessionSummary(summary *SessionResponse, playlist string, fromUnix, t
 
 	filteredMatches := make([]*SessionMatchDetail, 0, len(summary.Matches))
 	filteredPlaylists := make(map[string]*PlaylistSessionStats)
+	earliestMatchTime := make(map[string]time.Time)
+	latestMatchTime := make(map[string]time.Time)
 	var wins, losses, totalMatches int
 
 	for _, m := range summary.Matches {
@@ -346,6 +348,11 @@ func FilterSessionSummary(summary *SessionResponse, playlist string, fromUnix, t
 				PlaylistID:   m.PlaylistID,
 				PlaylistName: resolvePlaylistName(m.PlaylistID, m.PlaylistName),
 			}
+			if fromUnix <= 0 && toUnix <= 0 && summary.Playlists != nil {
+				if origPS := summary.Playlists[pKey]; origPS != nil && origPS.InitialMMR > 0 {
+					ps.InitialMMR = origPS.InitialMMR
+				}
+			}
 			filteredPlaylists[pKey] = ps
 		}
 		ps.MatchesPlayed++
@@ -356,8 +363,42 @@ func FilterSessionSummary(summary *SessionResponse, playlist string, fromUnix, t
 		}
 		ps.WinRate = domain.ComputeWinRate(ps.Wins, ps.MatchesPlayed)
 		ps.MMRDelta = domain.RoundFloat(ps.MMRDelta+m.MMRChange, 2)
+		if m.StartingMMR > 0 {
+			prevEarliest, hasEarliest := earliestMatchTime[pKey]
+			if ps.InitialMMR == 0 || ((fromUnix > 0 || toUnix > 0) && (!hasEarliest || (!matchTime.IsZero() && matchTime.Before(prevEarliest)))) {
+				ps.InitialMMR = m.StartingMMR
+				if !matchTime.IsZero() {
+					earliestMatchTime[pKey] = matchTime
+				}
+			}
+		}
 		if m.EndingMMR > 0 {
-			ps.CurrentMMR = m.EndingMMR
+			prevLatest, hasLatest := latestMatchTime[pKey]
+			if !hasLatest || matchTime.IsZero() || !matchTime.Before(prevLatest) {
+				ps.CurrentMMR = m.EndingMMR
+				if !matchTime.IsZero() {
+					latestMatchTime[pKey] = matchTime
+				}
+			}
+		}
+	}
+
+	for pKey, ps := range filteredPlaylists {
+		if fromUnix <= 0 && toUnix <= 0 && summary.Playlists != nil {
+			if origPS := summary.Playlists[pKey]; origPS != nil {
+				if ps.InitialMMR == 0 && origPS.InitialMMR > 0 {
+					ps.InitialMMR = origPS.InitialMMR
+				}
+				if ps.CurrentMMR == 0 && origPS.CurrentMMR > 0 {
+					ps.CurrentMMR = origPS.CurrentMMR
+				}
+				if ps.MMRDelta == 0 && origPS.MMRDelta != 0 {
+					ps.MMRDelta = origPS.MMRDelta
+				}
+			}
+		}
+		if ps.InitialMMR == 0 && ps.CurrentMMR > 0 && ps.MMRDelta != 0 {
+			ps.InitialMMR = domain.RoundFloat(ps.CurrentMMR-ps.MMRDelta, 2)
 		}
 	}
 

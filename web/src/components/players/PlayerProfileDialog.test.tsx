@@ -153,6 +153,10 @@ describe('PlayerProfileDialog', () => {
     expect(container.textContent).toContain('WITH YOU');
     expect(container.textContent).toContain('VS YOU');
     expect(container.textContent).toContain('RANKED DOUBLES');
+    const plBtnLabels = Array.from(container.querySelectorAll('.prof-pl-btn')).map((b) => b.textContent?.trim());
+    expect(plBtnLabels).not.toContain('ALL');
+    expect(plBtnLabels).not.toContain('EXTRA');
+    expect(plBtnLabels).toEqual(['2V2', '3V3', '1V1', 'CASUAL']);
   });
 
   it('toggles interactive filter cards (WITH YOU / VS YOU)', async () => {

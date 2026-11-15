@@ -19,6 +19,9 @@ export const TelemetryPendingBanner: React.FC = () => (
   </div>
 );
 
+const CORE_GRID_COLS =
+  'grid-cols-[minmax(176px,1.7fr)_68px_minmax(112px,1.1fr)_repeat(8,minmax(56px,1fr))]';
+
 export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
   players,
   bluePlayers,
@@ -75,7 +78,7 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
           return (
             <div
               key={`${pKey}-${i}`}
-              className={`grid grid-cols-[1.35fr_70px_1fr_repeat(8,1fr)] py-2.5 px-2 border-b t-border border-line text-base font-extrabold t-panel-hover hover:bg-panel-hover t-font-mono items-center ${
+              className={`grid ${CORE_GRID_COLS} py-2.5 px-2 border-b t-border border-line text-base font-extrabold t-panel-hover hover:bg-panel-hover t-font-mono items-center ${
                 inspected ? 'bg-panel-hover' : ''
               }`}
             >
@@ -106,7 +109,9 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
             </div>
           );
         })}
-        <div className="grid grid-cols-[1.35fr_70px_1fr_repeat(8,1fr)] py-2 px-2 t-bg-page bg-page border-b-2 t-border-2 border-line-2 text-base font-extrabold t-font-mono items-center">
+        <div
+          className={`grid ${CORE_GRID_COLS} py-2 px-2 t-bg-page bg-page border-b-2 t-border-2 border-line-2 text-base font-extrabold t-font-mono items-center`}
+        >
           <span
             className={`font-sans ${
               isBlue ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'
@@ -136,22 +141,31 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
           NO PARSED STATS FOR THIS REPLAY
         </p>
       ) : (
-        <div className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto">
-          <div className="grid grid-cols-[1.35fr_70px_1fr_repeat(8,1fr)] text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase">
-            <span>PLAYER</span>
-            <span className="text-right">MMR</span>
-            <span className="pl-2">RANK · DIV</span>
-            <span className="text-right">SCORE</span>
-            <span className="text-right">GOALS</span>
-            <span className="text-right">ASSISTS</span>
-            <span className="text-right">SAVES</span>
-            <span className="text-right">SHOTS</span>
-            <span className="text-right">SHOT %</span>
-            <span className="text-right">DEMOS</span>
-            <span className="text-right">DEMO&apos;D</span>
+        <div
+          role="region"
+          aria-label="Core match scoreboard"
+          tabIndex={0}
+          className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto"
+        >
+          <div className="min-w-[880px]">
+            <div
+              className={`grid ${CORE_GRID_COLS} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
+            >
+              <span>PLAYER</span>
+              <span className="text-right">MMR</span>
+              <span className="pl-2">RANK · DIV</span>
+              <span className="text-right">SCORE</span>
+              <span className="text-right">GOALS</span>
+              <span className="text-right">ASSISTS</span>
+              <span className="text-right">SAVES</span>
+              <span className="text-right">SHOTS</span>
+              <span className="text-right">SHOT %</span>
+              <span className="text-right">DEMOS</span>
+              <span className="text-right">DEMO&apos;D</span>
+            </div>
+            {renderCoreTeamSection(bluePlayers, 'BLUE TEAM', true)}
+            {renderCoreTeamSection(orangePlayers, 'ORANGE TEAM', false)}
           </div>
-          {renderCoreTeamSection(bluePlayers, 'BLUE TEAM', true)}
-          {renderCoreTeamSection(orangePlayers, 'ORANGE TEAM', false)}
         </div>
       )}
     </div>

@@ -166,9 +166,11 @@ describe('HistoricalMatchDetailModal', () => {
     expect(container.textContent).toContain('BLUE TEAM TOTALS / AVG');
     expect(container.textContent).toContain('ORANGE TEAM TOTALS / AVG');
     expect(container.textContent).toContain('PLAT II · DIV II');
+    expect(container.querySelector('[role="region"][aria-label="Core match scoreboard"]')).not.toBeNull();
 
     // Tab 2: 2. BOOST ECONOMY & PADS (BCPM header, no fabricated bpm * 0.96 = 528)
     await clickText(container, '2. BOOST ECONOMY & PADS');
+    expect(container.querySelector('[role="region"][aria-label="Boost economy telemetry"]')).not.toBeNull();
     expect(container.textContent).toContain('BPM');
     expect(container.textContent).toContain('BCPM');
     expect(container.textContent).not.toContain('BCMPM');
@@ -178,6 +180,7 @@ describe('HistoricalMatchDetailModal', () => {
 
     // Tab 3: 3. SPEED & MOVEMENT (native Unreal Units uu/s)
     await clickText(container, '3. SPEED & MOVEMENT');
+    expect(container.querySelector('[role="region"][aria-label="Speed and movement telemetry"]')).not.toBeNull();
     expect(container.textContent).toContain('AVG SPEED');
     expect(container.textContent).toContain('SUPERSONIC');
     expect(container.textContent).toContain('1450 uu/s');
@@ -186,6 +189,7 @@ describe('HistoricalMatchDetailModal', () => {
 
     // Tab 4: 4. POSITIONING & ROTATION (2v2 shows 1ST MAN / 2ND MAN and native uu distance)
     await clickText(container, '4. POSITIONING & ROTATION');
+    expect(container.querySelector('[role="region"][aria-label="Positioning and rotation telemetry"]')).not.toBeNull();
     expect(container.textContent).toContain('DEF 1/3');
     expect(container.textContent).toContain('BEHIND BALL');
     expect(container.textContent).toContain('1ST MAN');

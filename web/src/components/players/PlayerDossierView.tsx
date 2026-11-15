@@ -10,6 +10,8 @@ import {
   formatAgo,
   formatMmr,
   formatShortDate,
+  modeKeyFromPlaylistId,
+  normalizeActiveModeKey,
   platformLabel,
   playlistFilterToParam,
   playlistLabels,
@@ -17,7 +19,8 @@ import {
 } from '../../utils/broadcast';
 import {
   CompactRoleSplitCard,
-  PLAYLIST_SCOPE_BUTTONS,
+  CORE_PLAYLIST_SCOPE_BUTTONS,
+  EXTRA_PLAYLIST_SCOPE_OPTIONS,
   ProfilePlaylistScope,
   RecordWithPct,
 } from './PlayerRoleSplitCard';
@@ -34,7 +37,7 @@ interface PlayerDossierViewProps {
   onSelectPlayer?: (playerId: string, playerName?: string) => void;
 }
 
-const PLAYLIST_GRID = 'minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 70px 120px';
+const PLAYLIST_GRID = 'minmax(150px,1.2fr) minmax(110px,1fr) minmax(110px,1fr) 70px 120px';
 const NO_IDS = new Set<string>();
 
 const EXTRA_MODE_SPECS: ReadonlyArray<{ id: number; label: string }> = [
@@ -76,41 +79,40 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
   const isDialog = variant === 'dialog';
   const padX = isDialog ? 'px-8' : '';
   const isPinned = pinnedPlayerIds.includes(d.id);
-  const hasPlaylistFilter = Boolean(d.activePlaylistParam);
+  const hasSecondaryFilter =
+    d.roleFilter !== 'all' || d.resultFilter !== 'all' || d.searchQuery.trim() !== '';
   const showHistory =
     !isDialog ||
     d.matches.length > 0 ||
     d.isLoadingMatches ||
-    d.roleFilter !== 'all' ||
-    hasPlaylistFilter;
+    hasSecondaryFilter;
 
   const handleSelectScope = (scope: ProfilePlaylistScope) => {
     d.setStatPlaylist(scope);
     if (!isDialog) {
-      setActivePlaylist(scope === 'all' ? 'all' : playlistFilterToParam(scope) || scope);
+      setActivePlaylist(normalizeActiveModeKey(playlistFilterToParam(scope) || scope));
     }
   };
 
   const handleSelectPlaylistRow = (playlistId: number) => {
-    const togglingOff = playlistId === 0 || d.activePlaylistId === playlistId;
+    if (playlistId <= 0) return;
     d.setPlaylistById(playlistId);
     if (!isDialog) {
-      setActivePlaylist(togglingOff ? 'all' : String(playlistId));
+      setActivePlaylist(modeKeyFromPlaylistId(playlistId));
     }
   };
 
   const handleClearFilters = () => {
     d.clearFilters();
-    if (!isDialog) {
-      setActivePlaylist('all');
-    }
   };
+
+  const isExtraScopeSelected = EXTRA_PLAYLIST_SCOPE_OPTIONS.some(
+    (opt) => opt.scope === d.statPlaylist,
+  );
 
   const activePlaylistLabel =
     d.activePlaylistId > 0
       ? playlistLabels(d.activePlaylistId).name
-      : d.statPlaylist === 'extra'
-      ? 'EXTRA MODES'
       : d.statPlaylist === 'casual'
       ? 'CASUAL'
       : '';
@@ -131,7 +133,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
         </div>
       ) : !d.profile && isDialog ? null : (
         <div className="flex flex-col font-display pb-4 gap-4">
-          {/* Scope Controls: MMR Trend Sparkline, Pin Toggle, Playlist Scope (.prof-pl-btn) */}
+          {/* Scope Controls: MMR Trend Sparkline, Pin Toggle, Concrete Playlist Scope (.prof-pl-btn) */}
           <div
             className={`${padX} ${
               isDialog ? 'pt-4' : ''
@@ -163,11 +165,9 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                 {isPinned ? '★ PINNED' : '☆ PIN PLAYER'}
               </button>
 
-              <div className="flex flex-wrap t-border border border-outline t-bg-panel bg-panel t-radius overflow-hidden">
-                {PLAYLIST_SCOPE_BUTTONS.map((b) => {
-                  const isActive =
-                    d.statPlaylist === b.scope &&
-                    (b.scope !== 'all' || !hasPlaylistFilter);
+              <div className="flex flex-wrap items-center t-border border border-outline t-bg-panel bg-panel t-radius overflow-hidden">
+                {CORE_PLAYLIST_SCOPE_BUTTONS.map((b) => {
+                  const isActive = d.statPlaylist === b.scope && d.activePlaylistId === (b.scope === '2v2' ? 11 : b.scope === '3v3' ? 13 : 10);
                   return (
                     <button
                       key={b.scope}
@@ -183,24 +183,55 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                     </button>
                   );
                 })}
+
+                <select
+                  aria-label="Select extra mode scope"
+                  value={isExtraScopeSelected ? d.statPlaylist : ''}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleSelectScope(e.target.value as ProfilePlaylistScope);
+                    }
+                  }}
+                  className={`px-2.5 py-1.5 border-l border-r t-border border-line uppercase outline-none cursor-pointer ${
+                    isExtraScopeSelected
+                      ? 't-bg-ink bg-ink text-page'
+                      : 't-bg-panel bg-panel text-muted hover:text-ink'
+                  }`}
+                >
+                  <option value="" disabled>
+                    EXTRA ▾
+                  </option>
+                  {EXTRA_PLAYLIST_SCOPE_OPTIONS.map((opt) => (
+                    <option
+                      key={opt.scope}
+                      value={opt.scope}
+                      className="t-bg-panel bg-panel text-ink"
+                    >
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectScope('casual')}
+                  className={`prof-pl-btn px-3 py-1.5 uppercase cursor-pointer ${
+                    d.statPlaylist === 'casual'
+                      ? 't-bg-ink bg-ink text-page'
+                      : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  CASUAL
+                </button>
               </div>
             </div>
           </div>
-
-          {!hasPlaylistFilter && d.playlistBreakdown.length > 1 && (
-            <div
-              data-testid="blended-modes-note"
-              className={`${padX} text-xs font-bold text-muted uppercase tracking-wider`}
-            >
-              BLENDED ACROSS MODES — SELECT A PLAYLIST FOR EXACT AVERAGES
-            </div>
-          )}
 
           {/* Interactive WITH YOU & AGAINST YOU H2H Role Split Cards */}
           <div className={`${padX} grid grid-cols-1 lg:grid-cols-2 gap-3.5`}>
             <CompactRoleSplitCard
               label={d.isOwnProfile ? 'YOUR STATS' : 'WITH YOU'}
-              roleTitle={d.isOwnProfile ? 'ALL MATCHES (YOU)' : 'WITH YOU (TEAMMATE)'}
+              roleTitle={d.isOwnProfile ? 'SELECTED MODE (YOU)' : 'WITH YOU (TEAMMATE)'}
               wins={d.totals.mate.wins}
               losses={d.totals.mate.losses}
               teammate
@@ -230,8 +261,8 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
             />
           </div>
 
-          {/* Active Filter Summary Bar */}
-          {(d.roleFilter !== 'all' || hasPlaylistFilter) && (
+          {/* Active Secondary Filter Summary Bar */}
+          {hasSecondaryFilter && (
             <div
               data-testid="active-filter-summary"
               className={`${
@@ -245,9 +276,12 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                     ? 'WITH YOU (TEAMMATE)'
                     : d.roleFilter === 'opponent'
                     ? 'VS YOU (OPPONENT)'
-                    : ''}
-                  {d.roleFilter !== 'all' && activePlaylistLabel ? ' · ' : ''}
-                  {activePlaylistLabel}
+                    : d.resultFilter === 'W'
+                    ? 'WINS'
+                    : d.resultFilter === 'L'
+                    ? 'LOSSES'
+                    : d.searchQuery.trim()}
+                  {activePlaylistLabel ? ` · ${activePlaylistLabel}` : ''}
                 </span>
                 <span className="text-muted">
                   ({displayTotalMatches} {displayTotalMatches === 1 ? 'match' : 'matches'})
@@ -389,60 +423,67 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
           <div className={`${padX} flex flex-col gap-2`}>
             <SectionLabel className="pb-1">BY PLAYLIST</SectionLabel>
             {d.playlistBreakdown.length ? (
-              <>
-                <div
-                  className={`grid px-[18px] ${COLUMN_HEADER}`}
-                  style={{ gridTemplateColumns: PLAYLIST_GRID }}
-                >
-                  <span>PLAYLIST</span>
-                  <span>WITH YOU</span>
-                  <span>VS YOU</span>
-                  <span className="text-right">GAMES</span>
-                  <span className="text-right">LAST MET</span>
+              <div
+                role="region"
+                aria-label="Player breakdown by playlist"
+                tabIndex={0}
+                className="overflow-x-auto"
+              >
+                <div className="min-w-[580px] flex flex-col gap-2">
+                  <div
+                    className={`grid px-[18px] ${COLUMN_HEADER}`}
+                    style={{ gridTemplateColumns: PLAYLIST_GRID }}
+                  >
+                    <span>PLAYLIST</span>
+                    <span>WITH YOU</span>
+                    <span>VS YOU</span>
+                    <span className="text-right">GAMES</span>
+                    <span className="text-right">LAST MET</span>
+                  </div>
+                  {d.playlistBreakdown.map((m) => {
+                    const isSelected = d.activePlaylistId === m.playlist_id;
+                    return (
+                      <div
+                        key={m.playlist_id}
+                        data-testid="profile-playlist-row"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleSelectPlaylistRow(m.playlist_id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleSelectPlaylistRow(m.playlist_id);
+                          }
+                        }}
+                        className={`grid items-center min-h-[52px] py-2 bg-panel px-[18px] cursor-pointer transition-all duration-120 ${
+                          isSelected
+                            ? 'ring-2 ring-blue-ink bg-panel-hover'
+                            : 'hover:bg-panel-hover'
+                        }`}
+                        style={{ gridTemplateColumns: PLAYLIST_GRID }}
+                      >
+                        <span className="font-bold text-lg tracking-t6 truncate">
+                          {playlistLabels(m.playlist_id).name}
+                        </span>
+                        <RecordWithPct
+                          wins={m.wins_as_teammate}
+                          losses={m.losses_as_teammate}
+                        />
+                        <RecordWithPct
+                          wins={m.wins_as_opponent}
+                          losses={m.losses_as_opponent}
+                        />
+                        <span className="text-right font-bold text-xl t-font-mono">
+                          {m.total_matches}
+                        </span>
+                        <span className="text-right font-semibold text-sm tracking-t8 text-muted">
+                          {formatAgo(m.last_played_at)}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
-                {d.playlistBreakdown.map((m) => {
-                  const isSelected = d.activePlaylistId === m.playlist_id;
-                  return (
-                    <div
-                      key={m.playlist_id}
-                      data-testid="profile-playlist-row"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => handleSelectPlaylistRow(m.playlist_id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleSelectPlaylistRow(m.playlist_id);
-                        }
-                      }}
-                      className={`grid items-center h-[52px] bg-panel px-[18px] cursor-pointer transition-all duration-120 ${
-                        isSelected
-                          ? 'ring-2 ring-blue-ink bg-panel-hover'
-                          : 'hover:bg-panel-hover'
-                      }`}
-                      style={{ gridTemplateColumns: PLAYLIST_GRID }}
-                    >
-                      <span className="font-bold text-lg tracking-t6 truncate">
-                        {playlistLabels(m.playlist_id).name}
-                      </span>
-                      <RecordWithPct
-                        wins={m.wins_as_teammate}
-                        losses={m.losses_as_teammate}
-                      />
-                      <RecordWithPct
-                        wins={m.wins_as_opponent}
-                        losses={m.losses_as_opponent}
-                      />
-                      <span className="text-right font-bold text-xl t-font-mono">
-                        {m.total_matches}
-                      </span>
-                      <span className="text-right font-semibold text-sm tracking-t8 text-muted">
-                        {formatAgo(m.last_played_at)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </>
+              </div>
             ) : (
               <p className="font-semibold text-base tracking-t8 text-muted">
                 NO RECORDED MATCHUPS

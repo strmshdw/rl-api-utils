@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { SessionResponse, SessionMatchDetail, SessionListResponse } from '../types/api';
 import { sharedSSEManager } from '../context/SSEContext';
 import { useDashboard } from '../context/DashboardContext';
@@ -20,14 +20,46 @@ export interface UseSessionResult {
   setSelectedMatch: React.Dispatch<React.SetStateAction<SessionMatchDetail | null>>;
 }
 
+function mergeBasePlaylistMmr(
+  scoped: SessionResponse | null,
+  base: SessionResponse | null,
+): SessionResponse | null {
+  if (!scoped || !base?.playlists || !scoped.playlists) return scoped;
+  let mutated = false;
+  const mergedPlaylists = { ...scoped.playlists };
+  for (const [key, ps] of Object.entries(mergedPlaylists)) {
+    const orig = base.playlists[key];
+    if (!orig) continue;
+    const nextInitial = ps.initial_mmr > 0 ? ps.initial_mmr : orig.initial_mmr;
+    const nextCurrent = ps.current_mmr > 0 ? ps.current_mmr : orig.current_mmr;
+    const nextDelta = ps.mmr_delta !== 0 ? ps.mmr_delta : orig.mmr_delta;
+    if (
+      nextInitial !== ps.initial_mmr ||
+      nextCurrent !== ps.current_mmr ||
+      nextDelta !== ps.mmr_delta
+    ) {
+      mergedPlaylists[key] = {
+        ...ps,
+        initial_mmr: nextInitial,
+        current_mmr: nextCurrent,
+        mmr_delta: nextDelta,
+      };
+      mutated = true;
+    }
+  }
+  return mutated ? { ...scoped, playlists: mergedPlaylists } : scoped;
+}
+
 export function useSession(playlistFilter?: string): UseSessionResult {
   const { dateRangeQueryParams, previewMode, isDevBuild } = useDashboard();
   const [session, setSession] = useState<SessionResponse | null>(null);
+  const [sessionScopeKey, setSessionScopeKey] = useState<string>('');
   const [unfilteredSession, setUnfilteredSession] = useState<SessionResponse | null>(null);
   const [pastSessions, setPastSessions] = useState<SessionResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
+  const fetchSeqRef = useRef(0);
 
   const playlistParam = playlistFilter ? playlistFilterToParam(playlistFilter) : '';
   const demoFallbackEnabled = isDevBuild && (previewMode || isDemoMode());
@@ -46,6 +78,7 @@ export function useSession(playlistFilter?: string): UseSessionResult {
   }, []);
 
   const fetchSession = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
     try {
       const baseParams = new URLSearchParams();
       if (dateRangeQueryParams.from) baseParams.set('from', dateRangeQueryParams.from);
@@ -57,12 +90,14 @@ export function useSession(playlistFilter?: string): UseSessionResult {
         const res = await fetch(baseUrl);
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         const data: SessionResponse = await res.json();
+        if (seq !== fetchSeqRef.current) return;
         const resolved =
           demoFallbackEnabled && (!data.matches || data.matches.length === 0)
             ? SAMPLE_SESSION_RESPONSE
             : data;
         setUnfilteredSession(resolved);
         setSession(resolved);
+        setSessionScopeKey('');
       } else {
         const filteredParams = new URLSearchParams(baseParams);
         filteredParams.set('playlist', playlistParam);
@@ -76,20 +111,27 @@ export function useSession(playlistFilter?: string): UseSessionResult {
         }
         const baseData: SessionResponse | null = baseRes.ok ? await baseRes.json() : null;
         const filteredData: SessionResponse | null = filteredRes.ok ? await filteredRes.json() : null;
+        if (seq !== fetchSeqRef.current) return;
 
         if (demoFallbackEnabled && (!baseData?.matches || baseData.matches.length === 0)) {
           setUnfilteredSession(SAMPLE_SESSION_RESPONSE);
           setSession(filterSessionByPlaylist(SAMPLE_SESSION_RESPONSE, playlistFilter));
+          setSessionScopeKey(playlistParam);
         } else {
           if (baseData) setUnfilteredSession(baseData);
           const source = filteredData ?? baseData;
-          setSession(filterSessionByPlaylist(source, playlistFilter));
+          const scoped = mergeBasePlaylistMmr(filterSessionByPlaylist(source, playlistFilter), baseData);
+          setSession(scoped);
+          setSessionScopeKey(playlistParam);
         }
       }
 
-      setError(null);
-      void fetchPastSessions();
+      if (seq === fetchSeqRef.current) {
+        setError(null);
+        void fetchPastSessions();
+      }
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       if (demoFallbackEnabled) {
         setUnfilteredSession(SAMPLE_SESSION_RESPONSE);
         setSession(
@@ -97,12 +139,15 @@ export function useSession(playlistFilter?: string): UseSessionResult {
             ? filterSessionByPlaylist(SAMPLE_SESSION_RESPONSE, playlistFilter)
             : SAMPLE_SESSION_RESPONSE,
         );
+        setSessionScopeKey(playlistParam);
         setError(null);
       } else {
         setError(err instanceof Error ? err.message : 'Failed to load session');
       }
     } finally {
-      setIsLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [
     fetchPastSessions,
@@ -135,6 +180,7 @@ export function useSession(playlistFilter?: string): UseSessionResult {
         const data: SessionResponse = await res.json();
         setUnfilteredSession(data);
         setSession(playlistParam ? filterSessionByPlaylist(data, playlistFilter) : data);
+        setSessionScopeKey(playlistParam);
         setError(null);
         void fetchPastSessions();
         return data;
@@ -158,6 +204,7 @@ export function useSession(playlistFilter?: string): UseSessionResult {
         const data: SessionResponse = await res.json();
         setUnfilteredSession(data);
         setSession(playlistParam ? filterSessionByPlaylist(data, playlistFilter) : data);
+        setSessionScopeKey(playlistParam);
       } catch (err) {
         console.error('Session dismiss error:', err);
       }
@@ -179,9 +226,11 @@ export function useSession(playlistFilter?: string): UseSessionResult {
               ? filterSessionByPlaylist(SAMPLE_SESSION_RESPONSE, playlistFilter)
               : SAMPLE_SESSION_RESPONSE,
           );
+          setSessionScopeKey(playlistParam);
         } else {
           setUnfilteredSession(data);
           setSession(playlistParam ? filterSessionByPlaylist(data, playlistFilter) : data);
+          setSessionScopeKey(playlistParam);
           if (playlistParam && !isEmpty) {
             void fetchSession();
           }
@@ -202,10 +251,16 @@ export function useSession(playlistFilter?: string): UseSessionResult {
       unsubSessionUpdate();
       unsubMatchEnded();
     };
-  }, [fetchSession, fetchPastSessions, playlistParam, playlistFilter]);
+  }, [fetchSession, fetchPastSessions, playlistParam, playlistFilter, demoFallbackEnabled]);
+
+  const resolvedSession = useMemo(() => {
+    if (!playlistParam) return session;
+    if (sessionScopeKey === playlistParam) return session;
+    return unfilteredSession ? filterSessionByPlaylist(unfilteredSession, playlistFilter) : null;
+  }, [playlistParam, sessionScopeKey, session, unfilteredSession, playlistFilter]);
 
   return {
-    session,
+    session: resolvedSession,
     unfilteredSession,
     pastSessions,
     isLoading,

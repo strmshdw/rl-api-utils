@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, type SetStateAction } from 'react';
 import { PlayerSummary, PlayerSearchResponse, GlobalSpotlights } from '../types/api';
 import { useDashboard } from '../context/DashboardContext';
-import { playlistFilterToParam } from '../utils/broadcast';
+import { normalizeActiveModeKey } from '../utils/broadcast';
 import { isDemoMode, SAMPLE_PLAYERS } from '../utils/sampleData';
 
 export type PlayerSortField =
@@ -27,7 +27,7 @@ export interface UsePlayerSearchOptions {
 
 export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
   const { activePlaylist, setActivePlaylist, dateRangeQueryParams } = useDashboard();
-  const contextPlaylist = playlistFilterToParam(activePlaylist) || 'all';
+  const contextPlaylist = normalizeActiveModeKey(activePlaylist);
 
   const [query, setQuery] = useState<string>('');
   const [debouncedQuery, setDebouncedQuery] = useState<string>('');
@@ -44,7 +44,7 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
 
   const setPlaylist = useCallback(
     (next: string) => {
-      const normalized = playlistFilterToParam(next) || 'all';
+      const normalized = normalizeActiveModeKey(next);
       setPlaylistState({ source: contextPlaylist, value: normalized });
       setActivePlaylist(normalized);
     },
@@ -129,7 +129,7 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
         });
         if (debouncedQuery.trim()) params.set('query', debouncedQuery.trim());
         if (platform !== 'all') params.set('platform', platform);
-        if (playlist !== 'all') params.set('playlist', playlist);
+        params.set('playlist', playlist);
         if (role !== 'all') params.set('role', role);
         if (dateRangeQueryParams.from) params.set('from', dateRangeQueryParams.from);
         if (dateRangeQueryParams.to) params.set('to', dateRangeQueryParams.to);

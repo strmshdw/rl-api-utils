@@ -69,7 +69,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {isDevBuild ? '-dev' : ''} · PREFERENCES SAVED TO LOCAL STORAGE
         </span>
       }
-      maxWidth={880}
+      maxWidth={960}
     >
       <div
         id="settings-panel-body"

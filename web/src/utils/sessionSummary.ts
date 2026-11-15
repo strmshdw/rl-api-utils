@@ -13,6 +13,7 @@ import {
   localTeamOf,
   matchesPlaylistFilter,
   modeKeyFromPlaylistId,
+  normalizeActiveModeKey,
   outcomeOf,
   playlistLabels,
 } from './broadcastLabels';
@@ -273,7 +274,22 @@ export function summarizeSessionPlaylists(
   });
 }
 
-export function summarizeSession(session: SessionResponse | null): SessionSummary {
+function resolveModeSubFallback(playlistFilter?: string): string {
+  if (!playlistFilter) return 'SELECTED MODE';
+  const norm = normalizeActiveModeKey(playlistFilter);
+  if (norm === 'casual') return 'CASUAL';
+  if (norm === 'private') return 'PRIVATE MATCH';
+  const pid = Number(norm);
+  if (Number.isInteger(pid) && pid > 0) {
+    return playlistLabels(pid).mode;
+  }
+  return 'SELECTED MODE';
+}
+
+export function summarizeSession(
+  session: SessionResponse | null,
+  playlistFilter?: string,
+): SessionSummary {
   const matches = chronological(session?.matches);
   let goalsFor = 0;
   let goalsAgainst = 0;
@@ -312,7 +328,7 @@ export function summarizeSession(session: SessionResponse | null): SessionSummar
   }
 
   let netMmr = summedMmr;
-  let mmrSub = 'ALL PLAYLISTS';
+  let mmrSub = resolveModeSubFallback(playlistFilter);
 
   if (distinctPlaylists.size > 1) {
     if (session?.most_played_playlist && session.most_played_playlist.id > 0) {
@@ -329,7 +345,11 @@ export function summarizeSession(session: SessionResponse | null): SessionSummar
     }
   } else if (distinctPlaylists.size === 1) {
     const [onlyId] = Array.from(distinctPlaylists);
-    mmrSub = onlyId ? playlistLabels(onlyId).mode : 'ALL PLAYLISTS';
+    const plDelta = onlyId ? session?.playlists?.[String(onlyId)]?.mmr_delta : undefined;
+    if (summedMmr === 0 && plDelta !== undefined && plDelta !== 0) {
+      netMmr = plDelta;
+    }
+    mmrSub = onlyId ? playlistLabels(onlyId).mode : resolveModeSubFallback(playlistFilter);
   } else if (session?.most_played_playlist && session.most_played_playlist.id > 0) {
     netMmr = session.most_played_playlist.net_mmr;
     mmrSub = playlistLabels(session.most_played_playlist.id, session.most_played_playlist.name).mode;

@@ -11,6 +11,7 @@ import {
   formatMmr,
   formatSigned,
   localTeamOf,
+  normalizeActiveModeKey,
   outcomeOf,
   playlistLabels,
   rosterLine,
@@ -141,21 +142,41 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
   onInspectPlayer,
   onOpenMatchTelemetry,
 }) => {
-  const { setLiveModeOverride, isDevBuild, previewMode } = useDashboard();
+  const {
+    activePlaylist: contextActivePlaylist,
+    setLiveModeOverride,
+    isDevBuild,
+    previewMode,
+  } = useDashboard();
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
   const [showAllModes, setShowAllModes] = useState(false);
 
+  const resolvedPlaylist = useMemo(
+    () => normalizeActiveModeKey(activePlaylist ?? contextActivePlaylist),
+    [activePlaylist, contextActivePlaylist],
+  );
+
   const effectiveScopedSession = useMemo(() => {
     if (!session) return null;
-    if (!activePlaylist || activePlaylist === 'all') return session;
     if (scopedSession) return scopedSession;
-    return filterSessionByPlaylist(session, activePlaylist);
-  }, [session, activePlaylist, scopedSession]);
+    return filterSessionByPlaylist(session, resolvedPlaylist);
+  }, [session, resolvedPlaylist, scopedSession]);
 
-  const summary = useMemo(() => summarizeSession(effectiveScopedSession), [effectiveScopedSession]);
-  const matches = chronological(session?.matches);
+  const scopedContinuableSession = useMemo(() => {
+    if (!session?.continuable_session) return null;
+    const scoped = filterSessionByPlaylist(session.continuable_session, resolvedPlaylist);
+    return scoped && scoped.total_matches > 0 ? scoped : null;
+  }, [session?.continuable_session, resolvedPlaylist]);
+
+  const summary = useMemo(
+    () => summarizeSession(effectiveScopedSession, resolvedPlaylist),
+    [effectiveScopedSession, resolvedPlaylist],
+  );
+  const matches = chronological(effectiveScopedSession?.matches);
   const lastMatch = matches.length ? matches[matches.length - 1] : null;
-  const playlists = session?.playlists ? Object.values(session.playlists) : [];
+  const playlists = effectiveScopedSession?.playlists
+    ? Object.values(effectiveScopedSession.playlists)
+    : [];
   const dot = connection === 'connected' ? 'bg-win' : connection === 'offline' ? 'bg-loss' : 'bg-faint';
   const mmrPollerState = session?.mmr_poller_state || (connection === 'offline' ? 'OFFLINE' : 'READY');
 
@@ -261,9 +282,9 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
         )}
       </div>
 
-      {session?.continuable_session && (
+      {scopedContinuableSession && (
         <ContinueSessionBanner
-          continuableSession={session.continuable_session}
+          continuableSession={scopedContinuableSession}
           onContinue={(id) => onContinueSession?.(id)}
           onDismiss={(id) => onDismissContinueSession?.(id)}
         />

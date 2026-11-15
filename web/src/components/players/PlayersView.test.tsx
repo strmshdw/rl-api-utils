@@ -49,7 +49,8 @@ function mockFetch(detail?: Partial<PlayerDetailResponse>) {
       if (url.includes('/matches')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ matches: [], total: 0, limit: 10, offset: 0 }) });
       }
-      const id = decodeURIComponent(url.slice('/api/players/'.length));
+      const rawId = url.slice('/api/players/'.length).split('?')[0];
+      const id = decodeURIComponent(rawId);
       const p = PLAYERS.find((x) => x.player_id === id)!;
       const body: PlayerDetailResponse = {
         player_id: p.player_id,
@@ -189,7 +190,7 @@ describe('PlayersView', () => {
     await act(async () => aero.click());
     await flush();
 
-    expect(calls).toContain('/api/players/Steam%7CAeroPulse%7C0');
+    expect(calls).toContain('/api/players/Steam%7CAeroPulse%7C0?playlist=11');
     const page = container.querySelector('[data-testid="player-profile-page"]')!;
     expect(page).not.toBeNull();
     expect(page.textContent).toContain('PLAYER PROFILE · STEAM');
@@ -198,9 +199,9 @@ describe('PlayersView', () => {
       'https://rocketleague.tracker.network/rocket-league/profile/steam/AeroPulse/overview',
     );
     const withYou = page.querySelector('[data-testid="h2h-with"]')!;
-    expect(withYou.textContent).toContain('5 GAMES');
+    expect(withYou.textContent).toContain('4 GAMES');
     expect(withYou.textContent).toContain('STRONG SYNERGY');
-    expect(withYou.textContent).toContain('4–1');
+    expect(withYou.textContent).toContain('3–1');
     expect(withYou.querySelectorAll('[data-cell]')).toHaveLength(10);
     expect(page.querySelector('[data-testid="h2h-vs"]')!.textContent).toContain('DOMINANT');
     expect(page.textContent).toContain('RANKED 2V2');

@@ -61,7 +61,7 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
     <section className="flex flex-col gap-3.5">
       <SectionLabel>01 · DESIGN SYSTEM &amp; APPEARANCE</SectionLabel>
 
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
         {coreThemes.map((opt) => {
           const def = THEME_STYLES[opt.id];
           const pal = opt.id === 'arashi' ? def.light : def.dark;
@@ -71,18 +71,18 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
               key={opt.id}
               type="button"
               onClick={() => applyThemeSelection(opt.id)}
-              className={`p-2.5 text-left surface-plaque border transition-colors cursor-pointer flex flex-col gap-2 t-radius ${
+              className={`p-2.5 text-left surface-plaque border transition-colors cursor-pointer flex flex-col justify-between gap-2 t-radius min-w-0 ${
                 active
                   ? 'border-blue-ink ring-1 ring-blue-ink t-bg-panel-hover'
                   : 'border-line hover:border-outline'
               }`}
             >
-              <div className="flex items-center justify-between gap-1">
-                <span className="t-font-display font-bold text-xs uppercase tracking-wider t-text-strong truncate">
+              <div className="flex items-start justify-between gap-1 min-w-0">
+                <span className="t-font-display font-bold text-xs uppercase tracking-wider t-text-strong leading-tight break-words">
                   {opt.shortName}
                 </span>
                 {active && (
-                  <span className="text-[10px] t-font-mono font-extrabold t-text-blue">●</span>
+                  <span className="text-[10px] t-font-mono font-extrabold t-text-blue shrink-0">●</span>
                 )}
               </div>
               <div className="flex items-center gap-1 h-3 w-full overflow-hidden border border-line">

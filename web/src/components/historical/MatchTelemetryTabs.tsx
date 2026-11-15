@@ -28,6 +28,9 @@ const avgBy = (rows: ReplayPlayerStats[], fn: (p: ReplayPlayerStats) => number) 
 const formatTrimmedTenths = (value: number): string =>
   value.toFixed(1).replace(/\.0$/, '');
 
+const BOOST_GRID_COLS = 'grid-cols-[minmax(176px,1.7fr)_repeat(9,minmax(64px,1fr))]';
+const MOVEMENT_GRID_COLS = 'grid-cols-[minmax(176px,1.7fr)_repeat(8,minmax(68px,1fr))]';
+
 export const MatchBoostTab: React.FC<TeamTelemetryTabProps> = ({
   bluePlayers,
   orangePlayers,
@@ -68,7 +71,7 @@ export const MatchBoostTab: React.FC<TeamTelemetryTabProps> = ({
           return (
             <div
               key={`${pKey}-${i}`}
-              className="grid grid-cols-[1.3fr_repeat(9,1fr)] py-2.5 px-2 border-b t-border border-line text-base font-extrabold t-panel-hover hover:bg-panel-hover t-font-mono items-center"
+              className={`grid ${BOOST_GRID_COLS} py-2.5 px-2 border-b t-border border-line text-base font-extrabold t-panel-hover hover:bg-panel-hover t-font-mono items-center`}
             >
               <button
                 type="button"
@@ -91,7 +94,9 @@ export const MatchBoostTab: React.FC<TeamTelemetryTabProps> = ({
             </div>
           );
         })}
-        <div className="grid grid-cols-[1.3fr_repeat(9,1fr)] py-2 px-2 t-bg-page bg-page border-b-2 t-border-2 border-line-2 text-base font-extrabold t-font-mono items-center">
+        <div
+          className={`grid ${BOOST_GRID_COLS} py-2 px-2 t-bg-page bg-page border-b-2 t-border-2 border-line-2 text-base font-extrabold t-font-mono items-center`}
+        >
           <span className={`font-sans ${isBlue ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'}`}>
             {teamLabel} TOTALS / AVG
           </span>
@@ -112,21 +117,30 @@ export const MatchBoostTab: React.FC<TeamTelemetryTabProps> = ({
   return (
     <div className="p-7 flex flex-col gap-4">
       {!hasTelemetry && <TelemetryPendingBanner />}
-      <div className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto">
-        <div className="grid grid-cols-[1.3fr_repeat(9,1fr)] text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase">
-          <span>PLAYER</span>
-          <span className="text-right" title="Boost Used Per Minute">BPM</span>
-          <span className="text-right" title="Boost Collected Per Minute">BCPM</span>
-          <span className="text-right">AVG BST</span>
-          <span className="text-right">STOLEN</span>
-          <span className="text-right">100 PADS</span>
-          <span className="text-right">SML PADS</span>
-          <span className="text-right">OVERFILL</span>
-          <span className="text-right">0% TIME</span>
-          <span className="text-right">100% TIME</span>
+      <div
+        role="region"
+        aria-label="Boost economy telemetry"
+        tabIndex={0}
+        className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto"
+      >
+        <div className="min-w-[880px]">
+          <div
+            className={`grid ${BOOST_GRID_COLS} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
+          >
+            <span>PLAYER</span>
+            <span className="text-right" title="Boost Used Per Minute">BPM</span>
+            <span className="text-right" title="Boost Collected Per Minute">BCPM</span>
+            <span className="text-right">AVG BST</span>
+            <span className="text-right">STOLEN</span>
+            <span className="text-right">100 PADS</span>
+            <span className="text-right">SML PADS</span>
+            <span className="text-right">OVERFILL</span>
+            <span className="text-right">0% TIME</span>
+            <span className="text-right">100% TIME</span>
+          </div>
+          {renderTeam(bluePlayers, 'BLUE TEAM', true)}
+          {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
         </div>
-        {renderTeam(bluePlayers, 'BLUE TEAM', true)}
-        {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
       </div>
     </div>
   );
@@ -155,7 +169,7 @@ export const MatchMovementTab: React.FC<TeamTelemetryTabProps> = ({
           return (
             <div
               key={`${pKey}-${i}`}
-              className="grid grid-cols-[1.3fr_repeat(8,1fr)] py-2.5 px-2 border-b t-border border-line text-base font-extrabold t-panel-hover hover:bg-panel-hover t-font-mono items-center"
+              className={`grid ${MOVEMENT_GRID_COLS} py-2.5 px-2 border-b t-border border-line text-base font-extrabold t-panel-hover hover:bg-panel-hover t-font-mono items-center`}
             >
               <button
                 type="button"
@@ -179,7 +193,9 @@ export const MatchMovementTab: React.FC<TeamTelemetryTabProps> = ({
             </div>
           );
         })}
-        <div className="grid grid-cols-[1.3fr_repeat(8,1fr)] py-2 px-2 t-bg-page bg-page border-b-2 t-border-2 border-line-2 text-base font-extrabold t-font-mono items-center">
+        <div
+          className={`grid ${MOVEMENT_GRID_COLS} py-2 px-2 t-bg-page bg-page border-b-2 t-border-2 border-line-2 text-base font-extrabold t-font-mono items-center`}
+        >
           <span className={`font-sans ${isBlue ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'}`}>
             {teamLabel} TOTALS / AVG
           </span>
@@ -201,20 +217,29 @@ export const MatchMovementTab: React.FC<TeamTelemetryTabProps> = ({
   return (
     <div className="p-7 flex flex-col gap-4">
       {!hasTelemetry && <TelemetryPendingBanner />}
-      <div className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto">
-        <div className="grid grid-cols-[1.3fr_repeat(8,1fr)] text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase">
-          <span>PLAYER</span>
-          <span className="text-right">AVG SPEED</span>
-          <span className="text-right">SUPERSONIC</span>
-          <span className="text-right">BOOST SPD</span>
-          <span className="text-right">SLOW SPD</span>
-          <span className="text-right">GROUND %</span>
-          <span className="text-right">LOW AIR</span>
-          <span className="text-right">HIGH AIR</span>
-          <span className="text-right">POWERSLIDES</span>
+      <div
+        role="region"
+        aria-label="Speed and movement telemetry"
+        tabIndex={0}
+        className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto"
+      >
+        <div className="min-w-[860px]">
+          <div
+            className={`grid ${MOVEMENT_GRID_COLS} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
+          >
+            <span>PLAYER</span>
+            <span className="text-right">AVG SPEED</span>
+            <span className="text-right">SUPERSONIC</span>
+            <span className="text-right">BOOST SPD</span>
+            <span className="text-right">SLOW SPD</span>
+            <span className="text-right">GROUND %</span>
+            <span className="text-right">LOW AIR</span>
+            <span className="text-right">HIGH AIR</span>
+            <span className="text-right">POWERSLIDES</span>
+          </div>
+          {renderTeam(bluePlayers, 'BLUE TEAM', true)}
+          {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
         </div>
-        {renderTeam(bluePlayers, 'BLUE TEAM', true)}
-        {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
       </div>
     </div>
   );
@@ -230,8 +255,8 @@ export const MatchPositioningTab: React.FC<MatchPositioningTabProps> = ({
 }) => {
   const { showRotation, forwardLabel, backLabel } = positioningRoleLabels(playlist);
   const gridColsClass = showRotation
-    ? 'grid-cols-[1.3fr_repeat(8,1fr)]'
-    : 'grid-cols-[1.3fr_repeat(6,1fr)]';
+    ? 'grid-cols-[minmax(176px,1.7fr)_repeat(8,minmax(68px,1fr))]'
+    : 'grid-cols-[minmax(176px,1.7fr)_repeat(6,minmax(76px,1fr))]';
 
   const renderTeam = (teamRows: ReplayPlayerStats[], teamLabel: string, isBlue: boolean) => {
     const hasTeamPos = teamRows.some((p) => p.positioning !== undefined);
@@ -300,24 +325,33 @@ export const MatchPositioningTab: React.FC<MatchPositioningTabProps> = ({
   return (
     <div className="p-7 flex flex-col gap-4">
       {!hasTelemetry && <TelemetryPendingBanner />}
-      <div className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto">
-        <div className={`grid ${gridColsClass} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}>
-          <span>PLAYER</span>
-          <span className="text-right">DEF 1/3</span>
-          <span className="text-right">NEUT 1/3</span>
-          <span className="text-right">OFF 1/3</span>
-          <span className="text-right">BEHIND BALL</span>
-          <span className="text-right">IN FRONT</span>
-          {showRotation && (
-            <>
-              <span className="text-right">{forwardLabel}</span>
-              <span className="text-right">{backLabel}</span>
-            </>
-          )}
-          <span className="text-right">DIST BALL</span>
+      <div
+        role="region"
+        aria-label="Positioning and rotation telemetry"
+        tabIndex={0}
+        className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto"
+      >
+        <div className="min-w-[860px]">
+          <div
+            className={`grid ${gridColsClass} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
+          >
+            <span>PLAYER</span>
+            <span className="text-right">DEF 1/3</span>
+            <span className="text-right">NEUT 1/3</span>
+            <span className="text-right">OFF 1/3</span>
+            <span className="text-right">BEHIND BALL</span>
+            <span className="text-right">IN FRONT</span>
+            {showRotation && (
+              <>
+                <span className="text-right">{forwardLabel}</span>
+                <span className="text-right">{backLabel}</span>
+              </>
+            )}
+            <span className="text-right">DIST BALL</span>
+          </div>
+          {renderTeam(bluePlayers, 'BLUE TEAM', true)}
+          {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
         </div>
-        {renderTeam(bluePlayers, 'BLUE TEAM', true)}
-        {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
       </div>
     </div>
   );
@@ -401,7 +435,7 @@ export const MatchH2HTab: React.FC<{
           const pct = total > 0 ? Math.round((m.blueRaw / total) * 100) : 50;
           return (
             <div key={m.label}>
-              <div className="flex justify-between mb-1.5 text-base">
+              <div className="flex flex-wrap justify-between items-baseline gap-2 mb-1.5 text-base">
                 <span className="t-text-blue text-blue-ink t-font-mono">
                   {m.blueText}
                 </span>

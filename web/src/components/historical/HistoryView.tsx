@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CurrentMatchResponse, HistoricalMatchRecord, MatchesResponse } from '../../types/api';
-import { matchesPlaylistFilter, playlistFilterToParam } from '../../utils/broadcast';
+import {
+  matchesPlaylistFilter,
+  normalizeActiveModeKey,
+  playlistFilterToParam,
+} from '../../utils/broadcast';
 import { isDemoMode, SAMPLE_HISTORICAL_MATCHES } from '../../utils/sampleData';
 import { COLUMN_HEADER, GhostButton, PageHeader, PrimaryButton, SearchInput, Segmented } from '../common/ui';
 import { HistoricalMatchDetailModal } from './HistoricalMatchDetailModal';
@@ -11,11 +15,14 @@ import { useDashboard } from '../../context/DashboardContext';
 import { useBallchasingSync } from '../../hooks/useBallchasingSync';
 
 const PLAYLIST_OPTIONS = [
-  ['all', 'ALL MODES'],
-  ['10', '1V1'],
   ['11', '2V2'],
   ['13', '3V3'],
-  ['extra', 'EXTRA'],
+  ['10', '1V1'],
+  ['27', 'HOOPS'],
+  ['28', 'RUMBLE'],
+  ['29', 'DROPSHOT'],
+  ['30', 'SNOW DAY'],
+  ['34', 'TOURNAMENT'],
   ['casual', 'CASUAL'],
 ] as const;
 
@@ -45,6 +52,12 @@ const OUTCOME_OPTIONS = [
 
 const PAGE_SIZE = 20;
 const EMPTY_IDS = new Set<string>();
+
+function toHistoryPlaylistOption(raw?: string | null): PlaylistFilter {
+  const norm = normalizeActiveModeKey(raw);
+  const valid = PLAYLIST_OPTIONS.some(([k]) => k === norm);
+  return (valid ? norm : '11') as PlaylistFilter;
+}
 
 interface HistoryViewProps {
   /** Lower-cased online IDs of the local player, used to orient W/L and highlight "you". */
@@ -76,7 +89,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [localPlaylistFilter, setLocalPlaylistFilter] = useState<PlaylistFilter>('all');
+  const [localPlaylistFilter, setLocalPlaylistFilter] = useState<PlaylistFilter>(() =>
+    toHistoryPlaylistOption(activePlaylist),
+  );
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
   const [sortOption, setSortOption] = useState<HistorySortOption>('date-desc');
@@ -88,7 +103,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [profilePlayerId, setProfilePlayerId] = useState<string | null>(null);
   const [profilePlayerName, setProfilePlayerName] = useState<string | undefined>(undefined);
 
-  const effectivePlaylistFilter = hidePlaylistFilter ? activePlaylist : localPlaylistFilter;
+  useEffect(() => {
+    setLocalPlaylistFilter(toHistoryPlaylistOption(activePlaylist));
+  }, [activePlaylist]);
+
+  const effectivePlaylistFilter = useMemo(
+    () => normalizeActiveModeKey(hidePlaylistFilter ? activePlaylist : localPlaylistFilter),
+    [hidePlaylistFilter, activePlaylist, localPlaylistFilter],
+  );
   const playlistParam = useMemo(
     () => playlistFilterToParam(effectivePlaylistFilter),
     [effectivePlaylistFilter],
@@ -293,9 +315,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const hasFilters =
     debouncedQuery !== '' ||
-    playlistParam !== '' ||
     outcomeFilter !== 'all' ||
-    statusFilter !== 'all';
+    statusFilter !== 'all' ||
+    Boolean(dateRangeQueryParams.from || dateRangeQueryParams.to);
   const combinedError = syncError || error;
 
   return (
@@ -403,36 +425,45 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       ) : (
         <div className="flex flex-col gap-[2px]">
           <div
-            className={`grid px-0 pb-2 ${COLUMN_HEADER}`}
-            style={{ gridTemplateColumns: HISTORY_ROW_GRID }}
+            role="region"
+            aria-label="Match history"
+            tabIndex={0}
+            className="overflow-x-auto"
           >
-            <span className="pl-4">RESULT</span>
-            <span className="pl-[22px]">SCORE</span>
-            <span>PLAYLIST · ARENA</span>
-            <span>ROSTER</span>
-            <span className="text-right">DURATION</span>
-            <span className="text-right pr-2">STATUS</span>
-            <span className="text-right pr-[22px]">PLAYED</span>
-          </div>
+            <div className="min-w-[820px] flex flex-col gap-[2px]">
+              <div
+                className={`grid px-0 pb-2 ${COLUMN_HEADER}`}
+                style={{ gridTemplateColumns: HISTORY_ROW_GRID }}
+              >
+                <span className="pl-4">RESULT</span>
+                <span className="pl-[22px]">SCORE</span>
+                <span>PLAYLIST · ARENA</span>
+                <span>ROSTER</span>
+                <span className="text-right">DURATION</span>
+                <span className="text-right pr-2">STATUS</span>
+                <span className="text-right pr-[22px]">PLAYED</span>
+              </div>
 
-          {rows.map((m) => (
-            <HistoryRow
-              key={m.match_guid}
-              match={m}
-              localIds={effectiveLocalIds}
-              open={openMatchGuid === m.match_guid}
-              onToggle={() =>
-                setOpenMatchGuid((cur) => (cur === m.match_guid ? null : m.match_guid))
-              }
-              onDetail={() => setDetailMatch(m)}
-              onRetry={handleRetryMatch}
-              isRetrying={retryingGuids.has(m.match_guid)}
-              onPlayerClick={(pId, pName) => {
-                setProfilePlayerId(pId);
-                setProfilePlayerName(pName);
-              }}
-            />
-          ))}
+              {rows.map((m) => (
+                <HistoryRow
+                  key={m.match_guid}
+                  match={m}
+                  localIds={effectiveLocalIds}
+                  open={openMatchGuid === m.match_guid}
+                  onToggle={() =>
+                    setOpenMatchGuid((cur) => (cur === m.match_guid ? null : m.match_guid))
+                  }
+                  onDetail={() => setDetailMatch(m)}
+                  onRetry={handleRetryMatch}
+                  isRetrying={retryingGuids.has(m.match_guid)}
+                  onPlayerClick={(pId, pName) => {
+                    setProfilePlayerId(pId);
+                    setProfilePlayerName(pName);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-4 px-2">

@@ -4,6 +4,7 @@ import {
   DEFAULT_STAMPING_CONFIG,
   isStampingConfigPayload,
   modeKeyFromPlaylistId,
+  normalizeActiveModeKey,
   normalizeStampingConfig,
 } from '../utils/broadcast';
 import {
@@ -88,7 +89,7 @@ const DEFAULT_CONTEXT: DashboardContextValue = {
   setFontScale: () => {},
   statMode: 'avg',
   setStatMode: () => {},
-  activePlaylist: 'all',
+  activePlaylist: '11',
   setActivePlaylist: () => {},
   syncLivePlaylist: () => {},
   dateRange: 'all',
@@ -135,7 +136,7 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [previewMode, setPreviewModeState] = useState<boolean>(() => isDemoMode());
   const [statMode, setStatMode] = useState<StatMode>('avg');
   const [activePlaylist, setActivePlaylistState] = useState<string>(
-    () => safeStorageGet(ACTIVE_PLAYLIST_STORAGE_KEY) || '11',
+    () => normalizeActiveModeKey(safeStorageGet(ACTIVE_PLAYLIST_STORAGE_KEY)),
   );
   const lastSyncedLivePlaylistRef = useRef<number | null>(null);
   const userOverrodeInCurrentMatchRef = useRef<boolean>(false);
@@ -234,7 +235,7 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, []);
 
   const setActivePlaylist = useCallback((playlist: string) => {
-    const next = playlist || '11';
+    const next = normalizeActiveModeKey(playlist);
     setActivePlaylistState(next);
     safeStorageSet(ACTIVE_PLAYLIST_STORAGE_KEY, next);
     if (lastSyncedLivePlaylistRef.current !== null && lastSyncedLivePlaylistRef.current > 0) {

@@ -12,8 +12,8 @@ import {
   chronological,
   filterSessionByPlaylist,
   matchesPlaylistFilter,
+  normalizeActiveModeKey,
   onlineIdOf,
-  playlistFilterToParam,
 } from './utils/broadcast';
 import { DashboardProvider, useDashboard } from './context/DashboardContext';
 import { NavigationProvider, useNavigation } from './context/NavigationContext';
@@ -86,14 +86,18 @@ const DashboardShell: React.FC = () => {
     return activePreview ? SAMPLE_SESSION_RESPONSE : candidate;
   }, [liveUnfilteredSession, liveSession, activePreview]);
 
+  const normalizedActivePlaylist = useMemo(
+    () => normalizeActiveModeKey(activePlaylist),
+    [activePlaylist],
+  );
+
   const scopedSession = useMemo(() => {
     if (!rawSession) return null;
-    if (!activePlaylist || activePlaylist === 'all') return rawSession;
     if (liveUnfilteredSession && rawSession === liveUnfilteredSession && liveSession) {
       return liveSession;
     }
-    return filterSessionByPlaylist(rawSession, activePlaylist);
-  }, [rawSession, activePlaylist, liveUnfilteredSession, liveSession]);
+    return filterSessionByPlaylist(rawSession, normalizedActivePlaylist);
+  }, [rawSession, normalizedActivePlaylist, liveUnfilteredSession, liveSession]);
 
   const match = useMemo(() => {
     if (liveMatch && (liveMatch.active_match || liveMatch.match_ended)) return liveMatch;
@@ -130,9 +134,9 @@ const DashboardShell: React.FC = () => {
     }
   }, [inMatch, match?.playlist_id, syncLivePlaylist]);
 
-  const lastMatch = chronological(rawSession?.matches).pop();
+  const lastMatch = chronological(scopedSession?.matches).pop();
   const headerPlaylistId = useMemo(() => {
-    const param = playlistFilterToParam(activePlaylist);
+    const param = normalizedActivePlaylist;
     const numericId = Number(param);
     if (Number.isInteger(numericId) && numericId > 0) {
       return numericId;
@@ -144,8 +148,8 @@ const DashboardShell: React.FC = () => {
       return matched?.playlist_id;
     }
     if (inMatch && match?.playlist_id) return match.playlist_id;
-    return rawSession?.most_played_playlist?.id ?? lastMatch?.playlist_id;
-  }, [inMatch, match?.playlist_id, activePlaylist, rawSession, lastMatch?.playlist_id]);
+    return scopedSession?.most_played_playlist?.id ?? lastMatch?.playlist_id;
+  }, [inMatch, match?.playlist_id, normalizedActivePlaylist, rawSession, scopedSession, lastMatch?.playlist_id]);
 
   const onTabChange = useCallback(
     (nextTab: DashboardTab) => {
@@ -170,6 +174,7 @@ const DashboardShell: React.FC = () => {
         onTabChange={onTabChange}
         inMatch={inMatch}
         session={rawSession}
+        scopedSession={scopedSession}
         playlistId={headerPlaylistId}
         onOpenColumns={activeTab === 'live' && inMatch ? () => setColumnsOpen(true) : undefined}
         onRefreshSession={refreshSession}

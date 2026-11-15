@@ -180,5 +180,14 @@ describe('StampingSettingsSection — UI Configuration & Live Reactivity', () =>
     const statusBadge = document.querySelector('[data-testid="stamping-sync-status"]');
     expect(statusBadge?.textContent).toContain('SAVE FAILED');
     expect(statusBadge?.textContent).not.toContain('SAVED ✓');
+
+    // Paired threshold fields use CSS Grid subgrid (row-span-3 grid-rows-subgrid) and theme plaques omit truncate
+    const pairedField = document.querySelector('[data-testid="threshold-field-off_mode_self_tier_diff"]');
+    expect(pairedField?.className).toContain('grid-rows-subgrid');
+    const themePlaques = Array.from(document.querySelectorAll('#settings-panel-body button span')).filter((el) =>
+      el.textContent?.includes('01 · WOODBLOCK'),
+    );
+    expect(themePlaques).toHaveLength(1);
+    expect(themePlaques[0].className).not.toContain('truncate');
   });
 });

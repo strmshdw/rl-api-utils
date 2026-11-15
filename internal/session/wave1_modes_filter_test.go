@@ -19,7 +19,30 @@ func TestFilterSessionSummary_CasualPrivateRankedAndCSV(t *testing.T) {
 		TotalLosses:    2,
 		WinRate:        66.7,
 		LocalPlayerIDs: []string{"Steam|local|0"},
-		Playlists:      map[string]*PlaylistSessionStats{},
+		Playlists: map[string]*PlaylistSessionStats{
+			"11": {
+				PlaylistID:    11,
+				PlaylistName:  "Ranked Doubles",
+				MatchesPlayed: 1,
+				Wins:          1,
+				Losses:        0,
+				WinRate:       100.0,
+				InitialMMR:    1400,
+				CurrentMMR:    1409,
+				MMRDelta:      9,
+			},
+			"27": {
+				PlaylistID:    27,
+				PlaylistName:  "Ranked Hoops",
+				MatchesPlayed: 1,
+				Wins:          1,
+				Losses:        0,
+				WinRate:       100.0,
+				InitialMMR:    1174,
+				CurrentMMR:    1183,
+				MMRDelta:      9,
+			},
+		},
 		Matches: []*SessionMatchDetail{
 			{
 				MatchGUID: "m-cas-2", PlaylistID: 2, PlaylistName: "Casual Doubles",
@@ -67,13 +90,30 @@ func TestFilterSessionSummary_CasualPrivateRankedAndCSV(t *testing.T) {
 		t.Fatalf("private summary = %+v, want 1 match in playlist 6", priv)
 	}
 
-	// 3. Ranked 2v2 filter -> matches Playlist 11 only (not Casual 2v2 Playlist 2!).
+	// 3. Ranked 2v2 filter -> matches Playlist 11 only (not Casual 2v2 Playlist 2!), preserving InitialMMR/CurrentMMR.
 	rk2 := FilterSessionSummary(summary, "ranked_2v2", 0, 0, nil)
 	if rk2.TotalMatches != 1 || rk2.Matches[0].PlaylistID != 11 {
 		t.Fatalf("ranked_2v2 summary = %+v, want 1 match in playlist 11", rk2)
 	}
+	ps11 := rk2.Playlists["11"]
+	if ps11 == nil || ps11.InitialMMR != 1400 || ps11.CurrentMMR != 1409 || ps11.MMRDelta != 9 {
+		t.Fatalf("ranked_2v2 playlist 11 stats = %+v, want InitialMMR=1400 CurrentMMR=1409 MMRDelta=9", ps11)
+	}
 
-	// 4. Comma-separated playlist IDs -> "27,28" matches Hoops + Rumble.
+	// 4. Extra mode filter ("27" Hoops) -> preserves InitialMMR/CurrentMMR/MMRDelta from unfiltered Playlists["27"] even when match StartingMMR/EndingMMR are 0.
+	hoops := FilterSessionSummary(summary, "27", 0, 0, nil)
+	ps27 := hoops.Playlists["27"]
+	if ps27 == nil || ps27.InitialMMR != 1174 || ps27.CurrentMMR != 1183 || ps27.MMRDelta != 9 {
+		t.Fatalf("hoops playlist 27 stats = %+v, want InitialMMR=1174 CurrentMMR=1183 MMRDelta=9", ps27)
+	}
+
+	// 5. Date-bounded filter computes InitialMMR from earliest matching game's StartingMMR.
+	rk2Window := FilterSessionSummary(summary, "11", baseTime.Add(18*time.Minute).Unix(), baseTime.Add(22*time.Minute).Unix(), nil)
+	if ps11Win := rk2Window.Playlists["11"]; ps11Win == nil || ps11Win.InitialMMR != 1400 || ps11Win.CurrentMMR != 1409 {
+		t.Fatalf("windowed ranked_2v2 playlist 11 stats = %+v, want InitialMMR=1400 CurrentMMR=1409", ps11Win)
+	}
+
+	// 6. Comma-separated playlist IDs -> "27,28" matches Hoops + Rumble.
 	csv := FilterSessionSummary(summary, "27,28", 0, 0, nil)
 	if csv.TotalMatches != 2 || csv.TotalWins != 1 || csv.TotalLosses != 1 {
 		t.Fatalf("csv 27,28 summary = (%d, %d-%d), want (2, 1-1)", csv.TotalMatches, csv.TotalWins, csv.TotalLosses)

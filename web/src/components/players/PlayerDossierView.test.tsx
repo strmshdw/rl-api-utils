@@ -195,16 +195,38 @@ describe('PlayerDossierView', () => {
     expect(vsCard.textContent).toContain('389');
     expect(container.querySelector('[data-testid="profile-match-row"]')?.textContent).toContain('WIN');
 
-    // Scope playlist to 2V2 and date range to 7D
-    const btn2v2 = Array.from(container.querySelectorAll<HTMLButtonElement>('.prof-pl-btn')).find(
-      (b) => b.textContent?.trim() === '2V2',
-    )!;
-    await act(async () => btn2v2.click());
+    // No ALL or blended EXTRA buttons exist; initial mount is already scoped to 2v2 (playlist=11)
+    const scopeBtns = Array.from(container.querySelectorAll<HTMLButtonElement>('.prof-pl-btn')).map((b) =>
+      b.textContent?.trim(),
+    );
+    expect(scopeBtns).not.toContain('ALL');
+    expect(scopeBtns).not.toContain('EXTRA');
+    expect(container.querySelector('[data-testid="blended-modes-note"]')).toBeNull();
+    expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0?playlist=11'))).toBe(true);
+
+    // Scope playlist to individual Extra mode (27 Hoops) and date range to 7D
+    const extraSelect = container.querySelector<HTMLSelectElement>('select[aria-label="Select extra mode scope"]')!;
+    expect(extraSelect).not.toBeNull();
+    await act(async () => {
+      extraSelect.value = '27';
+      extraSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="set-7d"]')!.click());
     await flush(10);
 
-    expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0?') && u.includes('playlist=11') && u.includes('from='))).toBe(true);
-    expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0/matches?') && u.includes('playlist=11') && u.includes('from='))).toBe(true);
+    expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0?') && u.includes('playlist=27') && u.includes('from='))).toBe(true);
+    expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0/matches?') && u.includes('playlist=27') && u.includes('from='))).toBe(true);
+
+    // Clicking WITH YOU and then CLEAR FILTERS clears role filter while preserving playlist=27
+    await act(async () => (withCard as HTMLElement).click());
+    expect(container.querySelector('[data-testid="active-filter-summary"]')?.textContent).toContain('WITH YOU (TEAMMATE)');
+    const clearBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('CLEAR FILTERS'),
+    )!;
+    await act(async () => clearBtn.click());
+    await flush(10);
+    expect(container.querySelector('[data-testid="active-filter-summary"]')).toBeNull();
+    expect(extraSelect.value).toBe('27');
   });
 
   it('computes live threat badges from liveMatch prop in non-demo mode and hides mock badges when null', async () => {

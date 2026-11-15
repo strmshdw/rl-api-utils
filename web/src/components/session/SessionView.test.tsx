@@ -18,24 +18,27 @@ describe('SessionView', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the header, KPI strip and playlists cell', async () => {
+  it('renders the header, mode-scoped KPI strip (with subgrid alignment and non-truncated headers) and playlists cell', async () => {
     const { container } = await renderSession(SAMPLE_SESSION_RESPONSE);
-    expect(container.textContent).toContain('STARTED 1H 40M AGO · 5 MATCHES');
+    expect(container.textContent).toContain('STARTED 1H 40M AGO · 4 MATCHES');
     const kpis = container.querySelector('[data-testid="session-kpis"]')!;
-    expect(kpis.querySelector('[data-kpi="record"]')!.textContent).toContain('4–1');
-    expect(kpis.querySelector('[data-kpi="record"]')!.textContent).toContain('80% WIN RATE');
-    expect(kpis.querySelector('[data-kpi="goals"]')!.textContent).toContain('16 FOR · 8 AGAINST');
+    expect(kpis.className).toContain('lg:grid-rows-[auto_auto_auto]');
+    expect(kpis.querySelector('[data-kpi="record"]')!.className).toContain('lg:grid-rows-subgrid');
+    expect(kpis.querySelector('[data-kpi="record"]')!.textContent).toContain('3–1');
+    expect(kpis.querySelector('[data-kpi="record"]')!.textContent).toContain('75% WIN RATE');
+    expect(kpis.querySelector('[data-kpi="goals"]')!.textContent).toContain('11 FOR · 6 AGAINST');
     expect(kpis.textContent).toContain('RANKED DOUBLES');
+    expect(kpis.textContent).not.toContain('RANKED STANDARD');
     expect(kpis.textContent).toContain('1485');
     expect(kpis.textContent).toContain('+29');
   });
 
-  it('lists matches newest first with your score on the left in your team colour', async () => {
+  it('lists mode-scoped matches newest first with your score on the left in your team colour', async () => {
     const { container } = await renderSession(SAMPLE_SESSION_RESPONSE);
     const all = rows(container);
-    expect(all).toHaveLength(5);
+    expect(all).toHaveLength(4);
     expect(all[0].textContent).toContain('9 MIN');
-    expect(all[4].textContent).toContain('1H');
+    expect(all[3].textContent).toContain('1H');
     // sample-match-003: local on orange, lost 2–3 (blue 3, orange 2)
     const loss = all[2];
     expect(loss.textContent).toMatch(/^L2–3/);
@@ -63,15 +66,15 @@ describe('SessionView', () => {
     expect(rows(container)[0].textContent).not.toContain('MVP');
   });
 
-  it('filters by result with the segmented control', async () => {
+  it('filters by result with the segmented control within the active game mode', async () => {
     const { container } = await renderSession(SAMPLE_SESSION_RESPONSE);
     await clickText(container, 'LOSSES');
     expect(rows(container)).toHaveLength(1);
     expect(rows(container)[0].textContent).toMatch(/^L/);
     await clickText(container, 'WINS');
-    expect(rows(container)).toHaveLength(4);
+    expect(rows(container)).toHaveLength(3);
     await clickText(container, 'ALL');
-    expect(rows(container)).toHaveLength(5);
+    expect(rows(container)).toHaveLength(4);
   });
 
   it('opens the match detail dialog when a row is clicked, and closes it with ESC ✕', async () => {
@@ -104,35 +107,35 @@ describe('SessionView', () => {
     expect(loading.container.textContent).toContain('LOADING SESSION…');
   });
 
-  it('renders the continue previous session banner and invokes continue / dismiss handlers', async () => {
+  it('renders the mode-scoped continue previous session banner and hides it when the selected mode had 0 games', async () => {
     const onContinue = vi.fn();
     const onDismiss = vi.fn();
     const prevSession: SessionResponse = {
       ...SAMPLE_SESSION_RESPONSE,
       session_id: 'prev-session-123',
-      total_matches: 3,
-      total_wins: 2,
-      total_losses: 1,
       last_match_at: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
     };
     const currentSession: SessionResponse = {
       ...SAMPLE_SESSION_RESPONSE,
       session_id: 'curr-session-456',
       matches: [],
+      playlists: {},
       total_matches: 0,
       total_wins: 0,
       total_losses: 0,
       continuable_session: prevSession,
     };
 
-    const { container } = await renderSession(currentSession, {
+    const mounted = await renderSession(currentSession, {
+      activePlaylist: '11',
       onContinueSession: onContinue,
       onDismissContinueSession: onDismiss,
     });
+    const { container } = mounted;
 
     const banner = container.querySelector('[data-testid="continue-session-banner"]')!;
     expect(banner).not.toBeNull();
-    expect(banner.textContent).toContain('2W–1L · 3 MATCHES');
+    expect(banner.textContent).toContain('3W–1L · 4 MATCHES');
     expect(banner.textContent).toContain('LAST PLAYED 25 MIN AGO');
 
     await clickText(banner, 'CONTINUE SESSION');
@@ -140,11 +143,25 @@ describe('SessionView', () => {
 
     await clickText(banner, 'START NEW');
     expect(onDismiss).toHaveBeenCalledWith('prev-session-123');
+
+    // Switching to Hoops ('27', 0 matches in prevSession) hides the continuable banner cleanly
+    await mounted.rerender(
+      <SessionView
+        session={currentSession}
+        activePlaylist="27"
+        isLoading={false}
+        error={null}
+        onResetSession={() => {}}
+        onContinueSession={onContinue}
+        onDismissContinueSession={onDismiss}
+      />,
+    );
+    expect(container.querySelector('[data-testid="continue-session-banner"]')).toBeNull();
   });
 
-  it('displays session history over time and lets the user inspect or continue past sessions', async () => {
+  it('displays mode-scoped session history over time and hides past sessions with 0 matches in the active mode', async () => {
     const onContinue = vi.fn();
-    const pastSession: SessionResponse = {
+    const pastSession2v2: SessionResponse = {
       ...SAMPLE_SESSION_RESPONSE,
       session_id: 'past-session-001',
       started_at: '2026-10-16T18:00:00Z',
@@ -153,7 +170,19 @@ describe('SessionView', () => {
       total_wins: 2,
       total_losses: 0,
       can_continue: true,
+      playlists: { '11': SAMPLE_SESSION_RESPONSE.playlists['11'] },
       matches: SAMPLE_SESSION_RESPONSE.matches.slice(0, 2),
+    };
+    const pastSession3v3Only: SessionResponse = {
+      ...SAMPLE_SESSION_RESPONSE,
+      session_id: 'past-session-3v3-only',
+      started_at: '2026-10-15T18:00:00Z',
+      last_match_at: '2026-10-15T19:00:00Z',
+      total_matches: 1,
+      total_wins: 1,
+      total_losses: 0,
+      playlists: { '13': SAMPLE_SESSION_RESPONSE.playlists['13'] },
+      matches: [SAMPLE_SESSION_RESPONSE.matches[3]],
     };
     const currentSession: SessionResponse = {
       ...SAMPLE_SESSION_RESPONSE,
@@ -161,14 +190,18 @@ describe('SessionView', () => {
     };
 
     const { container } = await renderSession(currentSession, {
-      pastSessions: [currentSession, pastSession],
+      activePlaylist: '11',
+      pastSessions: [currentSession, pastSession2v2, pastSession3v3Only],
       onContinueSession: onContinue,
     });
 
     const historySection = container.querySelector('[data-testid="session-history-section"]')!;
     expect(historySection).not.toBeNull();
+    // pastSession3v3Only has 0 matches in 2v2 ('11'), so only currentSession and pastSession2v2 appear
     const histRows = historySection.querySelectorAll<HTMLElement>('[data-testid="session-history-row"]');
     expect(histRows).toHaveLength(2);
+    expect(histRows[0].textContent).toContain('3–1');
+    expect(histRows[0].textContent).toContain('4 MATCHES');
     expect(histRows[0].textContent).toContain('CURRENT');
     expect(histRows[1].textContent).toContain('CONTINUABLE');
 
@@ -177,10 +210,10 @@ describe('SessionView', () => {
     expect(container.querySelector('[data-testid="historical-session-banner"]')).not.toBeNull();
     expect(rows(container)).toHaveLength(2);
 
-    // Return to current session
+    // Return to current session (4 matches in 2v2)
     await clickText(container, '← CURRENT SESSION');
     expect(container.querySelector('[data-testid="historical-session-banner"]')).toBeNull();
-    expect(rows(container)).toHaveLength(5);
+    expect(rows(container)).toHaveLength(4);
 
     // Click CONTINUE directly on the history row
     const continueBtn = histRows[1].querySelector<HTMLElement>('[data-testid="continue-history-row-btn"]')!;
@@ -262,7 +295,7 @@ describe('SessionView', () => {
     expect(strip).not.toBeNull();
     expect(strip.textContent).toContain('2V2 DOUBLES');
     expect(strip.textContent).toContain('3V3 STANDARD');
-    expect(strip.textContent).toContain('ALL SESSION (5)');
+    expect(strip.textContent).not.toContain('ALL SESSION');
 
     // SessionForAgainstTable preserves badge without duplicate SWITCH TO TOTALS button
     const splitTable = container.querySelector('[data-testid="session-for-against-table"]')!;

@@ -205,7 +205,11 @@ describe('LiveGameView — in match', () => {
     const aeroCard = () => cards(container).find((c) => c.dataset.playerId === 'Steam|76561198000000010|0')!;
     const youCard = () => cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
 
-    // Default (ALL) shows 2v2 rank (1502), 2v2 H2H (4–1), and 2v2 session record (3–1)
+    // Concrete single-mode pills only (no ALL cross-mode pill); default (2V2) shows 2v2 rank (1502), 2v2 H2H (4–1), and 2v2 session record (3–1)
+    const scopeLabels = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).map((b) =>
+      b.textContent?.trim(),
+    );
+    expect(scopeLabels).not.toContain('ALL');
     expect(aeroCard().textContent).toContain('1502');
     expect(aeroCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('WITH YOU4–1');
     expect(youCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION3–1');
@@ -237,6 +241,7 @@ describe('LiveGameView — in match', () => {
 });
 
 describe('LiveGameView — between matches', () => {
+  beforeEach(() => localStorage.clear());
   afterEach(cleanup);
 
   it('shows the compact idle header (no giant WAITING FOR KICKOFF banner), last match strip, box score and session KPIs', async () => {
@@ -260,12 +265,13 @@ describe('LiveGameView — between matches', () => {
     expect(container.querySelector('[data-testid="box-score-orange"]')!.textContent).not.toContain('MVP');
 
     const kpis = container.querySelector('[data-testid="session-kpis"]')!;
-    expect(kpis.textContent).toContain('4–1');
+    expect(kpis.textContent).toContain('3–1');
+    expect(kpis.textContent).not.toContain('4–1');
     expect(kpis.textContent).toContain('+29');
     expect(kpis.textContent).toContain('W2');
   });
 
-  it('scopes IdleStateView KPIs and For/Against split when activePlaylist is passed while preserving full PlaylistRows', async () => {
+  it('scopes IdleStateView KPIs, For/Against split, PlaylistRows, and LastMatch strictly to activePlaylist', async () => {
     const { container } = await mount(
       <DashboardProvider>
         <LiveGameView
@@ -282,9 +288,10 @@ describe('LiveGameView — between matches', () => {
     const kpis = container.querySelector('[data-testid="session-kpis"]')!;
     expect(kpis.textContent).toContain('1–0');
     expect(kpis.textContent).toContain('+11');
-    // Playlist progression still displays all played playlists in session
-    expect(container.textContent).toContain('RANKED DOUBLES');
+    // Playlist progression and LastMatch strictly show only 3v3 (RANKED STANDARD), never Ranked Doubles
     expect(container.textContent).toContain('RANKED STANDARD');
+    expect(container.querySelector('[data-testid="last-match"]')?.textContent).toContain('RANKED STANDARD');
+    expect(container.querySelector('[data-testid="last-match"]')?.textContent).not.toContain('RANKED DOUBLES');
   });
 
   it('reflects daemon connectivity in the status dots', async () => {
@@ -336,7 +343,7 @@ describe('LiveGameView — between matches', () => {
 
     const banner = container.querySelector('[data-testid="continue-session-banner"]')!;
     expect(banner).not.toBeNull();
-    expect(banner.textContent).toContain('4W–1L');
+    expect(banner.textContent).toContain('3W–1L · 4 MATCHES');
 
     const continueBtn = container.querySelector<HTMLButtonElement>('[data-testid="continue-session-btn"]')!;
     continueBtn.click();

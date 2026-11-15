@@ -158,29 +158,36 @@ export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
         THIS SESSION YET
       </EmptyLine>
     ) : (
-      <div>
-        <div
-          className={`grid pb-2 ${COLUMN_HEADER}`}
-          style={{ gridTemplateColumns: ROW_GRID }}
-        >
-          <span />
-          <span>SCORE</span>
-          <span>MATCH</span>
-          <span className="text-right">G</span>
-          <span className="text-right">A</span>
-          <span className="text-right">SV</span>
-          <span className="text-right">PTS</span>
-          <span className="text-right">MMR</span>
-          <span className="text-right pr-[22px]">WHEN</span>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          {rows.map((m) => (
-            <SessionMatchRow
-              key={m.match_guid}
-              match={m}
-              onOpen={() => onOpenMatch(m)}
-            />
-          ))}
+      <div
+        role="region"
+        aria-label="Session match list"
+        tabIndex={0}
+        className="overflow-x-auto"
+      >
+        <div className="min-w-[780px]">
+          <div
+            className={`grid pb-2 ${COLUMN_HEADER}`}
+            style={{ gridTemplateColumns: ROW_GRID }}
+          >
+            <span />
+            <span>SCORE</span>
+            <span>MATCH</span>
+            <span className="text-right">G</span>
+            <span className="text-right">A</span>
+            <span className="text-right">SV</span>
+            <span className="text-right">PTS</span>
+            <span className="text-right">MMR</span>
+            <span className="text-right pr-[22px]">WHEN</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {rows.map((m) => (
+              <SessionMatchRow
+                key={m.match_guid}
+                match={m}
+                onOpen={() => onOpenMatch(m)}
+              />
+            ))}
+          </div>
         </div>
       </div>
     )}

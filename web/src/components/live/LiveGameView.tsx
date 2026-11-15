@@ -8,7 +8,13 @@ import { IdleStateView } from './IdleStateView';
 import { ColumnConfigModal } from './ColumnConfigModal';
 import { ContinueSessionBanner } from '../session/SessionView';
 import { useDashboard } from '../../context/DashboardContext';
-import { matchesPlaylistFilter, playlistFilterToParam } from '../../utils/broadcast';
+import {
+  filterSessionByPlaylist,
+  matchesPlaylistFilter,
+  modeKeyFromPlaylistId,
+  normalizeActiveModeKey,
+  playlistLabels,
+} from '../../utils/broadcast';
 import { SAMPLE_CURRENT_MATCH } from '../../utils/sampleData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
 import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
@@ -48,15 +54,21 @@ export function lobbyPlayers(match: CurrentMatchResponse): LobbyPlayer[] {
 
 const byScore = (a: LobbyPlayer, b: LobbyPlayer) => (b.stats?.score || 0) - (a.stats?.score || 0);
 
-const PLAYLIST_SCOPES: ReadonlyArray<{ id: string; label: string }> = [
-  { id: 'all', label: 'ALL' },
+const BASE_PLAYLIST_SCOPES: ReadonlyArray<{ id: string; label: string }> = [
   { id: '11', label: '2V2' },
   { id: '13', label: '3V3' },
   { id: '10', label: '1V1' },
 ];
 
+function scopeLabelForModeKey(modeKey: string, playlistId?: number): string {
+  if (modeKey === 'casual') return 'CASUAL';
+  if (modeKey === 'private') return 'PRIVATE';
+  const pid = Number(modeKey) || playlistId || 0;
+  return pid > 0 ? playlistLabels(pid).short : modeKey.toUpperCase();
+}
+
 function resolveScopedPlaylistId(scope: string): number {
-  const param = playlistFilterToParam(scope);
+  const param = normalizeActiveModeKey(scope);
   const num = Number(param);
   return Number.isInteger(num) && num > 0 ? num : 0;
 }
@@ -79,6 +91,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
 }) => {
   const { config, toggleColumn, applyPreset, resetToDefault, activePreset } = useColumnConfig();
   const {
+    activePlaylist: contextActivePlaylist,
     setActivePlaylist,
     liveModeOverride,
     showLiveHistData,
@@ -87,20 +100,26 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
     isDevBuild,
     previewMode,
   } = useDashboard();
-  const [playlistScope, setPlaylistScope] = useState<string>(() => activePlaylist ?? 'all');
+  const [playlistScope, setPlaylistScope] = useState<string>(() =>
+    normalizeActiveModeKey(
+      activePlaylist ??
+        (match?.playlist_id ? modeKeyFromPlaylistId(match.playlist_id) : contextActivePlaylist),
+    ),
+  );
   const [fallbackPlayer, setFallbackPlayer] = useState<{ id: string; name?: string } | null>(null);
   const [fallbackMatch, setFallbackMatch] = useState<SessionMatchDetail | null>(null);
 
   useEffect(() => {
     if (activePlaylist !== undefined) {
-      setPlaylistScope(activePlaylist);
+      setPlaylistScope(normalizeActiveModeKey(activePlaylist));
     }
   }, [activePlaylist]);
 
   const handleScopeSelect = (nextScope: string) => {
-    setPlaylistScope(nextScope);
-    onSelectPlaylist?.(nextScope);
-    setActivePlaylist(nextScope);
+    const normalized = normalizeActiveModeKey(nextScope);
+    setPlaylistScope(normalized);
+    onSelectPlaylist?.(normalized);
+    setActivePlaylist(normalized);
   };
 
   const handleInspectPlayer = (playerId: string, playerName?: string) => {
@@ -135,13 +154,37 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
   );
   const leaders = useMemo(() => statLeaders(lobby), [lobby]);
 
+  const normalizedScopeKey = normalizeActiveModeKey(playlistScope);
+
+  const scopedContinuableSession = useMemo(() => {
+    if (!session?.continuable_session) return null;
+    const scoped = filterSessionByPlaylist(session.continuable_session, normalizedScopeKey);
+    return scoped && scoped.total_matches > 0 ? scoped : null;
+  }, [session?.continuable_session, normalizedScopeKey]);
+
+  const playlistScopes = useMemo(() => {
+    const items = [...BASE_PLAYLIST_SCOPES];
+    const matchModeKey = effectiveMatch?.playlist_id
+      ? modeKeyFromPlaylistId(effectiveMatch.playlist_id)
+      : '';
+    for (const candidate of [matchModeKey, normalizedScopeKey]) {
+      if (candidate && !items.some((s) => s.id === candidate)) {
+        items.push({
+          id: candidate,
+          label: scopeLabelForModeKey(candidate, effectiveMatch?.playlist_id),
+        });
+      }
+    }
+    return items;
+  }, [effectiveMatch?.playlist_id, normalizedScopeKey]);
+
   if (!shouldShowMatch || !effectiveMatch) {
     return (
       <>
         <IdleStateView
           session={session}
           scopedSession={scopedSession}
-          activePlaylist={activePlaylist}
+          activePlaylist={activePlaylist ?? normalizedScopeKey}
           connection={connection}
           onShowSession={onShowSession}
           onContinueSession={onContinueSession}
@@ -172,14 +215,11 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
   const teams = [0, 1].map((team) => lobby.filter((p) => p.team_num === team).sort(byScore));
   const opposingTeam = localTeam === 0 ? teams[1] : teams[0];
 
-  const scopedPlaylistId = resolveScopedPlaylistId(playlistScope);
+  const scopedPlaylistId = resolveScopedPlaylistId(normalizedScopeKey);
   const targetPlId = scopedPlaylistId > 0 ? scopedPlaylistId : effectiveMatch.playlist_id;
   const hasPlaylistBreakdown = !!session?.playlists && Object.keys(session.playlists).length > 0;
   const plSession = hasPlaylistBreakdown ? session?.playlists?.[String(targetPlId)] : undefined;
-  const scopeMatchesMatch =
-    !playlistScope ||
-    playlistScope === 'all' ||
-    matchesPlaylistFilter(effectiveMatch.playlist_id, playlistScope);
+  const scopeMatchesMatch = matchesPlaylistFilter(effectiveMatch.playlist_id, normalizedScopeKey);
 
   const sessionRecord = hasPlaylistBreakdown
     ? scopedPlaylistId === 0 && !scopeMatchesMatch
@@ -197,14 +237,12 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
       }
     : { wins: 0, losses: 0, netMmr: undefined };
 
-  const normalizedScopeKey = playlistFilterToParam(playlistScope) || 'all';
-
   return (
     <div data-testid="live-match" className="flex flex-col gap-4">
-      {session?.continuable_session && (
+      {scopedContinuableSession && (
         <div>
           <ContinueSessionBanner
-            continuableSession={session.continuable_session}
+            continuableSession={scopedContinuableSession}
             onContinue={(id) => onContinueSession?.(id)}
             onDismiss={(id) => onDismissContinueSession?.(id)}
           />
@@ -280,7 +318,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
             SCOPE ({dateRangeLabel}):
           </span>
           <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Live player card playlist scope">
-            {PLAYLIST_SCOPES.map((sc, i) => {
+            {playlistScopes.map((sc, i) => {
               const active = normalizedScopeKey === sc.id;
               return (
                 <button
@@ -330,7 +368,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
                 localPlayer={effectiveMatch.local_player}
                 opposingTeamPlayers={opposingTeam}
                 activePlaylistId={effectiveMatch.playlist_id}
-                playlistScope={playlistScope}
+                playlistScope={normalizedScopeKey}
                 onInspectPlayer={handleInspectPlayer}
               />
             ))}

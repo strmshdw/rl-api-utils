@@ -228,6 +228,21 @@ export function modeKeyFromPlaylistId(playlistId: number): string {
   return playlistId > 0 ? String(playlistId) : '11';
 }
 
+/**
+ * Normalizes any UI or legacy storage mode token to a single concrete game-mode key
+ * (`'11'`, `'13'`, `'10'`, `'27'`, `'28'`, `'29'`, `'30'`, `'34'`, `'casual'`, `'private'`).
+ * Cross-mode rollups (`'all'`, `'0'`, `''`, `'extra'`) are mapped to concrete single modes.
+ */
+export function normalizeActiveModeKey(raw?: string | null): string {
+  const f = (raw || '').trim().toLowerCase();
+  if (!f || f === 'all' || f === '0') return '11';
+  if (f === 'extra') return '27';
+  const param = playlistFilterToParam(f);
+  if (!param || param === 'all' || param === '0') return '11';
+  if (param === 'extra') return '27';
+  return param;
+}
+
 export interface PositioningRoleLabels {
   showRotation: boolean;
   forwardLabel: string;

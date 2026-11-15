@@ -10,7 +10,16 @@ import {
 } from '../../utils/broadcast';
 import { h2hTag } from './playerData';
 
-export type ProfilePlaylistScope = 'all' | '2v2' | '3v3' | '1v1' | 'extra' | 'casual';
+export type ProfilePlaylistScope =
+  | '2v2'
+  | '3v3'
+  | '1v1'
+  | '27'
+  | '28'
+  | '29'
+  | '30'
+  | '34'
+  | 'casual';
 export type ProfileRoleFilter = 'all' | 'teammate' | 'opponent';
 export type ProfileResultFilter = 'all' | 'W' | 'L';
 export type ProfileSortOption =
@@ -22,23 +31,42 @@ export type ProfileSortOption =
   | 'demos-desc';
 
 export const PLAYLIST_SCOPE_IDS: Record<ProfilePlaylistScope, number> = {
-  all: 0,
   '2v2': 11,
   '3v3': 13,
   '1v1': 10,
-  extra: 0,
+  '27': 27,
+  '28': 28,
+  '29': 29,
+  '30': 30,
+  '34': 34,
   casual: 0,
 };
+
+export const CORE_PLAYLIST_SCOPE_BUTTONS: ReadonlyArray<{
+  scope: ProfilePlaylistScope;
+  label: string;
+}> = [
+  { scope: '2v2', label: '2V2' },
+  { scope: '3v3', label: '3V3' },
+  { scope: '1v1', label: '1V1' },
+];
+
+export const EXTRA_PLAYLIST_SCOPE_OPTIONS: ReadonlyArray<{
+  scope: ProfilePlaylistScope;
+  label: string;
+}> = [
+  { scope: '27', label: 'HOOPS' },
+  { scope: '28', label: 'RUMBLE' },
+  { scope: '29', label: 'DROPSHOT' },
+  { scope: '30', label: 'SNOW DAY' },
+  { scope: '34', label: 'TOURNAMENT' },
+];
 
 export const PLAYLIST_SCOPE_BUTTONS: ReadonlyArray<{
   scope: ProfilePlaylistScope;
   label: string;
 }> = [
-  { scope: 'all', label: 'ALL' },
-  { scope: '2v2', label: '2V2' },
-  { scope: '3v3', label: '3V3' },
-  { scope: '1v1', label: '1V1' },
-  { scope: 'extra', label: 'EXTRA' },
+  ...CORE_PLAYLIST_SCOPE_BUTTONS,
   { scope: 'casual', label: 'CASUAL' },
 ];
 
@@ -172,7 +200,7 @@ export const CompactRoleSplitCard: React.FC<CompactRoleSplitCardProps> = ({
             </span>
           ) : (
             <span className="text-xs font-bold text-muted uppercase tracking-wider truncate">
-              {selected ? 'FILTER ACTIVE · CLICK TO SHOW ALL' : 'CLICK TO FILTER MATCHES'}
+              {selected ? 'FILTER ACTIVE · CLICK TO RESET ROLE' : 'CLICK TO FILTER MATCHES'}
             </span>
           )}
           <span className="t-font-mono font-extrabold text-sm text-muted whitespace-nowrap shrink-0">
@@ -188,28 +216,30 @@ export const CompactRoleSplitCard: React.FC<CompactRoleSplitCardProps> = ({
           {emptyMessage}
         </div>
       ) : !synced ? (
-        <div className="t-bg-page bg-page t-border border border-line">
-          <div className="grid grid-cols-9 items-center py-1.5 px-2 text-right text-sm font-extrabold text-muted border-b t-border border-line uppercase">
-            <span>PTS</span>
-            <span>G</span>
-            <span>A</span>
-            <span>SV</span>
-            <span>SH%</span>
-            <span>DEM</span>
-            <span>BPM</span>
-            <span>BST</span>
-            <span>SUP%</span>
-          </div>
-          <div className="grid grid-cols-9 items-center py-2 px-2 text-right text-base font-extrabold t-font-mono text-muted">
-            <span>—</span>
-            <span>—</span>
-            <span>—</span>
-            <span>—</span>
-            <span>—</span>
-            <span>—</span>
-            <span>—</span>
-            <span>—</span>
-            <span>—</span>
+        <div className="t-bg-page bg-page t-border border border-line overflow-x-auto">
+          <div className="min-w-[420px]">
+            <div className="grid grid-cols-9 items-center py-1.5 px-2 text-right text-sm font-extrabold text-muted border-b t-border border-line uppercase">
+              <span>PTS</span>
+              <span>G</span>
+              <span>A</span>
+              <span>SV</span>
+              <span>SH%</span>
+              <span>DEM</span>
+              <span>BPM</span>
+              <span>BST</span>
+              <span>SUP%</span>
+            </div>
+            <div className="grid grid-cols-9 items-center py-2 px-2 text-right text-base font-extrabold t-font-mono text-muted">
+              <span>—</span>
+              <span>—</span>
+              <span>—</span>
+              <span>—</span>
+              <span>—</span>
+              <span>—</span>
+              <span>—</span>
+              <span>—</span>
+              <span>—</span>
+            </div>
           </div>
           <div
             data-testid={teammate ? 'h2h-with-unsynced' : 'h2h-vs-unsynced'}
@@ -219,28 +249,30 @@ export const CompactRoleSplitCard: React.FC<CompactRoleSplitCardProps> = ({
           </div>
         </div>
       ) : (
-        <div className="t-bg-page bg-page t-border border border-line">
-          <div className="grid grid-cols-9 items-center py-1.5 px-2 text-right text-sm font-extrabold text-muted border-b t-border border-line uppercase">
-            <span>PTS</span>
-            <span>G</span>
-            <span>A</span>
-            <span>SV</span>
-            <span>SH%</span>
-            <span>DEM</span>
-            <span>BPM</span>
-            <span>BST</span>
-            <span>SUP%</span>
-          </div>
-          <div className="grid grid-cols-9 items-center py-2 px-2 text-right text-base font-extrabold t-font-mono">
-            <span className="t-text-strong text-ink-strong">{pts.toLocaleString()}</span>
-            <span className="t-text-strong text-ink-strong">{g}</span>
-            <span className="t-text-strong text-ink-strong">{a}</span>
-            <span className="t-text-strong text-ink-strong">{sv}</span>
-            <span className="t-text-win text-win">{shPct}%</span>
-            <span className="t-text-orange text-orange-ink">{dem}</span>
-            <span className="t-text-blue text-blue-ink">{bpm}</span>
-            <span className="t-text-ink2 text-ink-2">{bst}</span>
-            <span className="t-text-ink2 text-ink-2">{sup}%</span>
+        <div className="t-bg-page bg-page t-border border border-line overflow-x-auto">
+          <div className="min-w-[420px]">
+            <div className="grid grid-cols-9 items-center py-1.5 px-2 text-right text-sm font-extrabold text-muted border-b t-border border-line uppercase">
+              <span>PTS</span>
+              <span>G</span>
+              <span>A</span>
+              <span>SV</span>
+              <span>SH%</span>
+              <span>DEM</span>
+              <span>BPM</span>
+              <span>BST</span>
+              <span>SUP%</span>
+            </div>
+            <div className="grid grid-cols-9 items-center py-2 px-2 text-right text-base font-extrabold t-font-mono">
+              <span className="t-text-strong text-ink-strong">{pts.toLocaleString()}</span>
+              <span className="t-text-strong text-ink-strong">{g}</span>
+              <span className="t-text-strong text-ink-strong">{a}</span>
+              <span className="t-text-strong text-ink-strong">{sv}</span>
+              <span className="t-text-win text-win">{shPct}%</span>
+              <span className="t-text-orange text-orange-ink">{dem}</span>
+              <span className="t-text-blue text-blue-ink">{bpm}</span>
+              <span className="t-text-ink2 text-ink-2">{bst}</span>
+              <span className="t-text-ink2 text-ink-2">{sup}%</span>
+            </div>
           </div>
         </div>
       )}
