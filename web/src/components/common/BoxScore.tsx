@@ -102,8 +102,9 @@ export function sessionMatchRows(match: SessionMatchDetail, team: number, mvpId?
   });
 }
 
-const WITH_RANKS = 'minmax(132px,1.55fr) 52px minmax(108px,1.1fr) 46px repeat(5,32px)';
-const STATS_ONLY = 'minmax(110px,1fr) 48px repeat(5,34px)';
+const WITH_RANKS =
+  'minmax(112px,1.55fr) minmax(44px,0.55fr) minmax(94px,1.05fr) minmax(42px,0.55fr) repeat(5,minmax(26px,0.38fr))';
+const STATS_ONLY = 'minmax(110px,1fr) minmax(44px,0.55fr) repeat(5,minmax(28px,0.42fr))';
 
 /** One team's box score panel with a 3px rule in the team slab colour. */
 export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
@@ -114,13 +115,19 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
   withH2H = false,
   onPlayerClick,
 }) => {
-  const gridTemplateColumns = `${withRanks ? WITH_RANKS : STATS_ONLY}${withH2H ? ' 64px' : ''}`;
+  const gridTemplateColumns = `${withRanks ? WITH_RANKS : STATS_ONLY}${
+    withH2H ? ' minmax(54px,0.65fr)' : ''
+  }`;
+  const minGridWidth = withRanks ? (withH2H ? 'min-w-[490px]' : 'min-w-[432px]') : 'min-w-[320px]';
   return (
     <div
       data-testid={`box-score-${team === 0 ? 'blue' : 'orange'}`}
-      className={`surface-plaque border border-outline px-5 pt-3.5 pb-4 border-t-[3px] ${TEAM_SLAB_BORDER[team]} flex flex-col min-w-0 overflow-hidden font-display t-radius`}
+      role="region"
+      aria-label={`${label} box score`}
+      tabIndex={0}
+      className={`surface-plaque border border-outline px-4 sm:px-5 pt-3.5 pb-4 border-t-[3px] ${TEAM_SLAB_BORDER[team]} flex flex-col min-w-0 overflow-x-auto font-display t-radius`}
     >
-      <div className={`grid gap-x-2 pb-1.5 ${COLUMN_HEADER}`} style={{ gridTemplateColumns }}>
+      <div className={`grid gap-x-2 pb-1.5 ${minGridWidth} ${COLUMN_HEADER}`} style={{ gridTemplateColumns }}>
         <span className={team === 0 ? 't-text-blue' : 't-text-orange'}>
           {label}
         </span>
@@ -139,7 +146,7 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
         return (
           <div
             key={p.key}
-            className={`grid gap-x-2 border-t border-line font-bold text-base sm:text-[18px] items-center py-2 t-hover-panel ${
+            className={`grid gap-x-2 ${minGridWidth} border-t border-line font-bold text-base sm:text-[18px] items-center py-2 t-hover-panel ${
               p.disconnected ? 'opacity-60' : ''
             }`}
             style={{ gridTemplateColumns }}

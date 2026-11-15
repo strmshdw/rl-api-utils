@@ -195,8 +195,9 @@ describe('LiveGameView — in match', () => {
     expect(toggleBtn.textContent).toContain('HISTORICAL DATA: SHOWN');
     expect(container.querySelectorAll('.live-hist-section').length).toBeGreaterThan(0);
 
-    toggleBtn.click();
-    await new Promise((r) => setTimeout(r, 10));
+    await act(async () => {
+      toggleBtn.click();
+    });
     expect(toggleBtn.textContent).toContain('HISTORICAL DATA: HIDDEN');
   });
 
@@ -237,6 +238,267 @@ describe('LiveGameView — in match', () => {
     });
     expect(aeroCard().textContent).toContain('UNRANKED');
     expect(aeroCard().textContent).toContain('— NO MATCHES IN SELECTED RANGE —');
+  });
+
+  it('locks paired Blue/Orange card bands via CSS subgrid coordinates even under heavy multi-stamp asymmetry and updates Scorebug AVG by scope', async () => {
+    const heavyStampOpponent = lobby({
+      player_id: 'Steam|heavy_stamp_opp|0',
+      name: 'HyperAltCarry99',
+      team_num: 1,
+      stats: { score: 610, goals: 3, assists: 1, saves: 2, shots: 7, demos: 3 },
+      tags: ['smurf-duo', 'watch-air-dribble'],
+      notes: 'Queues with lower ranked friend and flip resets from backboard',
+      current_rank: {
+        playlist_id: 11,
+        playlist_name: 'Ranked Doubles',
+        tier: 17,
+        division: 3,
+        rank_name: 'Grand Champion II',
+        mmr: 1645,
+        matches_played: 18,
+        sigma: 3.35,
+        win_streak: 5,
+      },
+      ranks: {
+        '11': {
+          playlist_id: 11,
+          playlist_name: 'Ranked Doubles',
+          tier: 17,
+          division: 3,
+          rank_name: 'Grand Champion II',
+          mmr: 1645,
+          matches_played: 18,
+          sigma: 3.35,
+          win_streak: 5,
+        },
+        '13': {
+          playlist_id: 13,
+          playlist_name: 'Ranked Standard',
+          tier: 22,
+          division: 1,
+          rank_name: 'Supersonic Legend',
+          mmr: 1910,
+          matches_played: 20,
+          sigma: 2.5,
+        },
+      },
+    });
+    const lowMateOpponent = lobby({
+      player_id: 'Steam|low_mate_opp|0',
+      name: 'AnchorBuddy',
+      team_num: 1,
+      stats: { score: 180, goals: 0, assists: 1, saves: 1, shots: 1, demos: 0 },
+      current_rank: {
+        playlist_id: 11,
+        playlist_name: 'Ranked Doubles',
+        tier: 15,
+        division: 1,
+        rank_name: 'Champion III',
+        mmr: 1390,
+        matches_played: 210,
+        sigma: 2.5,
+      },
+      ranks: {
+        '11': {
+          playlist_id: 11,
+          playlist_name: 'Ranked Doubles',
+          tier: 15,
+          division: 1,
+          rank_name: 'Champion III',
+          mmr: 1390,
+          matches_played: 210,
+          sigma: 2.5,
+        },
+        '13': {
+          playlist_id: 13,
+          playlist_name: 'Ranked Standard',
+          tier: 16,
+          division: 1,
+          rank_name: 'Grand Champion I',
+          mmr: 1450,
+          matches_played: 120,
+          sigma: 2.5,
+        },
+      },
+    });
+
+    const { container } = await renderLive(
+      liveMatch({ opponents: [heavyStampOpponent, lowMateOpponent] }),
+    );
+
+    const rosterGrid = container.querySelector<HTMLElement>('.live-roster-grid');
+    expect(rosterGrid).not.toBeNull();
+    expect(rosterGrid?.style.getPropertyValue('--live-roster-rows')).toBe(
+      'auto auto auto auto 0.875rem auto auto auto auto',
+    );
+
+    const blueCards = cards(container.querySelector('[data-testid="team-blue"]')!);
+    const orangeCards = cards(container.querySelector('[data-testid="team-orange"]')!);
+    expect(blueCards[0].style.getPropertyValue('--live-card-col')).toBe('1');
+    expect(orangeCards[0].style.getPropertyValue('--live-card-col')).toBe('2');
+    expect(blueCards[0].style.getPropertyValue('--live-card-row')).toBe('1 / span 4');
+    expect(orangeCards[0].style.getPropertyValue('--live-card-row')).toBe('1 / span 4');
+    expect(blueCards[1].style.getPropertyValue('--live-card-row')).toBe('6 / span 4');
+    expect(orangeCards[1].style.getPropertyValue('--live-card-row')).toBe('6 / span 4');
+
+    // Heavy opponent carries all 5 threat stamps + tags + note without losing H2H ledger
+    expect(orangeCards[0].querySelector('[data-testid="badge-threat-smurf"]')).not.toBeNull();
+    expect(orangeCards[0].querySelector('[data-testid="badge-threat-higher"]')).not.toBeNull();
+    expect(orangeCards[0].querySelector('[data-testid="badge-threat-carry"]')).not.toBeNull();
+    expect(orangeCards[0].querySelector('[data-testid="badge-threat-peak"]')).not.toBeNull();
+    expect(orangeCards[0].querySelector('[data-testid="badge-threat-streak"]')).not.toBeNull();
+    expect(orangeCards[0].querySelector('[data-testid="badge-player-note"]')).not.toBeNull();
+
+    // Switch scope to 3V3 -> Scorebug AVG updates to 3v3 MMRs ((1460+1795)/2 = 1628 vs (1910+1450)/2 = 1680 -> +52 ORANGE)
+    const btn3v3 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
+      (b) => b.textContent?.trim() === '3V3',
+    )!;
+    await act(async () => {
+      btn3v3.click();
+    });
+    const bug = container.querySelector('[data-testid="scorebug"]')!;
+    expect(bug.textContent).toContain('AVG 1628');
+    expect(bug.textContent).toContain('AVG 1680');
+    expect(bug.textContent).toContain('+53 ORANGE');
+  });
+
+  it('hydrates live historical role split telemetry from /api/players/{id} for real live matches and re-scopes on playlist switch', async () => {
+    const origFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      const parsed = new URL(url, 'http://localhost');
+      const pl = parsed.searchParams.get('playlist');
+      if (parsed.pathname === '/api/players/me') {
+        return new Response(
+          JSON.stringify({
+            player_id: 'Epic|real_me|0',
+            player_name: 'You',
+            with_you_stats:
+              pl === '11'
+                ? {
+                    games: 6,
+                    wins: 6,
+                    losses: 0,
+                    avg_score: 562,
+                    total_score: 3372,
+                    avg_goals: 2.3,
+                    total_goals: 14,
+                    avg_assists: 1.1,
+                    total_assists: 7,
+                    avg_saves: 2.0,
+                    total_saves: 12,
+                    avg_shots: 5.0,
+                    total_shots: 30,
+                    shooting_pct: 46,
+                    avg_demos_inflicted: 1.5,
+                    total_demos_inflicted: 9,
+                    avg_boost: 51,
+                  }
+                : { games: 0, wins: 0, losses: 0 },
+            against_you_stats: { games: 0, wins: 0, losses: 0 },
+            matchups: [],
+            recent_matches: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (parsed.pathname.includes('real_opp')) {
+        return new Response(
+          JSON.stringify({
+            player_id: 'Steam|real_opp|0',
+            player_name: 'RivalAce',
+            with_you_stats: { games: 0, wins: 0, losses: 0 },
+            against_you_stats:
+              pl === '11'
+                ? {
+                    games: 4,
+                    wins: 1,
+                    losses: 3,
+                    avg_score: 604,
+                    total_score: 2416,
+                    avg_goals: 2.5,
+                    total_goals: 10,
+                    avg_assists: 0.8,
+                    total_assists: 3,
+                    avg_saves: 2.8,
+                    total_saves: 11,
+                    avg_shots: 5.5,
+                    total_shots: 22,
+                    shooting_pct: 45,
+                    avg_demos_inflicted: 2.2,
+                    total_demos_inflicted: 9,
+                    avg_boost: 54,
+                  }
+                : { games: 0, wins: 0, losses: 0 },
+            teammate_wins: 0,
+            teammate_losses: 0,
+            opponent_wins: pl === '11' ? 1 : 0,
+            opponent_losses: pl === '11' ? 3 : 0,
+            matchups: [],
+            recent_matches: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const realMatch: CurrentMatchResponse = {
+        active_match: true,
+        match_ended: false,
+        match_guid: 'real-live-guid-1',
+        playlist_id: 11,
+        playlist_name: 'Ranked Doubles',
+        local_team: 0,
+        updated_at: new Date().toISOString(),
+        local_player: lobby({ player_id: 'Epic|real_me|0', name: 'Strmshdw', team_num: 0, is_local: true }),
+        teammates: [],
+        opponents: [
+          lobby({
+            player_id: 'Steam|real_opp|0',
+            name: 'RivalAce',
+            team_num: 1,
+            matchup_record: {
+              player_id: 'Steam|real_opp|0',
+              playlist_id: 11,
+              wins_as_teammate: 0,
+              losses_as_teammate: 0,
+              wins_as_opponent: 1,
+              losses_as_opponent: 3,
+              total_matches: 4,
+              last_played_at: '',
+            },
+          }),
+        ],
+        spectators: [],
+      };
+
+      const { container } = await renderLive(realMatch);
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 25));
+      });
+
+      expect(requestedUrls.some((u) => u.includes('/api/players/me?playlist=11'))).toBe(true);
+      expect(container.textContent).toContain('562');
+      expect(container.textContent).toContain('604');
+
+      // Switch to 3V3 -> 2v2 telemetry (562 / 604) must clear and re-query playlist=13
+      const btn3v3 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
+        (b) => b.textContent?.trim() === '3V3',
+      )!;
+      await act(async () => {
+        btn3v3.click();
+        await new Promise((r) => setTimeout(r, 25));
+      });
+      expect(requestedUrls.some((u) => u.includes('playlist=13'))).toBe(true);
+      expect(container.textContent).not.toContain('562');
+      expect(container.textContent).not.toContain('604');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 });
 

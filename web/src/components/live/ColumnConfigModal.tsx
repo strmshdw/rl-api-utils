@@ -75,7 +75,7 @@ export const ColumnConfigModal: React.FC<ColumnConfigModalProps> = ({
               />
               <span className="flex flex-col min-w-0 flex-1">
                 <span className={`font-bold text-[17px] tracking-t4 uppercase ${checked ? 'text-ink' : 'text-muted'}`}>{col.label}</span>
-                <span className="font-medium text-[13px] tracking-t4 text-muted-2 truncate">{col.description}</span>
+                <span className="font-medium text-[13px] tracking-t4 text-muted-2 leading-snug">{col.description}</span>
               </span>
               <span className="font-semibold text-[12px] tracking-t14 text-faint">{col.shortLabel}</span>
             </label>

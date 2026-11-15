@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useColumnConfig } from '../../hooks/useColumnConfig';
 import { ConnectionStatus } from '../../hooks/useLiveMatch';
+import { useLiveLobbyHistories } from '../../hooks/useLiveLobbyHistories';
 import { CurrentMatchResponse, LobbyPlayer, SessionMatchDetail, SessionResponse } from '../../types/api';
 import { Scorebug } from './Scorebug';
-import { LivePlayerCard, statLeaders } from './LivePlayerCard';
+import { LivePlayerCard, STRIP_STATS, statLeaders } from './LivePlayerCard';
 import { IdleStateView } from './IdleStateView';
 import { ColumnConfigModal } from './ColumnConfigModal';
 import { ContinueSessionBanner } from '../session/SessionView';
@@ -97,6 +98,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
     showLiveHistData,
     setShowLiveHistData,
     dateRangeLabel,
+    dateRangeQueryParams,
     isDevBuild,
     previewMode,
   } = useDashboard();
@@ -155,6 +157,18 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
   const leaders = useMemo(() => statLeaders(lobby), [lobby]);
 
   const normalizedScopeKey = normalizeActiveModeKey(playlistScope);
+  const localId = effectiveMatch?.local_player?.player_id;
+  const hasDateFilter = Boolean(dateRangeQueryParams.from || dateRangeQueryParams.to);
+
+  const scopedHistories = useLiveLobbyHistories({
+    matchGuid: effectiveMatch?.match_guid,
+    lobby,
+    localId,
+    scopeKey: normalizedScopeKey,
+    dateParams: dateRangeQueryParams,
+    enabled: Boolean(effectiveMatch) && (showLiveHistData || hasDateFilter),
+    previewMode: Boolean(isDevBuild && previewMode),
+  });
 
   const scopedContinuableSession = useMemo(() => {
     if (!session?.continuable_session) return null;
@@ -210,10 +224,16 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
     );
   }
 
-  const localId = effectiveMatch.local_player?.player_id;
   const localTeam = effectiveMatch.local_team ?? effectiveMatch.local_player?.team_num ?? 0;
   const teams = [0, 1].map((team) => lobby.filter((p) => p.team_num === team).sort(byScore));
   const opposingTeam = localTeam === 0 ? teams[1] : teams[0];
+
+  const hasStatStrip = STRIP_STATS.some((s) => config[s.key]);
+  const bandsPerCard = 2 + (hasStatStrip ? 1 : 0) + (showLiveHistData ? 1 : 0);
+  const maxSlots = Math.max(1, teams[0].length, teams[1].length);
+  const slotTrackDef = Array(bandsPerCard).fill('auto').join(' ');
+  const rosterGridRows = Array.from({ length: maxSlots }, () => slotTrackDef).join(' 0.875rem ');
+  const fallbackCardRows = `repeat(${bandsPerCard}, auto)`;
 
   const scopedPlaylistId = resolveScopedPlaylistId(normalizedScopeKey);
   const targetPlId = scopedPlaylistId > 0 ? scopedPlaylistId : effectiveMatch.playlist_id;
@@ -252,9 +272,9 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
       {effectiveMatch.match_ended && (
         <div
           data-testid="match-ended-banner"
-          className="t-bg-panel bg-panel border-l-4 border-blue-ink px-6 py-3 flex items-center justify-between t-border t-radius"
+          className="t-bg-panel bg-panel border-l-4 border-blue-ink px-6 py-3 flex flex-wrap items-center justify-between gap-3 t-border t-radius"
         >
-          <div className="flex items-center gap-3 font-display">
+          <div className="flex items-center gap-3 font-display flex-wrap">
             <span className="font-extrabold text-base tracking-wider text-ink uppercase">
               MATCH CONCLUDED · FINAL BOX SCORE
             </span>
@@ -317,7 +337,11 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
           <span className="text-xs t-font-display font-bold uppercase tracking-wider t-text-muted">
             SCOPE ({dateRangeLabel}):
           </span>
-          <div className="flex t-border t-radius overflow-hidden" role="group" aria-label="Live player card playlist scope">
+          <div
+            className="flex t-border t-radius overflow-hidden"
+            role="group"
+            aria-label="Live player card playlist scope"
+          >
             {playlistScopes.map((sc, i) => {
               const active = normalizedScopeKey === sc.id;
               return (
@@ -347,31 +371,45 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
         bluePlayers={teams[0]}
         orangePlayers={teams[1]}
         localTeam={localTeam}
+        scopedPlaylistId={scopedPlaylistId}
+        scopeKey={normalizedScopeKey}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div
+        className="live-roster-grid grid grid-cols-1 lg:grid-cols-2 gap-x-5 gap-y-3.5"
+        style={{ '--live-roster-rows': rosterGridRows } as React.CSSProperties}
+      >
         {teams.map((players, team) => (
           <div
             key={team}
             data-testid={`team-${team === 0 ? 'blue' : 'orange'}`}
-            className="flex flex-col gap-3.5 min-w-0"
+            className="flex flex-col gap-3.5 min-w-0 lg:contents"
           >
-            {players.map((p) => (
-              <LivePlayerCard
-                key={p.player_id}
-                player={p}
-                isLocal={p.is_local || p.player_id === localId}
-                isTeammate={team === localTeam}
-                leaders={leaders}
-                columns={config}
-                sessionRecord={sessionRecord}
-                localPlayer={effectiveMatch.local_player}
-                opposingTeamPlayers={opposingTeam}
-                activePlaylistId={effectiveMatch.playlist_id}
-                playlistScope={normalizedScopeKey}
-                onInspectPlayer={handleInspectPlayer}
-              />
-            ))}
+            {players.map((p, slotIndex) => {
+              const rowStart = 1 + slotIndex * (bandsPerCard + 1);
+              return (
+                <LivePlayerCard
+                  key={p.player_id}
+                  player={p}
+                  isLocal={p.is_local || p.player_id === localId}
+                  isTeammate={team === localTeam}
+                  leaders={leaders}
+                  columns={config}
+                  sessionRecord={sessionRecord}
+                  localPlayer={effectiveMatch.local_player}
+                  opposingTeamPlayers={opposingTeam}
+                  activePlaylistId={effectiveMatch.playlist_id}
+                  playlistScope={normalizedScopeKey}
+                  scopedHistory={scopedHistories[p.player_id]}
+                  subgridPlacement={{
+                    col: team + 1,
+                    row: `${rowStart} / span ${bandsPerCard}`,
+                    fallbackRows: fallbackCardRows,
+                  }}
+                  onInspectPlayer={handleInspectPlayer}
+                />
+              );
+            })}
           </div>
         ))}
       </div>

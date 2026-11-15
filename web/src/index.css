@@ -270,7 +270,8 @@
 .t-top-blue { border-top: 3px solid var(--t-blue-slab); }
 .t-top-orange { border-top: 3px solid var(--t-orange-slab); }
 .t-left-blue { border-left: 3px solid var(--t-blue-slab); }
-.t-radius { border-radius: var(--t-radius); overflow: hidden; }
+.t-radius { border-radius: var(--t-radius); }
+.t-radius:not(.overflow-x-auto):not(.overflow-auto):not(.overflow-visible) { overflow: clip; }
 
 .slab-left,
 .slab-blue-clip {
@@ -343,6 +344,22 @@ dialog.broadcast-modal::backdrop {
     background-color: Highlight;
     color: HighlightText;
     border-color: Highlight;
+  }
+}
+
+/* Paired Blue/Orange Live Player Card Subgrid Alignment (Desktop 2-Column) */
+@media (min-width: 1024px) {
+  .live-roster-grid {
+    grid-template-rows: var(--live-roster-rows);
+    row-gap: 0;
+  }
+  .live-player-subgrid {
+    grid-column: var(--live-card-col);
+    grid-row: var(--live-card-row);
+    display: grid;
+    grid-template-rows: var(--live-card-fallback-rows);
+    grid-template-rows: subgrid;
+    row-gap: 0;
   }
 }
 

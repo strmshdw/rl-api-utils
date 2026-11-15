@@ -16,6 +16,7 @@ import {
 } from '../../utils/broadcast';
 import { RecordCells } from '../common/ui';
 import { useDashboard } from '../../context/DashboardContext';
+import type { ScopedLivePlayerHistory } from '../../hooks/useLiveLobbyHistories';
 
 export type StatKey = keyof PlayerStatsSummary;
 export type StatLeaders = Record<StatKey, number>;
@@ -31,6 +32,11 @@ export const STRIP_STATS: ReadonlyArray<{ key: StatKey; label: string }> = [
 
 const EMPTY_STATS: PlayerStatsSummary = { score: 0, goals: 0, assists: 0, saves: 0, shots: 0, demos: 0 };
 
+const HIST_GRID_COLS =
+  'grid grid-cols-[minmax(96px,1.95fr)_minmax(34px,0.9fr)_minmax(44px,1.2fr)_repeat(3,minmax(26px,0.82fr))_minmax(38px,1fr)_repeat(2,minmax(26px,0.82fr))] gap-x-1.5 min-w-[420px] px-3 py-1 items-center min-h-[28px]';
+
+const STAMP_PILL_BASE = 'inline-flex items-center leading-tight min-h-[22px] text-[11px] px-2 py-0.5';
+
 /** Lobby leader (value > 0) is white, other non-zero values ink-3, zeros faint. */
 export function statInk(value: number, leader: number): string {
   if (!value) return 'text-faint';
@@ -45,6 +51,12 @@ export function statLeaders(players: LobbyPlayer[]): StatLeaders {
   return leaders;
 }
 
+export interface LiveCardSubgridPlacement {
+  col: number;
+  row: string;
+  fallbackRows: string;
+}
+
 interface LivePlayerCardProps {
   player: LobbyPlayer;
   isLocal: boolean;
@@ -57,6 +69,8 @@ interface LivePlayerCardProps {
   opposingTeamPlayers?: LobbyPlayer[];
   activePlaylistId?: number;
   playlistScope?: string;
+  scopedHistory?: ScopedLivePlayerHistory;
+  subgridPlacement?: LiveCardSubgridPlacement;
   onInspectPlayer?: (playerId: string, playerName?: string) => void;
 }
 
@@ -70,7 +84,9 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
   localPlayer,
   opposingTeamPlayers = [],
   activePlaylistId = 11,
-  playlistScope = 'all',
+  playlistScope = '11',
+  scopedHistory,
+  subgridPlacement,
   onInspectPlayer,
 }) => {
   const { statMode, showLiveHistData, stampingConfig } = useDashboard();
@@ -100,17 +116,30 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
       (player.matchup_record?.playlist_id === scopedPlaylistId ? player.matchup_record : undefined)
     : player.matchup_record;
 
+  const tw = scopedHistory?.hasDateFilter
+    ? scopedHistory.teammateWins
+    : scopedMatchup?.wins_as_teammate ?? scopedHistory?.teammateWins ?? 0;
+  const tl = scopedHistory?.hasDateFilter
+    ? scopedHistory.teammateLosses
+    : scopedMatchup?.losses_as_teammate ?? scopedHistory?.teammateLosses ?? 0;
+  const ow = scopedHistory?.hasDateFilter
+    ? scopedHistory.opponentWins
+    : scopedMatchup?.wins_as_opponent ?? scopedHistory?.opponentWins ?? 0;
+  const ol = scopedHistory?.hasDateFilter
+    ? scopedHistory.opponentLosses
+    : scopedMatchup?.losses_as_opponent ?? scopedHistory?.opponentLosses ?? 0;
+
   let h2hLabel = 'VS YOU';
-  let wins = scopedMatchup?.wins_as_opponent ?? 0;
-  let losses = scopedMatchup?.losses_as_opponent ?? 0;
+  let wins = ow;
+  let losses = ol;
   if (isLocal) {
     h2hLabel = 'THIS SESSION';
     wins = sessionRecord.wins;
     losses = sessionRecord.losses;
   } else if (isTeammate) {
     h2hLabel = 'WITH YOU';
-    wins = scopedMatchup?.wins_as_teammate ?? 0;
-    losses = scopedMatchup?.losses_as_teammate ?? 0;
+    wins = tw;
+    losses = tl;
   }
   const recordColor = isLocal && wins + losses > 0 ? 'text-ink' : recordInk(wins, losses);
 
@@ -145,12 +174,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
     stampingConfig,
   );
 
-  // Build historical split rows without fabricated cross-playlist telemetry fallbacks
-  const tw = scopedMatchup?.wins_as_teammate ?? 0;
-  const tl = scopedMatchup?.losses_as_teammate ?? 0;
-  const ow = scopedMatchup?.wins_as_opponent ?? 0;
-  const ol = scopedMatchup?.losses_as_opponent ?? 0;
-
+  // Build historical split rows using scoped SQLite role telemetry first, falling back to active-mode inline stats
   const canUseLocalRoleStats =
     !nonNumericMismatch && (scopedPlaylistId === 0 || scopedPlaylistId === activePlaylistId);
 
@@ -161,7 +185,9 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         Boolean(scopedMatchup) &&
         scopedMatchup?.playlist_id === activePlaylistId));
 
-  const withStats: PlayerRoleStatsSummary = isLocal
+  const withStats: PlayerRoleStatsSummary = scopedHistory?.withYouStats
+    ? scopedHistory.withYouStats
+    : isLocal
     ? canUseLocalRoleStats && player.in_wins_stats
       ? player.in_wins_stats
       : emptyRoleStats(Math.max(0, sessionRecord.wins), sessionRecord.wins, 0)
@@ -169,13 +195,15 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
     ? player.with_you_stats
     : emptyRoleStats(tw + tl, tw, tl);
 
-  const againstStats: PlayerRoleStatsSummary = isLocal
+  const againstStats: PlayerRoleStatsSummary = scopedHistory?.againstYouStats
+    ? scopedHistory.againstYouStats
+    : isLocal
     ? canUseLocalRoleStats && player.in_losses_stats
       ? player.in_losses_stats
       : emptyRoleStats(Math.max(0, sessionRecord.losses), 0, sessionRecord.losses)
     : canUsePlayerRoleStats && player.against_you_stats
     ? player.against_you_stats
-    : emptyRoleStats(ow + ol, ow, ol);
+    : emptyRoleStats(ow + ol, ow + ol > 0 ? ow : 0, ow + ol > 0 ? ol : 0);
 
   const renderHistRow = (
     roleLabel: string,
@@ -186,10 +214,10 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
       return (
         <div
           key={roleLabel}
-          className="grid grid-cols-10 px-3 py-1 border-t border-line items-center text-xs t-font-mono opacity-45"
+          className={`${HIST_GRID_COLS} border-t border-line text-xs t-font-mono opacity-45`}
         >
-          <div className="col-span-2 font-bold t-text-muted uppercase whitespace-nowrap">{roleLabel}</div>
-          <div className="col-span-1 text-right t-text-faint">0G</div>
+          <div className="font-bold t-text-muted uppercase whitespace-nowrap">{roleLabel}</div>
+          <div className="text-right t-text-faint tabular-nums">0G</div>
           <div className="col-span-7 text-center text-xs t-font-display tracking-wider t-text-faint uppercase">
             — NO MATCHES IN SELECTED RANGE —
           </div>
@@ -200,12 +228,12 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
       return (
         <div
           key={roleLabel}
-          className="grid grid-cols-10 px-3 py-1 border-t border-line items-center text-xs t-font-mono opacity-70"
+          className={`${HIST_GRID_COLS} border-t border-line text-xs t-font-mono opacity-70`}
         >
-          <div className={`col-span-2 t-font-display font-bold text-xs uppercase tracking-wider whitespace-nowrap ${roleColor}`}>
+          <div className={`t-font-display font-bold text-xs uppercase tracking-wider whitespace-nowrap ${roleColor}`}>
             {roleLabel}
           </div>
-          <div className="col-span-1 text-right font-bold t-text-ink2">{s.games}G</div>
+          <div className="text-right font-bold t-text-ink2 tabular-nums">{s.games}G</div>
           <div className="col-span-7 text-center text-xs t-font-display tracking-wider t-text-faint">
             No synced role telemetry · —
           </div>
@@ -223,63 +251,69 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
     return (
       <div
         key={roleLabel}
-        className="grid grid-cols-10 px-3 py-1 border-t border-line items-center text-sm t-font-mono"
+        className={`${HIST_GRID_COLS} border-t border-line text-sm t-font-mono`}
       >
-        <div className={`col-span-2 t-font-display font-bold text-xs uppercase tracking-wider whitespace-nowrap ${roleColor}`}>
+        <div className={`t-font-display font-bold text-xs uppercase tracking-wider whitespace-nowrap ${roleColor}`}>
           {roleLabel}
         </div>
-        <div className="col-span-1 text-right font-bold t-text-ink2">{s.games}G</div>
-        <div className="col-span-1 text-right font-bold t-text-strong">{pts}</div>
-        <div className="col-span-1 text-right font-bold t-text-win">{g}</div>
-        <div className="col-span-1 text-right t-text-ink">{a}</div>
-        <div className="col-span-1 text-right t-text-ink">{sv}</div>
-        <div className="col-span-1 text-right t-text-ink2">{shPct}</div>
-        <div className="col-span-1 text-right t-text-orange">{dem}</div>
-        <div className="col-span-1 text-right t-text-muted">{bst}</div>
+        <div className="text-right font-bold t-text-ink2 tabular-nums">{s.games}G</div>
+        <div className="text-right font-bold t-text-strong tabular-nums">{pts}</div>
+        <div className="text-right font-bold t-text-win tabular-nums">{g}</div>
+        <div className="text-right t-text-ink tabular-nums">{a}</div>
+        <div className="text-right t-text-ink tabular-nums">{sv}</div>
+        <div className="text-right t-text-ink2 tabular-nums">{shPct}</div>
+        <div className="text-right t-text-orange tabular-nums">{dem}</div>
+        <div className="text-right t-text-muted tabular-nums">{bst}</div>
       </div>
     );
   };
 
-  const isAlly = player.team_num === 0;
+  const isBlueTeam = player.team_num === 0;
+  const subgridStyle = subgridPlacement
+    ? ({
+        '--live-card-col': String(subgridPlacement.col),
+        '--live-card-row': subgridPlacement.row,
+        '--live-card-fallback-rows': subgridPlacement.fallbackRows,
+      } as React.CSSProperties)
+    : undefined;
 
   return (
-    <div
+    <article
       data-testid="live-player-card"
       data-player-id={player.player_id}
+      style={subgridStyle}
       onClick={() => {
         if (onInspectPlayer && !player.is_bot) {
           onInspectPlayer(player.player_id, isLocal ? 'You' : player.name);
         }
       }}
-      className={`surface-plaque flex flex-col border font-display t-radius overflow-hidden transition-colors ${
-        isLocal
-          ? 'border-blue-ink border-outline'
-          : 'border-outline'
+      className={`live-player-subgrid surface-plaque flex flex-col border font-display t-radius overflow-hidden transition-colors min-w-0 ${
+        isLocal ? 'border-blue-ink border-outline' : 'border-outline'
       } ${player.is_disconnected ? 'opacity-60' : ''} ${
         onInspectPlayer && !player.is_bot ? 'cursor-pointer t-hover-panel' : ''
       }`}
     >
-      {/* Full-Bleed Team Monolith Header Slab */}
+      {/* Band 1: Full-Bleed Team Monolith Header Slab */}
       <div
-        className={`px-4 py-2.5 flex items-center justify-between gap-3 border-b border-line ${
-          isAlly ? 't-bg-blue-slab bg-blue-slab t-on-slab' : 't-bg-orange-slab bg-orange-slab text-white'
+        className={`px-4 py-2.5 flex items-center justify-between gap-3 border-b border-line min-w-0 ${
+          isBlueTeam ? 't-bg-blue-slab bg-blue-slab t-on-slab' : 't-bg-orange-slab bg-orange-slab text-white'
         }`}
       >
-        <div className="flex flex-col min-w-0">
+        <div className="flex flex-col min-w-0 flex-1">
           <span className="t-font-mono text-[10px] font-bold tracking-widest uppercase opacity-80">
-            {isAlly ? 'BLUE TEAM // PLAYER' : 'ORANGE TEAM // PLAYER'}
+            {isBlueTeam ? 'BLUE TEAM // PLAYER' : 'ORANGE TEAM // PLAYER'}
           </span>
-          <div className="flex items-baseline gap-2.5 flex-wrap">
+          <div className="flex items-baseline gap-2.5 flex-wrap min-w-0">
             <div
               title={player.name}
-              className="font-bold text-2xl sm:text-[26px] tracking-wider leading-none uppercase truncate"
+              className="font-bold text-2xl sm:text-[26px] tracking-wider leading-none uppercase max-w-full min-w-0 truncate"
             >
               {isLocal ? 'You' : player.name}
             </div>
             {meta.length > 0 && (
               <div
                 data-testid="player-meta"
-                className="t-font-mono font-bold text-[11px] tracking-wider uppercase opacity-85 truncate"
+                className="t-font-mono font-bold text-[11px] tracking-wider uppercase opacity-85 max-w-full min-w-0 truncate"
               >
                 {meta.map((m, i) => (
                   <React.Fragment key={i}>
@@ -305,20 +339,20 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         </div>
       </div>
 
-      {/* Sub-Header Seal & H2H Ledger Row */}
-      <div className="px-4 py-2 border-b border-line flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+      {/* Band 2: Sub-Header Seal & H2H Ledger Row */}
+      <div className="px-4 py-2 border-b border-line flex flex-wrap items-center content-center justify-between gap-x-3 gap-y-1.5 min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-[180px] flex-1">
           {isLocal && (
             <>
-              <span className="text-[11px] t-font-display font-bold px-2 py-0.5 cartouche-monolith uppercase tracking-wider">
+              <span className={`${STAMP_PILL_BASE} uppercase t-font-display font-bold cartouche-monolith tracking-wider`}>
                 ◆ YOU · ACTIVE SESSION
               </span>
-              <span className="text-[11px] t-font-mono font-bold px-2 py-0.5 cartouche-mono uppercase">
+              <span className={`${STAMP_PILL_BASE} uppercase t-font-mono font-bold cartouche-mono`}>
                 IN RANGE {wins}W–{losses}L
               </span>
               {sessionRecord.netMmr !== undefined && (
                 <span
-                  className={`text-[11px] t-font-mono font-extrabold px-2 py-0.5 uppercase ${
+                  className={`${STAMP_PILL_BASE} uppercase t-font-mono font-extrabold ${
                     sessionRecord.netMmr >= 0 ? 'cartouche-celadon text-win' : 'cartouche-gold text-loss'
                   }`}
                 >
@@ -328,7 +362,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
             </>
           )}
           {!isLocal && threatBadges.length === 0 && (!player.tags || player.tags.length === 0) && !player.notes && (
-            <span className="text-[11px] t-font-mono font-bold px-2 py-0.5 cartouche-mono uppercase">
+            <span className={`${STAMP_PILL_BASE} uppercase t-font-mono font-bold cartouche-mono`}>
               {isTeammate ? '◆ TEAMMATE' : '◆ OPPONENT'}
             </span>
           )}
@@ -337,7 +371,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
           {(threatBadges.length > 0 || (player.tags && player.tags.length > 0) || player.notes) && (
             <div
               data-testid="live-player-badges"
-              className="flex flex-wrap items-center gap-1.5"
+              className="flex flex-wrap items-center gap-1.5 min-w-0"
             >
               {threatBadges.map((b, idx) => {
                 const badgeStyle =
@@ -349,7 +383,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
                     key={`${b.type}-${idx}`}
                     data-testid={`badge-threat-${b.type}`}
                     title={b.title}
-                    className={`text-[11px] t-font-display px-2 py-0.5 uppercase tracking-wider ${badgeStyle}`}
+                    className={`${STAMP_PILL_BASE} t-font-display tracking-wider ${badgeStyle}`}
                   >
                     {b.label}
                   </span>
@@ -359,7 +393,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
                 <span
                   key={tag}
                   data-testid={`badge-tag-${tag}`}
-                  className="cartouche-mono text-[11px] font-bold px-2 py-0.5 tracking-wider uppercase"
+                  className={`${STAMP_PILL_BASE} uppercase cartouche-mono font-bold tracking-wider`}
                 >
                   {tag}
                 </span>
@@ -368,7 +402,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
                 <span
                   data-testid="badge-player-note"
                   title={player.notes}
-                  className="inline-flex items-center gap-1 text-[11px] font-bold cartouche-carry px-2 py-0.5 tracking-wider uppercase cursor-help"
+                  className={`${STAMP_PILL_BASE} uppercase gap-1 font-bold cartouche-carry tracking-wider cursor-help`}
                 >
                   <span>◆</span> NOTE
                 </span>
@@ -378,32 +412,34 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         </div>
 
         {columns.h2h && (
-          <div data-testid="player-h2h" className="flex items-center gap-2 shrink-0">
-            <span className="font-bold text-xs tracking-widest text-muted uppercase">{h2hLabel}</span>
+          <div data-testid="player-h2h" className="flex items-center gap-2 shrink-0 ml-auto">
+            <span className="font-bold text-xs tracking-widest text-muted uppercase whitespace-nowrap">{h2hLabel}</span>
             <RecordCells wins={wins} losses={losses} />
-            <span className={`font-extrabold text-lg leading-none t-font-mono ${recordColor}`}>
+            <span className={`font-extrabold text-lg leading-none t-font-mono tabular-nums whitespace-nowrap ${recordColor}`}>
               {formatRecord(wins, losses)}
             </span>
           </div>
         )}
       </div>
 
-      {/* Compact Architectural Live Match Scoreboard Strip */}
+      {/* Band 3: Compact Architectural Live Match Scoreboard Strip */}
       {strip.length > 0 && (
         <div
           data-testid="stat-strip"
-          className="grid divide-x divide-line border-b border-line"
+          className="grid divide-x divide-line border-b border-line min-w-0"
           style={{
             gridTemplateColumns: strip
-              .map((s) => (s.key === 'score' ? 'minmax(0,1.4fr)' : 'minmax(0,1fr)'))
+              .map((s) => (s.key === 'score' ? 'minmax(0,1.65fr)' : 'minmax(0,1fr)'))
               .join(' '),
           }}
         >
           {strip.map(({ key, label }) => (
-            <div key={key} data-stat={key} className="px-3 py-1.5 flex items-baseline justify-between gap-1 min-w-0">
-              <span className="font-bold text-[11px] tracking-widest text-muted uppercase">{label}</span>
+            <div key={key} data-stat={key} className="px-2.5 py-1.5 flex items-baseline justify-between gap-1 min-w-0">
+              <span className="font-bold text-[10px] sm:text-[11px] tracking-wider text-muted uppercase shrink-0">
+                {label}
+              </span>
               <span
-                className={`font-extrabold text-2xl leading-none t-font-mono ${statInk(
+                className={`font-extrabold text-xl xl:text-2xl leading-none t-font-mono tabular-nums truncate ${statInk(
                   stats[key] || 0,
                   leaders[key],
                 )}`}
@@ -415,22 +451,25 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         </div>
       )}
 
-      {/* Collapsible Shared-Header Historical Split Table */}
+      {/* Band 4: Collapsible Shared-Header Historical Split Table */}
       {showLiveHistData && (
         <div
           data-testid="live-player-hist-split"
-          className="live-hist-section surface-plaque overflow-hidden"
+          role="region"
+          aria-label={`Historical role split for ${isLocal ? 'You' : player.name}`}
+          tabIndex={0}
+          className="live-hist-section surface-plaque overflow-x-auto min-w-0"
         >
-          <div className="grid grid-cols-10 px-3 py-1 text-[11px] t-font-display font-bold uppercase tracking-wider t-text-muted">
-            <div className="col-span-2 whitespace-nowrap">HIST ({isAvg ? 'AVG/G' : 'TOTAL'})</div>
-            <div className="col-span-1 text-right">GMS</div>
-            <div className="col-span-1 text-right">PTS</div>
-            <div className="col-span-1 text-right">G</div>
-            <div className="col-span-1 text-right">A</div>
-            <div className="col-span-1 text-right">SV</div>
-            <div className="col-span-1 text-right">SH%</div>
-            <div className="col-span-1 text-right">DEM</div>
-            <div className="col-span-1 text-right">BST</div>
+          <div className={`${HIST_GRID_COLS} text-[11px] t-font-display font-bold uppercase tracking-wider t-text-muted`}>
+            <div className="whitespace-nowrap">HIST ({isAvg ? 'AVG/G' : 'TOTAL'})</div>
+            <div className="text-right">GMS</div>
+            <div className="text-right">PTS</div>
+            <div className="text-right">G</div>
+            <div className="text-right">A</div>
+            <div className="text-right">SV</div>
+            <div className="text-right">SH%</div>
+            <div className="text-right">DEM</div>
+            <div className="text-right">BST</div>
           </div>
           {isLocal ? (
             <>
@@ -445,6 +484,6 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
           )}
         </div>
       )}
-    </div>
+    </article>
   );
 };
