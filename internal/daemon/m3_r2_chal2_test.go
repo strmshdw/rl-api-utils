@@ -16,57 +16,24 @@ import (
 	"github.com/dank/rl-api-utils/internal/storage"
 )
 
-// TestChallenger2_SessionReset_AdversarialOrigins exercises POST /api/session/reset
-// against unauthorized external origins (asserting 403 Forbidden) and authorized origins (asserting 200 OK).
-func TestChallenger2_SessionReset_AdversarialOrigins(t *testing.T) {
+// TestChallenger2_SessionReset_UnrestrictedLANOrigins exercises POST /api/session/reset
+// across LAN, custom-domain, reverse-proxy, loopback, and empty origins (asserting 200 OK without 403 blocking).
+func TestChallenger2_SessionReset_UnrestrictedLANOrigins(t *testing.T) {
 	h := setupM3DaemonTest(t)
 
-	unauthorizedOrigins := []string{
-		"http://evil.com",
-		"https://attacker.example.org",
-		"http://evil.com:8080",
-		"https://attacker.example.org:443",
-		"http://localhost.evil.com",
-		"http://127.0.0.1.attacker.net",
-		"http://evil-localhost",
-		"http://127.0.0.1.nip.io",
-		"null",
-		"data:text/html",
-		"://malformed-origin",
-		"http://evil.com?localhost",
-		"http://evil.com#localhost",
-	}
-
-	for _, origin := range unauthorizedOrigins {
-		t.Run("Disallowed Origin: "+origin, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
-			req.Header.Set("Origin", origin)
-			rec := httptest.NewRecorder()
-			h.handler.ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("expected 403 Forbidden for unauthorized origin %q, got %d (body: %s)", origin, rec.Code, rec.Body.String())
-			}
-
-			var body map[string]string
-			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-				t.Fatalf("failed to decode JSON error body: %v", err)
-			}
-			if body["error"] != "forbidden: invalid origin" {
-				t.Fatalf("expected 'forbidden: invalid origin', got %q", body["error"])
-			}
-		})
-	}
-
-	authorizedOrigins := []string{
+	origins := []string{
 		"http://localhost:5173",
 		"http://127.0.0.1:5173",
 		"http://[::1]:5173",
 		"http://localhost:49125",
 		"http://127.0.0.1:49125",
+		"http://192.168.1.42:49125",
+		"http://10.0.0.15:8080",
+		"https://rl.strmshdw.io",
+		"http://rl-box.lan:49125",
 	}
 
-	for _, origin := range authorizedOrigins {
+	for _, origin := range origins {
 		t.Run("Allowed Origin: "+origin, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
 			req.Header.Set("Origin", origin)
@@ -74,7 +41,7 @@ func TestChallenger2_SessionReset_AdversarialOrigins(t *testing.T) {
 			h.handler.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusOK {
-				t.Fatalf("expected 200 OK for authorized origin %q, got %d (body: %s)", origin, rec.Code, rec.Body.String())
+				t.Fatalf("expected 200 OK for origin %q, got %d (body: %s)", origin, rec.Code, rec.Body.String())
 			}
 
 			var body map[string]string

@@ -267,26 +267,22 @@ func TestDaemon_HTTP_Phase2_PlayersMatchesSessionAndPrune(t *testing.T) {
 		t.Errorf("expected mmr_poller_state=idle, got %q", statusResp.MMRPollerState)
 	}
 
-	// 6. Verify POST /api/matches/prune CSRF check & pruning
-	recPruneForbidden := executeTestRequestWithOrigin(d, http.MethodPost, "/api/matches/prune", "https://evil.example.com", strings.NewReader(`{"count":1}`))
-	if recPruneForbidden.Code != http.StatusForbidden {
-		t.Errorf("expected 403 Forbidden for cross-origin POST /api/matches/prune, got %d", recPruneForbidden.Code)
-	}
-	recPruneOK := executeTestRequestWithOrigin(d, http.MethodPost, "/api/matches/prune", "http://127.0.0.1:49125", strings.NewReader(`{"count":1,"new_limit":10}`))
-	if recPruneOK.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK for valid POST /api/matches/prune, got %d: %s", recPruneOK.Code, recPruneOK.Body.String())
+	// 6. Verify POST /api/matches/prune works across LAN & loopback origins without 403 authz blocking
+	recPruneLAN := executeTestRequestWithOrigin(d, http.MethodPost, "/api/matches/prune", "http://192.168.1.50:49125", strings.NewReader(`{"count":1,"new_limit":10}`))
+	if recPruneLAN.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for LAN POST /api/matches/prune, got %d: %s", recPruneLAN.Code, recPruneLAN.Body.String())
 	}
 	var pruneResp map[string]interface{}
-	if err := json.Unmarshal(recPruneOK.Body.Bytes(), &pruneResp); err != nil {
+	if err := json.Unmarshal(recPruneLAN.Body.Bytes(), &pruneResp); err != nil {
 		t.Fatalf("unmarshal prune response failed: %v", err)
 	}
 	if int(pruneResp["pruned_count"].(float64)) != 1 || int(pruneResp["replay_count"].(float64)) != 1 || int(pruneResp["replay_limit"].(float64)) != 10 {
 		t.Errorf("unexpected prune response: %+v", pruneResp)
 	}
 
-	// 7. Verify POST /api/sync/ballchasing CSRF check
-	recSyncForbidden := executeTestRequestWithOrigin(d, http.MethodPost, "/api/sync/ballchasing", "https://evil.example.com", nil)
-	if recSyncForbidden.Code != http.StatusForbidden {
-		t.Errorf("expected 403 Forbidden for cross-origin POST /api/sync/ballchasing, got %d", recSyncForbidden.Code)
+	// 7. Verify POST /api/sync/ballchasing does not reject LAN/reverse-proxy origins with 403
+	recSyncLAN := executeTestRequestWithOrigin(d, http.MethodPost, "/api/sync/ballchasing", "https://rl.strmshdw.io", nil)
+	if recSyncLAN.Code == http.StatusForbidden {
+		t.Errorf("did not expect 403 Forbidden for LAN/proxy POST /api/sync/ballchasing")
 	}
 }

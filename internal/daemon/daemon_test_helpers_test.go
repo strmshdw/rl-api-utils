@@ -62,6 +62,7 @@ func (m *mockSyncer) setRunFunc(fn func(ctx context.Context) (*syncer.SyncStats,
 
 func makeTestConfig(interval time.Duration, once bool) *config.Config {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(interval)
 	cfg.Sync.Once = once
 	cfg.Logging.Level = "debug"

@@ -95,52 +95,30 @@ func TestHardening_MutatingMethods_LoopbackOriginCSRF(t *testing.T) {
 	handler := d.Handler(context.Background())
 
 	mutatingMethods := []string{http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete}
-	rejectedOrigins := []string{
-		"http://evil.com",
+	lanAndProxyOrigins := []string{
+		"http://192.168.1.50:49125",
 		"https://192.168.1.50:49125",
-		"http://localhost.attacker.test",
-		"null",
-		"data:text/html,<script>",
+		"https://rl.strmshdw.io",
+		"http://rl-box.lan:49125",
+		"http://localhost:5173",
+		"http://[::1]:3000",
+		"",
 	}
 
 	for _, method := range mutatingMethods {
-		for _, origin := range rejectedOrigins {
-			t.Run(method+" rejects "+origin, func(t *testing.T) {
+		for _, origin := range lanAndProxyOrigins {
+			t.Run(method+" never blocks "+origin, func(t *testing.T) {
 				req := httptest.NewRequest(method, "/api/session/reset", nil)
-				req.Header.Set("Origin", origin)
+				if origin != "" {
+					req.Header.Set("Origin", origin)
+				}
 				rec := httptest.NewRecorder()
 				handler.ServeHTTP(rec, req)
-				if rec.Code != http.StatusForbidden {
-					t.Fatalf("expected 403 Forbidden for %s Origin=%q, got %d (%s)", method, origin, rec.Code, rec.Body.String())
+				if rec.Code == http.StatusForbidden {
+					t.Fatalf("did not expect 403 Forbidden for %s Origin=%q (%s)", method, origin, rec.Body.String())
 				}
 			})
 		}
-
-		t.Run(method+" allows empty Origin past CSRF guard", func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/session/reset", nil)
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code == http.StatusForbidden {
-				t.Fatalf("did not expect 403 Forbidden for empty Origin on %s", method)
-			}
-		})
-	}
-
-	loopbackOrigins := []string{
-		"http://localhost:5173",
-		"https://127.0.0.1:49125",
-		"http://[::1]:3000",
-	}
-	for _, origin := range loopbackOrigins {
-		t.Run("POST allows loopback "+origin, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
-			req.Header.Set("Origin", origin)
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected 200 OK for loopback Origin %q, got %d", origin, rec.Code)
-			}
-		})
 	}
 }
 

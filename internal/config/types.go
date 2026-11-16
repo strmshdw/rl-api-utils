@@ -131,7 +131,7 @@ func (s *SessionConfig) UnmarshalJSON(b []byte) error {
 // WebConfig configures the embedded web dashboard and HTTP server.
 type WebConfig struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"` // default: true
-	Host    string `yaml:"host" json:"host"`       // default: "127.0.0.1"
+	Host    string `yaml:"host" json:"host"`       // default: "0.0.0.0"
 	Port    int    `yaml:"port" json:"port"`       // default: 49125
 }
 

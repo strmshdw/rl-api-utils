@@ -267,11 +267,6 @@ func (d *Daemon) handleGetPlayerMatches(w http.ResponseWriter, r *http.Request) 
 
 // handlePatchPlayer handles PATCH /players/{id...} and PATCH /api/players/{id...}.
 func (d *Daemon) handlePatchPlayer(w http.ResponseWriter, r *http.Request) {
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
-		return
-	}
-
 	rawID := r.PathValue("id")
 	if rawID == "" {
 		rawID = strings.TrimPrefix(r.URL.Path, "/api/players/")

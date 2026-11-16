@@ -48,12 +48,12 @@ func hasPathTraversal(r *http.Request) bool {
 			return true
 		}
 	}
-	reqURI := r.RequestURI
-	if strings.Contains(reqURI, "..") || strings.HasPrefix(reqURI, "//") {
+	reqPath, _, _ := strings.Cut(r.RequestURI, "?")
+	if strings.Contains(reqPath, "..") || strings.HasPrefix(reqPath, "//") {
 		return true
 	}
-	lowerURI := strings.ToLower(reqURI)
-	if strings.Contains(lowerURI, "%2e") || strings.Contains(lowerURI, "%5c") {
+	lowerPath := strings.ToLower(reqPath)
+	if strings.Contains(lowerPath, "%2e") || strings.Contains(lowerPath, "%5c") {
 		return true
 	}
 	cleaned := path.Clean(r.URL.Path)

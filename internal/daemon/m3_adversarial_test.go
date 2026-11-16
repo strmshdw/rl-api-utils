@@ -237,15 +237,15 @@ func TestM3_Adversarial_RetryMatch_EdgeCases(t *testing.T) {
 		}
 	})
 
-	// 2. CSRF Attack with hostile Origin
-	t.Run("CSRFBlocked", func(t *testing.T) {
+	// 2. LAN & Reverse-Proxy Origin succeeds without 403 authz blocking
+	t.Run("LANAndProxyOriginAllowed", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/matches/"+existingGUID+"/retry", nil)
-		req.Header.Set("Origin", "https://malicious-website.com")
+		req.Header.Set("Origin", "https://rl.strmshdw.io")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusForbidden {
-			t.Errorf("expected 403 Forbidden for CSRF Origin, got %d: %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 OK for LAN/proxy Origin, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 
