@@ -283,11 +283,6 @@ func (d *Daemon) handlePruneMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
-		return
-	}
-
 	var payload struct {
 		Count       int `json:"count"`
 		ReplayLimit int `json:"replay_limit"`
@@ -344,11 +339,6 @@ func (d *Daemon) handlePruneMatches(w http.ResponseWriter, r *http.Request) {
 
 // handleRetryMatch handles POST /api/matches/{guid}/retry.
 func (d *Daemon) handleRetryMatch(w http.ResponseWriter, r *http.Request) {
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
-		return
-	}
-
 	rawGUID := r.PathValue("guid")
 	if rawGUID == "" {
 		p := strings.TrimPrefix(r.URL.Path, "/api/matches/")

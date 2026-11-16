@@ -46,8 +46,8 @@ func TestConfig_Defaults(t *testing.T) {
 	if !cfg.Web.Enabled {
 		t.Errorf("expected default web enabled true")
 	}
-	if cfg.Web.Host != "127.0.0.1" {
-		t.Errorf("expected default web host '127.0.0.1', got %q", cfg.Web.Host)
+	if cfg.Web.Host != "0.0.0.0" {
+		t.Errorf("expected default web host '0.0.0.0', got %q", cfg.Web.Host)
 	}
 	if cfg.Web.Port != 49125 {
 		t.Errorf("expected default web port 49125, got %d", cfg.Web.Port)

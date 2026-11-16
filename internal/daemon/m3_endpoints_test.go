@@ -106,14 +106,22 @@ func TestM3_Daemon_RetryMatch_Endpoint(t *testing.T) {
 		}
 	})
 
-	t.Run("DisallowedOrigin_CSRF_Rejected", func(t *testing.T) {
+	t.Run("LANAndProxyOrigin_Accepted", func(t *testing.T) {
+		_ = h.store.UpsertDiscoveredMatches(h.ctx, []*storage.MatchRecord{
+			{
+				MatchGUID:      matchGUID,
+				DownloadStatus: storage.DownloadFailed,
+				UploadStatus:   storage.UploadFailed,
+				RetryCount:     1,
+			},
+		})
 		req := httptest.NewRequest(http.MethodPost, "/api/matches/"+matchGUID+"/retry", nil)
-		req.Header.Set("Origin", "http://malicious-website.com")
+		req.Header.Set("Origin", "http://192.168.1.50:49125")
 		rec := httptest.NewRecorder()
 
 		h.handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("expected 403 Forbidden for disallowed origin, got %d", rec.Code)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for LAN origin, got %d", rec.Code)
 		}
 	})
 
@@ -342,13 +350,13 @@ func TestM3_Daemon_MMRHistory_And_SyncSecurity(t *testing.T) {
 			t.Fatalf("expected 405 for GET /sync, got %d", getRec.Code)
 		}
 
-		// 2. POST /sync with disallowed origin should return 403 Forbidden
-		badPost := httptest.NewRequest(http.MethodPost, "/sync", nil)
-		badPost.Header.Set("Origin", "http://untrusted-site.com")
-		badRec := httptest.NewRecorder()
-		h.handler.ServeHTTP(badRec, badPost)
-		if badRec.Code != http.StatusForbidden {
-			t.Fatalf("expected 403 for POST /sync with bad origin, got %d", badRec.Code)
+		// 2. POST /sync with LAN or reverse-proxy origin returns 200 OK
+		lanPost := httptest.NewRequest(http.MethodPost, "/sync", nil)
+		lanPost.Header.Set("Origin", "http://192.168.1.50:49125")
+		lanRec := httptest.NewRecorder()
+		h.handler.ServeHTTP(lanRec, lanPost)
+		if lanRec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for POST /sync with LAN origin, got %d", lanRec.Code)
 		}
 
 		// 3. POST /sync with allowed origin should return 200 OK

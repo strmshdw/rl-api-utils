@@ -278,6 +278,11 @@ func (d *Daemon) Start(ctx context.Context) error {
 		slog.Bool("force_sync_on_trigger", d.cfg.StatsAPI.ForceSyncOnTrigger),
 	)
 
+	if !d.cfg.Sync.Once {
+		d.startStatsListener(ctx)
+		d.startHTTPServer(ctx)
+	}
+
 	if err := d.executeCycle(ctx); err != nil {
 		if d.cfg.Sync.Once {
 			d.logger.Error("single-run mode sync cycle failed", slog.Any("error", err))
@@ -285,6 +290,16 @@ func (d *Daemon) Start(ctx context.Context) error {
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			d.logger.Info("daemon stopped during initial cycle", slog.Any("reason", err))
+			if d.statsListener != nil {
+				d.statsListener.Stop()
+			}
+			if d.statsTracker != nil {
+				d.statsTracker.Close()
+			}
+			if d.sessionTracker != nil && d.sessionTracker.Broadcaster() != nil {
+				d.sessionTracker.Broadcaster().Close()
+			}
+			d.wg.Wait()
 			return nil
 		}
 		d.logger.Error("initial sync cycle failed; continuing to ticker schedule", slog.Any("error", err))
@@ -294,9 +309,6 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.logger.Info("single-run mode completed successfully")
 		return nil
 	}
-
-	d.startStatsListener(ctx)
-	d.startHTTPServer(ctx)
 
 	return d.runEventLoop(ctx, pollInterval)
 }
@@ -338,7 +350,7 @@ func (d *Daemon) httpHost() string {
 	if d.cfg.Web.Host != "" {
 		return d.cfg.Web.Host
 	}
-	return "127.0.0.1"
+	return "0.0.0.0"
 }
 
 func (d *Daemon) httpPort() int {

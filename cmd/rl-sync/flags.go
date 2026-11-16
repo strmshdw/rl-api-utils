@@ -70,7 +70,7 @@ func parseCLIFlags(args []string, stdout, stderr io.Writer) (*cliOptions, int, b
 	fs.DurationVar(&sessionContinueWindow, "session-continue-window", 0, "Maximum time since last match to allow continuing a previous play session (default 2h, 0s to disable)")
 	fs.BoolVar(&pollingAuthEnabled, "polling-auth", false, "Enable secondary account authentication for rank retrieval")
 	fs.StringVar(&pollingAuthProvider, "polling-provider", "", "Authentication provider for secondary account ('epic' or 'steam')")
-	fs.StringVar(&webHost, "web-host", "", "HTTP host binding for web dashboard (default '127.0.0.1')")
+	fs.StringVar(&webHost, "web-host", "", "HTTP host binding for web dashboard (default '0.0.0.0')")
 	fs.IntVar(&webPort, "web-port", 0, "HTTP port binding for web dashboard (default 49125)")
 	fs.BoolVar(&webEnabled, "web-enabled", true, "Enable embedded web dashboard and API server")
 	fs.BoolVar(&syncBallchasingHistory, "sync-ballchasing-history", false, "Synchronize all historical replays and player stats from Ballchasing.com and exit")

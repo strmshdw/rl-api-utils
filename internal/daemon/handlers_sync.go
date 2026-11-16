@@ -16,10 +16,6 @@ func (d *Daemon) handleSync(ctx context.Context) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !d.isAllowedMutatingOrigin(r) {
-			writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
-			return
-		}
 		d.logger.Info("received manual trigger request via local HTTP endpoint", slog.String("remote", r.RemoteAddr))
 		if err := d.TriggerSync(ctx, "manual_http_request"); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
@@ -33,11 +29,6 @@ func (d *Daemon) handleSync(ctx context.Context) http.HandlerFunc {
 
 // handleTriggerBallchasingSync handles POST /api/sync/ballchasing.
 func (d *Daemon) handleTriggerBallchasingSync(w http.ResponseWriter, r *http.Request) {
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
-		return
-	}
-
 	if d.historySyncer == nil {
 		writeJSONError(w, http.StatusBadRequest, "ballchasing historical syncer not configured")
 		return
@@ -170,11 +161,6 @@ func (d *Daemon) handleUpdateSyncConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
-		return
-	}
-
 	var payload struct {
 		TriggerThreshold   *int  `json:"trigger_threshold"`
 		ForceSyncOnTrigger *bool `json:"force_sync_on_trigger"`
@@ -243,11 +229,6 @@ func (d *Daemon) handleManualSyncNow(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 

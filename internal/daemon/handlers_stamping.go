@@ -29,11 +29,6 @@ func (d *Daemon) handleUpdateStampingConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
-		return
-	}
-
 	var patch config.StampingConfigPatch
 	if !decodeJSONBody(w, r, &patch, true) {
 		return
@@ -72,11 +67,6 @@ func (d *Daemon) handleResetStampingConfig(w http.ResponseWriter, r *http.Reques
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 

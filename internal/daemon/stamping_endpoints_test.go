@@ -83,13 +83,13 @@ func TestStampingConfigEndpointsAndLiveScoutingPatch(t *testing.T) {
 		t.Fatalf("GET /api/stamping/config = %+v, want defaults", gotCfg)
 	}
 
-	// 2. Reject cross-origin mutation (403)
-	badReq := httptest.NewRequest(http.MethodPatch, "/api/stamping/config", bytes.NewReader([]byte(`{"carry_mmr_diff":150}`)))
-	badReq.Header.Set("Origin", "https://evil.example.com")
-	badRec := httptest.NewRecorder()
-	d.Handler(ctx).ServeHTTP(badRec, badReq)
-	if badRec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for cross-origin PATCH /api/stamping/config, got %d", badRec.Code)
+	// 2. Allow LAN, custom domain, and reverse-proxy Origin headers without 403 authz blocking
+	lanReq := httptest.NewRequest(http.MethodPatch, "/api/stamping/config", bytes.NewReader([]byte(`{"carry_mmr_diff":150}`)))
+	lanReq.Header.Set("Origin", "https://rl.strmshdw.io")
+	lanRec := httptest.NewRecorder()
+	d.Handler(ctx).ServeHTTP(lanRec, lanReq)
+	if lanRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for LAN/reverse-proxy PATCH /api/stamping/config, got %d: %s", lanRec.Code, lanRec.Body.String())
 	}
 
 	// 3. PATCH /api/stamping/config updates runtime & persists to config.yaml
@@ -273,22 +273,21 @@ func TestNonLoopbackWebHost_AllowsSameOriginLANAndHostname_BlocksCSRFAndDNSRebin
 		}
 	}
 
-	// 5. Cross-origin CSRF and DNS-rebinding attacks still return 403 Forbidden
-	blocked := []struct {
+	// 5. Custom domains, reverse proxies with mismatched Host/Origin, and neighbor LAN devices all succeed (zero 403 authz blocking)
+	lanAndProxyCases := []struct {
 		name   string
 		host   string
 		origin string
 	}{
-		{"cross-origin external site", "192.168.1.42:49125", "https://evil.example"},
-		{"cross-origin neighbor LAN IP", "192.168.1.42:49125", "http://192.168.1.250:49125"},
-		{"null sandboxed origin", "192.168.1.42:49125", "null"},
-		{"DNS rebinding public domain", "rebind.attacker.example:49125", "http://rebind.attacker.example:49125"},
-		{"DNS rebinding subdomain spoof", "my-pc.attacker.example:49125", "http://my-pc.attacker.example:49125"},
+		{"custom local domain over HTTPS proxy", "192.168.1.42:49125", "https://rl.strmshdw.io"},
+		{"neighbor LAN device or secondary port", "192.168.1.42:49125", "http://192.168.1.250:3000"},
+		{"split-horizon DNS custom TLD", "rl.homelab.dev:49125", "http://rl.homelab.dev:49125"},
+		{"reverse proxy without X-Forwarded-Host", "127.0.0.1:49125", "https://dashboard.myhome.org"},
 	}
-	for _, tc := range blocked {
+	for _, tc := range lanAndProxyCases {
 		rec := sendReq(http.MethodPatch, "/api/stamping/config", tc.host, tc.origin, `{"carry_mmr_diff":200}`)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("%s: expected 403 Forbidden for Host=%q Origin=%q, got %d: %s", tc.name, tc.host, tc.origin, rec.Code, rec.Body.String())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200 OK for Host=%q Origin=%q, got %d: %s", tc.name, tc.host, tc.origin, rec.Code, rec.Body.String())
 		}
 	}
 }

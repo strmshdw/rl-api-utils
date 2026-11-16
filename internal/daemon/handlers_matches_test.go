@@ -327,7 +327,7 @@ func TestDaemon_GetMatch_LocalRelativeOutcome(t *testing.T) {
 
 // TestDaemon_SessionReset_CSRFOriginValidation verifies that POST /api/session/reset
 // blocks unauthorized external origins and permits allowed local origins.
-func TestDaemon_SessionReset_CSRFOriginValidation(t *testing.T) {
+func TestDaemon_SessionReset_UnrestrictedLANOrigins(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{}
 	d, err := New(&dummySyncer{}, cfg)
@@ -336,22 +336,14 @@ func TestDaemon_SessionReset_CSRFOriginValidation(t *testing.T) {
 	}
 	handler := d.Handler(ctx)
 
-	// Disallowed origin should return 403 Forbidden
-	reqDisallowed := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
-	reqDisallowed.Header.Set("Origin", "http://evil-attacker.com")
-	recDisallowed := httptest.NewRecorder()
-	handler.ServeHTTP(recDisallowed, reqDisallowed)
-	if recDisallowed.Code != http.StatusForbidden {
-		t.Errorf("expected 403 Forbidden for disallowed Origin on session reset, got %d", recDisallowed.Code)
-	}
-
-	// Allowed origin should return 200 OK
-	reqAllowed := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
-	reqAllowed.Header.Set("Origin", "http://localhost:5173")
-	recAllowed := httptest.NewRecorder()
-	handler.ServeHTTP(recAllowed, reqAllowed)
-	if recAllowed.Code != http.StatusOK {
-		t.Errorf("expected 200 OK for allowed Origin on session reset, got %d", recAllowed.Code)
+	for _, origin := range []string{"http://192.168.1.50:49125", "https://rl.strmshdw.io", "http://localhost:5173"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 OK for Origin %q on session reset, got %d", origin, rec.Code)
+		}
 	}
 }
 

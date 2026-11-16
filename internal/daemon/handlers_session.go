@@ -72,11 +72,6 @@ func (d *Daemon) handleResetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
-		return
-	}
-
 	if d.sessionTracker != nil {
 		d.sessionTracker.Reset()
 	}
@@ -93,11 +88,6 @@ func (d *Daemon) handleContinueSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 
@@ -134,11 +124,6 @@ func (d *Daemon) handleDismissContinueSession(w http.ResponseWriter, r *http.Req
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if !d.isAllowedMutatingOrigin(r) {
-		writeJSONError(w, http.StatusForbidden, "forbidden: invalid origin")
 		return
 	}
 

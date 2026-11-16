@@ -18,7 +18,7 @@ func (d *Daemon) Handler(ctx context.Context) http.Handler {
 		d.ctx = ctx
 	}
 	d.mu.Unlock()
-	return corsMiddleware(d.setupRoutes(ctx), d.isAllowedMutatingOrigin)
+	return corsMiddleware(d.setupRoutes(ctx))
 }
 
 func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {

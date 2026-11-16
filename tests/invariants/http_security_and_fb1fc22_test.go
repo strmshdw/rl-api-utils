@@ -85,9 +85,9 @@ func newInvariantSecurityDaemon(t *testing.T, store storage.StateStore, logger *
 	return d
 }
 
-func TestInvariant_LoopbackOriginCSRFProtection(t *testing.T) {
+func TestInvariant_UnrestrictedLANAndLoopbackAccess(t *testing.T) {
 	ctx := context.Background()
-	store, err := storage.NewSQLiteStore(filepath.Join(t.TempDir(), "inv_csrf.db"))
+	store, err := storage.NewSQLiteStore(filepath.Join(t.TempDir(), "inv_lan.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
@@ -95,35 +95,20 @@ func TestInvariant_LoopbackOriginCSRFProtection(t *testing.T) {
 
 	handler := newInvariantSecurityDaemon(t, store, nil).Handler(ctx)
 
-	mutatingMethods := []string{http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete}
-	for _, method := range mutatingMethods {
-		t.Run("RejectEvilOrigin_"+method, func(t *testing.T) {
-			path := "/api/session/reset"
-			if method == http.MethodPatch {
-				path = "/api/players/Steam|1|0"
-			}
-			req := httptest.NewRequest(method, path, strings.NewReader(`{}`))
-			req.Header.Set("Origin", "https://evil.example")
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("%s with evil Origin got %d, want 403 Forbidden (%s)", method, rec.Code, rec.Body.String())
-			}
-		})
-	}
-
-	allowedOrigins := []string{
+	origins := []string{
 		"",
 		"http://127.0.0.1:49125",
 		"http://localhost:5173",
 		"http://[::1]:5173",
+		"http://192.168.1.50:49125",
+		"https://rl.strmshdw.io",
 	}
-	for _, origin := range allowedOrigins {
+	for _, origin := range origins {
 		name := origin
 		if name == "" {
 			name = "empty"
 		}
-		t.Run("AllowLoopbackOrEmpty_"+name, func(t *testing.T) {
+		t.Run("AllowAnyLANOrProxyOrigin_"+name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/session/reset", nil)
 			if origin != "" {
 				req.Header.Set("Origin", origin)
@@ -131,7 +116,7 @@ func TestInvariant_LoopbackOriginCSRFProtection(t *testing.T) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			if rec.Code == http.StatusForbidden {
-				t.Fatalf("loopback/empty Origin %q unexpectedly rejected with 403", origin)
+				t.Fatalf("Origin %q unexpectedly rejected with 403", origin)
 			}
 			if rec.Code != http.StatusOK {
 				t.Fatalf("POST /api/session/reset with Origin %q got %d, want 200", origin, rec.Code)
