@@ -19,9 +19,18 @@ import (
 type redirectPsyNetTransport struct {
 	targetURL string
 	base      http.RoundTripper
+	onEnter   func()
+	wg        *sync.WaitGroup
 }
 
 func (t *redirectPsyNetTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.wg != nil {
+		t.wg.Add(1)
+		defer t.wg.Done()
+	}
+	if t.onEnter != nil {
+		t.onEnter()
+	}
 	if strings.Contains(req.URL.Host, "psynet.gg") {
 		target, _ := url.Parse(t.targetURL)
 		req.URL.Scheme = target.Scheme

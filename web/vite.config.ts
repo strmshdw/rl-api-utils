@@ -50,6 +50,12 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true,
       environment: 'node',
+      poolOptions: process.allowedNodeEnvironmentFlags?.has('--no-experimental-webstorage')
+        ? {
+            threads: { execArgv: ['--no-experimental-webstorage'] },
+            forks: { execArgv: ['--no-experimental-webstorage'] },
+          }
+        : undefined,
     },
   };
 });
