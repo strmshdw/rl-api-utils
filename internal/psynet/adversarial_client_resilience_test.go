@@ -176,20 +176,35 @@ func TestClient_RequestTimeout_BoundsHangingRPCAndAuth(t *testing.T) {
 	})
 
 	t.Run("ShortRequestTimeoutAbortsHangingAuthPlayer", func(t *testing.T) {
+		releaseHandler := make(chan struct{})
 		hangingAuth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-r.Context().Done():
+			case <-releaseHandler:
 			case <-time.After(3 * time.Second):
 			}
+			w.WriteHeader(http.StatusServiceUnavailable)
 		}))
-		defer hangingAuth.Close()
+
+		entered := make(chan struct{})
+		var enterOnce sync.Once
+		var transportWG sync.WaitGroup
 
 		origTransport := http.DefaultTransport
 		http.DefaultTransport = &redirectPsyNetTransport{
 			targetURL: hangingAuth.URL,
 			base:      origTransport,
+			onEnter:   func() { enterOnce.Do(func() { close(entered) }) },
+			wg:        &transportWG,
 		}
-		defer func() { http.DefaultTransport = origTransport }()
+		defer func() {
+			<-entered
+			close(releaseHandler)
+			hangingAuth.CloseClientConnections()
+			hangingAuth.Close()
+			transportWG.Wait()
+			http.DefaultTransport = origTransport
+		}()
 
 		c, err := NewClient(ClientConfig{
 			RequestTimeout: 40 * time.Millisecond,
