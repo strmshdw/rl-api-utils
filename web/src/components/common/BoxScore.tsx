@@ -189,24 +189,26 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
               {p.mvp && <MvpChip />}
             </span>
             {withRanks && (
-              <span className="text-right t-font-mono font-bold text-base text-ink-2">
+              <span className={`text-right t-font-mono font-bold text-base ${p.mmr ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>
                 {formatMmr(p.mmr)}
               </span>
             )}
             {withRanks && (
               <span
                 title={formattedRank}
-                className="pl-1 font-bold text-sm tracking-wider text-muted uppercase whitespace-nowrap overflow-hidden text-ellipsis"
+                className={`pl-1 font-bold text-sm tracking-wider uppercase whitespace-nowrap overflow-hidden text-ellipsis ${
+                  formattedRank && formattedRank !== '—' ? STAT_LABEL_CLASS.rank : 'text-faint'
+                }`}
               >
                 {formattedRank}
               </span>
             )}
-            <span className="text-right t-font-mono font-bold text-ink">{p.score}</span>
-            <span className={`text-right t-font-mono ${zeroInk(p.goals, 'text-win font-extrabold')}`}>{p.goals}</span>
-            <span className={`text-right t-font-mono ${zeroInk(p.assists)}`}>{p.assists}</span>
-            <span className={`text-right t-font-mono ${zeroInk(p.saves)}`}>{p.saves}</span>
-            <span className="text-right t-font-mono text-ink-3">{p.shots}</span>
-            <span className={`text-right t-font-mono ${zeroInk(p.demos, 'text-orange-ink font-extrabold')}`}>
+            <span className={`text-right t-font-mono font-bold ${STAT_LABEL_CLASS.score}`}>{p.score}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.goals, `${STAT_LABEL_CLASS.goals} font-extrabold`)}`}>{p.goals}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.assists, STAT_LABEL_CLASS.assists)}`}>{p.assists}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.saves, STAT_LABEL_CLASS.saves)}`}>{p.saves}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.shots, STAT_LABEL_CLASS.shots)}`}>{p.shots}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.demos, `${STAT_LABEL_CLASS.demos} font-extrabold`)}`}>
               {p.demos}
             </span>
             {withH2H && (

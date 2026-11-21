@@ -419,7 +419,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                           wins={m.wins_as_opponent}
                           losses={m.losses_as_opponent}
                         />
-                        <span className="text-right font-bold text-xl t-font-mono">
+                        <span className={`text-right font-bold text-xl t-font-mono ${STAT_LABEL_CLASS.games}`}>
                           {m.total_matches}
                         </span>
                         <span className="text-right font-semibold text-sm tracking-t8 text-muted">

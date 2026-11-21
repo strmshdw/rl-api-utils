@@ -196,8 +196,6 @@ export const SessionForAgainstTable: React.FC<{
   const renderSplitRow = (
     rowLabel: string,
     labelColor: string,
-    goalsColor: string,
-    tailColor: string,
     s: PlayerRoleStatsSummary,
     borderBottom: boolean
   ) => {
@@ -211,7 +209,7 @@ export const SessionForAgainstTable: React.FC<{
         <div className={`col-span-2 t-font-display font-extrabold text-sm uppercase tracking-wider leading-tight break-words ${labelColor}`}>
           {rowLabel}
         </div>
-        <div className="col-span-1 text-right font-bold t-text-ink2">{s.games}G</div>
+        <div className={`col-span-1 text-right font-bold ${STAT_LABEL_CLASS.games}`}>{s.games}G</div>
         {!synced ? (
           <div className="col-span-9 flex items-center justify-between gap-2 pl-4 text-xs t-font-display t-text-faint">
             <span>{games === 0 ? 'No matches recorded yet' : 'No synced role telemetry'}</span>
@@ -219,31 +217,31 @@ export const SessionForAgainstTable: React.FC<{
           </div>
         ) : (
           <>
-            <div className="col-span-1 text-right font-bold t-text-strong">
+            <div className={`col-span-1 text-right font-bold ${STAT_LABEL_CLASS.score}`}>
               {fmtVal(synced, s.avg_score, s.total_score, 0)}
             </div>
-            <div className={`col-span-1 text-right font-bold ${goalsColor}`}>
+            <div className={`col-span-1 text-right font-bold ${STAT_LABEL_CLASS.goals}`}>
               {fmtVal(synced, s.avg_goals, s.total_goals, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink">
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.assists}`}>
               {fmtVal(synced, s.avg_assists, s.total_assists, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink">
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.saves}`}>
               {fmtVal(synced, s.avg_saves, s.total_saves, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink2">
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.shotpct}`}>
               {`${Math.round(s.shooting_pct)}%`}
             </div>
-            <div className="col-span-1 text-right font-bold t-text-orange">
+            <div className={`col-span-1 text-right font-bold ${STAT_LABEL_CLASS.demos}`}>
               {fmtVal(synced, s.avg_demos_inflicted, s.total_demos_inflicted, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink2">
+            <div className={`col-span-1 text-right ${s.avg_bpm > 0 ? STAT_LABEL_CLASS.bpm : 'text-faint'}`}>
               {s.avg_bpm > 0 ? Math.round(s.avg_bpm) : '—'}
             </div>
-            <div className="col-span-1 text-right t-text-muted">
+            <div className={`col-span-1 text-right ${s.avg_boost > 0 ? STAT_LABEL_CLASS.boost : 'text-faint'}`}>
               {s.avg_boost > 0 ? Math.round(s.avg_boost) : '—'}
             </div>
-            <div className={`col-span-1 text-right ${tailColor}`}>
+            <div className={`col-span-1 text-right ${s.avg_supersonic_pct > 0 ? STAT_LABEL_CLASS.speed : 'text-faint'}`}>
               {s.avg_supersonic_pct > 0 ? `${s.avg_supersonic_pct.toFixed(1)}%` : '—'}
             </div>
           </>
@@ -290,8 +288,8 @@ export const SessionForAgainstTable: React.FC<{
             <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.speed}`}>SUPER %</div>
           </div>
 
-          {renderSplitRow('YOUR STATS (FOR)', 't-text-blue', 't-text-win', 't-text-blue', forStats, true)}
-          {renderSplitRow('OPPONENTS (AGAINST)', 't-text-orange', 't-text-loss', 't-text-orange', againstStats, false)}
+          {renderSplitRow('YOUR STATS (FOR)', 't-text-blue', forStats, true)}
+          {renderSplitRow('OPPONENTS (AGAINST)', 't-text-orange', againstStats, false)}
         </div>
       </div>
     </div>

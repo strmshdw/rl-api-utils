@@ -108,11 +108,11 @@ const DirectoryRow: React.FC<DirectoryRowProps> = ({
         {platformLabel(player.platform || player.player_id)}
       </td>
 
-      <td className="px-3 py-2.5 align-middle text-right font-extrabold text-base t-text-blue text-blue-ink t-font-mono whitespace-nowrap">
+      <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${rank?.mmr ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>
         {formatMmr(rank?.mmr)}
       </td>
 
-      <td className="px-3 py-2.5 align-middle font-extrabold text-sm text-ink-2 uppercase whitespace-nowrap t-font-mono">
+      <td className={`px-3 py-2.5 align-middle font-extrabold text-sm uppercase whitespace-nowrap t-font-mono ${rank ? STAT_LABEL_CLASS.rank : 'text-faint'}`}>
         {rank ? shortRank(rank.rank_name || 'UNRANKED', rank.division, rank.short_rank, rank.tier) : '—'}
         {rank?.rank_name && <span className="sr-only"> {rank.rank_name}</span>}
       </td>
@@ -159,15 +159,15 @@ const DirectoryRow: React.FC<DirectoryRowProps> = ({
         </div>
       </td>
 
-      <td className="px-3 py-2.5 align-middle text-right font-extrabold text-base text-ink-strong t-font-mono whitespace-nowrap">
+      <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${STAT_LABEL_CLASS.games}`}>
         {player.total_matches}
       </td>
 
-      <td className="px-3 py-2.5 align-middle text-right font-extrabold text-base text-win t-font-mono whitespace-nowrap">
+      <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${withPtsVal !== '—' ? STAT_LABEL_CLASS.score : 'text-faint'}`}>
         {withPtsVal}
       </td>
 
-      <td className="px-3 py-2.5 align-middle text-right font-extrabold text-base text-orange-ink t-font-mono whitespace-nowrap">
+      <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${vsPtsVal !== '—' ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>
         {vsPtsVal}
       </td>
 

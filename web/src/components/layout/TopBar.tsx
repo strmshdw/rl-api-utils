@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { DashboardTab, SessionResponse } from '../../types/api';
 import {
   deltaInk,
@@ -11,6 +11,7 @@ import {
   playlistLabels,
 } from '../../utils/broadcast';
 import { isDemoMode } from '../../utils/sampleData';
+import { useBallchasingSync } from '../../hooks/useBallchasingSync';
 import { StatusDot } from '../common/ui';
 import { useDashboard } from '../../context/DashboardContext';
 import { ReplayLimitBanner } from './ReplayLimitBanner';
@@ -53,12 +54,74 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const {
     areaFilters,
+    replayLimitPreview,
+    setReplayLimitPreview,
     isDevBuild,
     appVersion,
     previewMode,
   } = useDashboard();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [clearedPendingSnapshot, setClearedPendingSnapshot] = useState<{
+    sessionId: string | undefined;
+    count: number;
+    preview: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (
+      clearedPendingSnapshot !== null &&
+      (session?.session_id !== clearedPendingSnapshot.sessionId ||
+        (session?.pending_count ?? 0) !== clearedPendingSnapshot.count ||
+        replayLimitPreview !== clearedPendingSnapshot.preview)
+    ) {
+      setClearedPendingSnapshot(null);
+    }
+  }, [clearedPendingSnapshot, session?.session_id, session?.pending_count, replayLimitPreview]);
+
+  const markPendingClearedOptimistically = () => {
+    setClearedPendingSnapshot({
+      sessionId: session?.session_id,
+      count: session?.pending_count ?? 0,
+      preview: replayLimitPreview,
+    });
+  };
+
+  const { isSyncing, triggerSync } = useBallchasingSync({
+    onSyncComplete: () => {
+      markPendingClearedOptimistically();
+      void onRefreshSession?.();
+    },
+  });
+
+  const maxHostedReplays = session?.max_hosted_replays || 20;
+  const triggerThreshold =
+    session?.trigger_threshold && session.trigger_threshold > 0 ? session.trigger_threshold : 15;
+  const isOptimisticallyCleared =
+    clearedPendingSnapshot !== null &&
+    session?.session_id === clearedPendingSnapshot.sessionId &&
+    (session?.pending_count ?? 0) === clearedPendingSnapshot.count &&
+    replayLimitPreview === clearedPendingSnapshot.preview;
+
+  const activePreview = isDevBuild ? replayLimitPreview : 'auto';
+  let pendingCount = isOptimisticallyCleared ? 0 : (session?.pending_count ?? 0);
+  if (!isOptimisticallyCleared) {
+    if (activePreview === 'warn') pendingCount = Math.max(triggerThreshold, 16);
+    else if (activePreview === 'error') pendingCount = maxHostedReplays;
+    else if (activePreview === 'ok') pendingCount = 0;
+  }
+  const isOverSyncWarning = pendingCount >= triggerThreshold;
+  const isOverSyncLimit = pendingCount >= maxHostedReplays;
+
+  const handleHeaderSyncNow = async () => {
+    if (isSyncing) return;
+    await triggerSync({ includeReplaySync: true });
+    markPendingClearedOptimistically();
+    if (isDevBuild && replayLimitPreview !== 'auto') {
+      setReplayLimitPreview('ok');
+    }
+    await onRefreshSession?.();
+  };
 
   const fallbackMode =
     activeTab === 'live' ? areaFilters.live.playlist : areaFilters.session.playlist;
@@ -117,7 +180,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               <span className="t-font-display font-bold text-xl tracking-widest t-text-strong whitespace-nowrap">
                 RL<span className="t-text-orange text-orange-ink">/</span>SYNC
               </span>
-              <span className="text-[11px] t-font-mono cartouche-mono px-1.5 py-0.5 hidden md:inline whitespace-nowrap">
+              <span className="text-[11px] t-font-mono cartouche-mono px-1.5 py-0.5 hidden xl:inline whitespace-nowrap">
                 v{appVersion}
                 {isDevBuild ? '-dev' : ''}
               </span>
@@ -157,10 +220,18 @@ export const TopBar: React.FC<TopBarProps> = ({
             </nav>
           </div>
 
-          {/* Right: Active-Mode Session Status Pill, Overlay Link & Settings Button */}
+          {/* Right: Active-Mode Session Status Pill + Sync Now, Overlay Link & Settings Button */}
           <div className="flex flex-wrap items-center gap-1.5 text-xs shrink-0 ml-auto">
             {(session || playlist) && (
-              <div className="hidden sm:flex items-center gap-2.5 px-2.5 py-1 surface-plaque t-border font-semibold text-xs tracking-wider text-muted whitespace-nowrap">
+              <div
+                data-testid="header-session-pill"
+                data-sync-warning={isOverSyncWarning ? 'true' : 'false'}
+                className={`hidden sm:flex items-center gap-2 px-2.5 py-1 surface-plaque font-semibold text-xs tracking-wider text-muted whitespace-nowrap t-radius transition-colors ${
+                  isOverSyncWarning
+                    ? 'border-2 border-[#ff3b4e] shadow-[0_0_0_1px_rgba(255,59,78,0.35)]'
+                    : 't-border'
+                }`}
+              >
                 {playlist &&
                 (Number.isInteger(numericActiveId) && numericActiveId > 0
                   ? true
@@ -192,6 +263,34 @@ export const TopBar: React.FC<TopBarProps> = ({
                     </span>
                   </span>
                 )}
+
+                {isOverSyncWarning && (
+                  <span
+                    data-testid="header-sync-warning"
+                    role="status"
+                    className="px-1.5 py-0.5 bg-[#c81624] text-white font-extrabold text-[11px] t-font-mono uppercase tracking-wider leading-none"
+                    title={`${pendingCount} of ${maxHostedReplays} undownloaded Rocket League replays (warning threshold: ${triggerThreshold})`}
+                  >
+                    {isOverSyncLimit
+                      ? `⚠ SYNC CAP ${pendingCount}/${maxHostedReplays}`
+                      : `⚠ SYNC WARN ${pendingCount}/${maxHostedReplays}`}
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  data-testid="header-sync-now-btn"
+                  disabled={isSyncing}
+                  onClick={handleHeaderSyncNow}
+                  className={`px-2 py-0.5 t-font-display font-extrabold text-[11px] uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-60 t-radius ${
+                    isOverSyncWarning
+                      ? 'bg-[#c81624] text-white border border-[#ff6b78] hover:bg-[#a8111d]'
+                      : 't-bg-page border border-outline t-text-strong hover:border-blue-ink hover:t-text-blue'
+                  }`}
+                  title="Download pending Rocket League replays and sync with Ballchasing now"
+                >
+                  {isSyncing ? '⟳ SYNCING…' : '⟳ SYNC NOW'}
+                </button>
               </div>
             )}
 

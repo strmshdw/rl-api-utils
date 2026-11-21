@@ -125,10 +125,12 @@ describe('LiveGameView — in match', () => {
     expect(cards(container).filter((c) => c.dataset.playerId === 'dup')).toHaveLength(1);
   });
 
-  it('colours stat values: lobby leader white, other non-zero ink-3, zero faint', async () => {
+  it('colours stat values to match their semantic stat labels, bolding lobby leaders and dimming zeros', async () => {
     expect(statInk(0, 0)).toBe('text-faint');
     expect(statInk(5, 6)).toBe('text-ink-3');
     expect(statInk(6, 6)).toBe('text-ink-strong');
+    expect(statInk(5, 6, 'stat-lbl-goals')).toBe('stat-lbl-goals font-bold');
+    expect(statInk(6, 6, 'stat-lbl-goals')).toBe('stat-lbl-goals font-black');
 
     const { container } = await renderLive(liveMatch());
     const byId = (id: string) => cards(container).find((c) => c.dataset.playerId === id)!;
@@ -141,10 +143,13 @@ describe('LiveGameView — in match', () => {
     expect(statLabel(you, 'shots').className).toContain('stat-lbl-shots');
     expect(statLabel(you, 'demos').className).toContain('stat-lbl-demos');
 
-    expect(statEl(you, 'score').className).toContain('text-ink-strong'); // 480 is the lobby high
-    expect(statEl(you, 'goals').className).toContain('text-ink-strong'); // 2 goals
+    expect(statEl(you, 'score').className).toContain('stat-lbl-score'); // 480 is the lobby high
+    expect(statEl(you, 'score').className).toContain('font-black');
+    expect(statEl(you, 'goals').className).toContain('stat-lbl-goals'); // 2 goals
+    expect(statEl(you, 'goals').className).toContain('font-black');
     expect(statEl(byId('Steam|76561198000000020|0'), 'demos').className).toContain('text-faint'); // 0 demos
-    expect(statEl(byId('Steam|76561198000000020|0'), 'score').className).toContain('text-ink-3');
+    expect(statEl(byId('Steam|76561198000000020|0'), 'score').className).toContain('stat-lbl-score');
+    expect(statEl(byId('Steam|76561198000000020|0'), 'score').className).toContain('font-bold');
   });
 
   it('respects the column config for the stat strip and meta line', async () => {
@@ -540,6 +545,11 @@ describe('LiveGameView — between matches', () => {
     expect(blue.querySelector('.stat-lbl-demos')?.textContent).toBe('D');
     expect(blue.querySelector('.stat-lbl-mmr')?.textContent).toBe('MMR');
     expect(blue.querySelector('.stat-lbl-rank')?.textContent).toBe('RANK · DIV');
+    // Stat values in box-score rows also carry matching stat-lbl-* color classes
+    expect(blue.querySelectorAll('.stat-lbl-score').length).toBeGreaterThan(1);
+    expect(blue.querySelectorAll('.stat-lbl-goals').length).toBeGreaterThan(1);
+    expect(blue.querySelectorAll('.stat-lbl-mmr').length).toBeGreaterThan(1);
+    expect(blue.querySelectorAll('.stat-lbl-rank').length).toBeGreaterThan(1);
     expect(container.querySelector('[data-testid="box-score-orange"]')!.textContent).not.toContain('MVP');
 
     const kpis = container.querySelector('[data-testid="session-kpis"]')!;

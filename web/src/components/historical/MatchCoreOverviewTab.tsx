@@ -95,18 +95,18 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
                 </button>
                 {isMvp && <MvpChip />}
               </div>
-              <span className="text-right t-text-blue text-blue-ink">{formatMmr(p.mmr)}</span>
-              <span title={rankLabel} className="pl-2 text-sm t-text-ink2 text-ink-2 truncate">
+              <span className={`text-right ${p.mmr ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>{formatMmr(p.mmr)}</span>
+              <span title={rankLabel} className={`pl-2 text-sm truncate ${rankLabel && rankLabel !== '—' ? STAT_LABEL_CLASS.rank : 'text-faint'}`}>
                 {rankLabel}
               </span>
-              <span className="text-right t-text-strong text-ink-strong">{p.score || 0}</span>
-              <span className="text-right t-text-strong text-ink-strong">{p.goals || 0}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{p.assists || 0}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{p.saves || 0}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{p.shots || 0}</span>
-              <span className="text-right t-text-win text-win">{pShPct}%</span>
-              <span className="text-right t-text-orange text-orange-ink">{demosInflicted}</span>
-              <span className="text-right t-text-muted text-muted">{demosTaken}</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.score}`}>{p.score || 0}</span>
+              <span className={`text-right ${p.goals ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>{p.goals || 0}</span>
+              <span className={`text-right ${p.assists ? STAT_LABEL_CLASS.assists : 'text-faint'}`}>{p.assists || 0}</span>
+              <span className={`text-right ${p.saves ? STAT_LABEL_CLASS.saves : 'text-faint'}`}>{p.saves || 0}</span>
+              <span className={`text-right ${p.shots ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>{p.shots || 0}</span>
+              <span className={`text-right ${pShPct > 0 ? STAT_LABEL_CLASS.shotpct : 'text-faint'}`}>{pShPct}%</span>
+              <span className={`text-right ${demosInflicted ? STAT_LABEL_CLASS.demos : 'text-faint'}`}>{demosInflicted}</span>
+              <span className={`text-right ${demosTaken ? STAT_LABEL_CLASS.demod : 'text-faint'}`}>{demosTaken}</span>
             </div>
           );
         })}
@@ -122,14 +122,14 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
           </span>
           <span className="text-right t-text-muted text-muted">—</span>
           <span className="pl-2 t-text-muted text-muted">—</span>
-          <span title="Team total" className="text-right t-text-strong text-ink-strong">{totPts}</span>
-          <span title="Team total" className="text-right t-text-strong text-ink-strong">{totG}</span>
-          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totA}</span>
-          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totSv}</span>
-          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totSh}</span>
-          <span title="Team average" className="text-right t-text-win text-win">{shPct}%</span>
-          <span title="Team total" className="text-right t-text-orange text-orange-ink">{totD}</span>
-          <span title="Team total" className="text-right t-text-muted text-muted">{totTk}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.score}`}>{totPts}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.goals}`}>{totG}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.assists}`}>{totA}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.saves}`}>{totSv}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.shots}`}>{totSh}</span>
+          <span title="Team average" className={`text-right ${STAT_LABEL_CLASS.shotpct}`}>{shPct}%</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.demos}`}>{totD}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.demod}`}>{totTk}</span>
         </div>
       </div>
     );
