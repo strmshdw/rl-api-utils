@@ -13,7 +13,6 @@ import {
 import { isDemoMode } from '../../utils/sampleData';
 import { StatusDot } from '../common/ui';
 import { useDashboard } from '../../context/DashboardContext';
-import { ContextFilterBar } from './ContextFilterBar';
 import { ReplayLimitBanner } from './ReplayLimitBanner';
 import { SettingsPanel } from './SettingsPanel';
 
@@ -25,10 +24,10 @@ interface TopBarProps {
   inMatch: boolean;
   session: SessionResponse | null;
   scopedSession?: SessionResponse | null;
+  /** Mode key ('11', '13', '10', etc.) governing the session status pill & count badge. */
+  statusMode?: string;
   /** Playlist whose MMR is shown on the right (current match, active mode, else most played). */
   playlistId?: number;
-  /** Shown while a live match is on screen; opens the column customiser. */
-  onOpenColumns?: () => void;
   onRefreshSession?: () => Promise<void> | void;
 }
 
@@ -48,18 +47,12 @@ export const TopBar: React.FC<TopBarProps> = ({
   inMatch,
   session,
   scopedSession,
+  statusMode,
   playlistId,
-  onOpenColumns,
   onRefreshSession,
 }) => {
   const {
-    activePlaylist,
-    dateRange,
-    customFrom,
-    setCustomFrom,
-    customTo,
-    setCustomTo,
-    showCustomCalendar,
+    areaFilters,
     isDevBuild,
     appVersion,
     previewMode,
@@ -67,7 +60,9 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const activeParam = normalizeActiveModeKey(activePlaylist);
+  const fallbackMode =
+    activeTab === 'live' ? areaFilters.live.playlist : areaFilters.session.playlist;
+  const activeParam = normalizeActiveModeKey(statusMode ?? fallbackMode);
   const effectiveScopedSession = scopedSession ?? filterSessionByPlaylist(session, activeParam);
   const matchCount =
     effectiveScopedSession?.matches?.length ?? effectiveScopedSession?.total_matches ?? 0;
@@ -104,12 +99,11 @@ export const TopBar: React.FC<TopBarProps> = ({
       {/* REPLAY HISTORY LIMIT WARNING / ERROR BANNER */}
       <ReplayLimitBanner session={session} onRefreshSession={onRefreshSession} />
 
-      {/* 2-TIER STICKY ARCHITECTURAL MASTHEAD (Tier 1 Nav + Tier 2 Context Filter Toolbar) */}
+      {/* SLIM SINGLE-TIER STICKY MASTHEAD (Per-Area Filters Live Locally Inside Each View) */}
       <header
         data-testid="app-header"
         className="sticky top-0 z-30 t-bg-page bg-page border-b t-border border-line font-display"
       >
-        {/* Tier 1: Primary Navigation, Session/Playlist MMR Readout, Overlay & Settings */}
         <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-2 flex flex-wrap 2xl:flex-nowrap items-center justify-between gap-x-3 gap-y-1.5">
           {/* Left: Brand Mark + Single-Row Primary Navigation Tabs */}
           <div className="flex items-center gap-3 sm:gap-4 min-w-0 max-w-full">
@@ -243,49 +237,6 @@ export const TopBar: React.FC<TopBarProps> = ({
             </button>
           </div>
         </div>
-
-        {/* Tier 2: Unified Mode Switcher + Contextual Analytics Toolbar */}
-        <ContextFilterBar
-          activeTab={activeTab}
-          inMatch={inMatch}
-          onOpenColumns={onOpenColumns}
-        />
-
-        {/* On-Demand Custom Date Range Picker Strip (Only visible when Custom Range is active) */}
-        {(showCustomCalendar || dateRange === 'custom') && (
-          <div
-            id="custom-calendar-bar"
-            data-testid="custom-calendar-bar"
-            className="border-t border-line surface-plaque"
-          >
-            <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-1.5 flex flex-wrap items-center gap-2 text-xs">
-              <span className="t-font-display font-bold uppercase tracking-wider t-text-muted">
-                CUSTOM DATE FILTER:
-              </span>
-              <label htmlFor="custom-date-from" className="text-xs t-font-display font-bold t-text-muted uppercase">
-                FROM
-              </label>
-              <input
-                id="custom-date-from"
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="t-bg-page t-text-strong t-border px-2 py-0.5 text-xs t-font-mono t-radius focus:outline-none cursor-pointer"
-              />
-              <span className="t-text-muted font-bold">→</span>
-              <label htmlFor="custom-date-to" className="text-xs t-font-display font-bold t-text-muted uppercase">
-                TO
-              </label>
-              <input
-                id="custom-date-to"
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="t-bg-page t-text-strong t-border px-2 py-0.5 text-xs t-font-mono t-radius focus:outline-none cursor-pointer"
-              />
-            </div>
-          </div>
-        )}
       </header>
 
       {/* DEDICATED SETTINGS PANEL MODAL */}

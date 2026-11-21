@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, type SetStateAction } from 'react';
 import { PlayerSummary, PlayerSearchResponse, GlobalSpotlights } from '../types/api';
-import { useDashboard } from '../context/DashboardContext';
+import { useAreaFilters } from '../context/DashboardContext';
 import { normalizeActiveModeKey } from '../utils/broadcast';
 import { isDemoMode, SAMPLE_PLAYERS } from '../utils/sampleData';
 
@@ -26,8 +26,9 @@ export interface UsePlayerSearchOptions {
 }
 
 export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
-  const { activePlaylist, setActivePlaylist, dateRangeQueryParams } = useDashboard();
-  const contextPlaylist = normalizeActiveModeKey(activePlaylist);
+  const playersFilters = useAreaFilters('players');
+  const contextPlaylist = normalizeActiveModeKey(playersFilters.playlist);
+  const dateRangeQueryParams = playersFilters.dateRangeQueryParams;
 
   const [query, setQuery] = useState<string>('');
   const [debouncedQuery, setDebouncedQuery] = useState<string>('');
@@ -46,9 +47,9 @@ export function usePlayerSearch(options: UsePlayerSearchOptions = {}) {
     (next: string) => {
       const normalized = normalizeActiveModeKey(next);
       setPlaylistState({ source: contextPlaylist, value: normalized });
-      setActivePlaylist(normalized);
+      playersFilters.setPlaylist(normalized);
     },
-    [contextPlaylist, setActivePlaylist],
+    [contextPlaylist, playersFilters],
   );
 
   const [role, setRole] = useState<RoleFilter>(options.initialRole ?? 'all');

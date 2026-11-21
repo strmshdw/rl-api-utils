@@ -8,13 +8,13 @@ import { LivePlayerCard, STRIP_STATS, statLeaders } from './LivePlayerCard';
 import { IdleStateView } from './IdleStateView';
 import { ColumnConfigModal } from './ColumnConfigModal';
 import { ContinueSessionBanner } from '../session/SessionView';
-import { useDashboard } from '../../context/DashboardContext';
+import { AreaFilterBar } from '../common/AreaFilterBar';
+import { useAreaFilters, useDashboard } from '../../context/DashboardContext';
 import {
   filterSessionByPlaylist,
   matchesPlaylistFilter,
   modeKeyFromPlaylistId,
   normalizeActiveModeKey,
-  playlistLabels,
 } from '../../utils/broadcast';
 import { SAMPLE_CURRENT_MATCH } from '../../utils/sampleData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
@@ -27,10 +27,10 @@ interface LiveGameViewProps {
   scopedSession?: SessionResponse | null;
   activePlaylist?: string;
   onSelectPlaylist?: (playlist: string) => void;
-  hideHeaderHistToggle?: boolean;
   connection: ConnectionStatus;
-  columnsOpen: boolean;
-  onCloseColumns: () => void;
+  columnsOpen?: boolean;
+  onOpenColumns?: () => void;
+  onCloseColumns?: () => void;
   onShowSession: () => void;
   onContinueSession?: (sessionId?: string) => void;
   onDismissContinueSession?: (sessionId?: string) => void;
@@ -55,24 +55,14 @@ export function lobbyPlayers(match: CurrentMatchResponse): LobbyPlayer[] {
 
 const byScore = (a: LobbyPlayer, b: LobbyPlayer) => (b.stats?.score || 0) - (a.stats?.score || 0);
 
-const BASE_PLAYLIST_SCOPES: ReadonlyArray<{ id: string; label: string }> = [
-  { id: '11', label: '2V2' },
-  { id: '13', label: '3V3' },
-  { id: '10', label: '1V1' },
-];
-
-function scopeLabelForModeKey(modeKey: string, playlistId?: number): string {
-  if (modeKey === 'casual') return 'CASUAL';
-  if (modeKey === 'private') return 'PRIVATE';
-  const pid = Number(modeKey) || playlistId || 0;
-  return pid > 0 ? playlistLabels(pid).short : modeKey.toUpperCase();
-}
-
 function resolveScopedPlaylistId(scope: string): number {
   const param = normalizeActiveModeKey(scope);
   const num = Number(param);
   return Number.isInteger(num) && num > 0 ? num : 0;
 }
+
+const LIVE_ACTION_BTN =
+  'toolbar-btn border border-outline px-2.5 py-1 t-font-display font-bold text-xs uppercase tracking-wider text-muted hover:text-ink hover:border-ink transition-colors duration-120 whitespace-nowrap t-radius cursor-pointer surface-plaque';
 
 export const LiveGameView: React.FC<LiveGameViewProps> = ({
   match,
@@ -80,9 +70,9 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
   scopedSession,
   activePlaylist,
   onSelectPlaylist,
-  hideHeaderHistToggle = false,
   connection,
-  columnsOpen,
+  columnsOpen: controlledColumnsOpen,
+  onOpenColumns,
   onCloseColumns,
   onShowSession,
   onContinueSession,
@@ -92,36 +82,46 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
 }) => {
   const { config, toggleColumn, applyPreset, resetToDefault, activePreset } = useColumnConfig();
   const {
-    activePlaylist: contextActivePlaylist,
-    setActivePlaylist,
     liveModeOverride,
     showLiveHistData,
     setShowLiveHistData,
-    dateRangeLabel,
-    dateRangeQueryParams,
     isDevBuild,
     previewMode,
   } = useDashboard();
+  const liveFilters = useAreaFilters('live');
+  const [localColumnsOpen, setLocalColumnsOpen] = useState(false);
   const [playlistScope, setPlaylistScope] = useState<string>(() =>
     normalizeActiveModeKey(
       activePlaylist ??
-        (match?.playlist_id ? modeKeyFromPlaylistId(match.playlist_id) : contextActivePlaylist),
+        (match?.playlist_id ? modeKeyFromPlaylistId(match.playlist_id) : liveFilters.playlist),
     ),
   );
   const [fallbackPlayer, setFallbackPlayer] = useState<{ id: string; name?: string } | null>(null);
   const [fallbackMatch, setFallbackMatch] = useState<SessionMatchDetail | null>(null);
 
+  const effectiveColumnsOpen = controlledColumnsOpen ?? localColumnsOpen;
+  const openColumnsModal = () => {
+    if (onOpenColumns) onOpenColumns();
+    else setLocalColumnsOpen(true);
+  };
+  const closeColumnsModal = () => {
+    setLocalColumnsOpen(false);
+    onCloseColumns?.();
+  };
+
   useEffect(() => {
     if (activePlaylist !== undefined) {
       setPlaylistScope(normalizeActiveModeKey(activePlaylist));
+    } else {
+      setPlaylistScope(normalizeActiveModeKey(liveFilters.playlist));
     }
-  }, [activePlaylist]);
+  }, [activePlaylist, liveFilters.playlist]);
 
   const handleScopeSelect = (nextScope: string) => {
     const normalized = normalizeActiveModeKey(nextScope);
     setPlaylistScope(normalized);
     onSelectPlaylist?.(normalized);
-    setActivePlaylist(normalized);
+    liveFilters.setPlaylist(normalized);
   };
 
   const handleInspectPlayer = (playerId: string, playerName?: string) => {
@@ -158,14 +158,14 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
 
   const normalizedScopeKey = normalizeActiveModeKey(playlistScope);
   const localId = effectiveMatch?.local_player?.player_id;
-  const hasDateFilter = Boolean(dateRangeQueryParams.from || dateRangeQueryParams.to);
+  const hasDateFilter = Boolean(liveFilters.dateRangeQueryParams.from || liveFilters.dateRangeQueryParams.to);
 
   const scopedHistories = useLiveLobbyHistories({
     matchGuid: effectiveMatch?.match_guid,
     lobby,
     localId,
     scopeKey: normalizedScopeKey,
-    dateParams: dateRangeQueryParams,
+    dateParams: liveFilters.dateRangeQueryParams,
     enabled: Boolean(effectiveMatch) && (showLiveHistData || hasDateFilter),
     previewMode: Boolean(isDevBuild && previewMode),
   });
@@ -176,21 +176,10 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
     return scoped && scoped.total_matches > 0 ? scoped : null;
   }, [session?.continuable_session, normalizedScopeKey]);
 
-  const playlistScopes = useMemo(() => {
-    const items = [...BASE_PLAYLIST_SCOPES];
-    const matchModeKey = effectiveMatch?.playlist_id
-      ? modeKeyFromPlaylistId(effectiveMatch.playlist_id)
-      : '';
-    for (const candidate of [matchModeKey, normalizedScopeKey]) {
-      if (candidate && !items.some((s) => s.id === candidate)) {
-        items.push({
-          id: candidate,
-          label: scopeLabelForModeKey(candidate, effectiveMatch?.playlist_id),
-        });
-      }
-    }
-    return items;
-  }, [effectiveMatch?.playlist_id, normalizedScopeKey]);
+  const showLiveReset =
+    liveFilters.dateRange !== 'all' ||
+    liveFilters.showCustomCalendar ||
+    normalizedScopeKey !== (effectiveMatch?.playlist_id ? modeKeyFromPlaylistId(effectiveMatch.playlist_id) : '11');
 
   if (!shouldShowMatch || !effectiveMatch) {
     return (
@@ -199,6 +188,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
           session={session}
           scopedSession={scopedSession}
           activePlaylist={activePlaylist ?? normalizedScopeKey}
+          onSelectPlaylist={handleScopeSelect}
           connection={connection}
           onShowSession={onShowSession}
           onContinueSession={onContinueSession}
@@ -299,72 +289,67 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
         </div>
       )}
 
-      {/* IN-MATCH Top Telemetry Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-1.5 surface-plaque border border-line t-radius font-display">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
+      {/* IN-MATCH Local Telemetry & Filter Bar */}
+      <AreaFilterBar
+        area="live"
+        ariaLabel="Live match filters"
+        playlist={normalizedScopeKey}
+        onPlaylistChange={handleScopeSelect}
+        dateRange={liveFilters.dateRange}
+        onDateRangeChange={liveFilters.setDateRange}
+        customFrom={liveFilters.customFrom}
+        onCustomFromChange={liveFilters.setCustomFrom}
+        customTo={liveFilters.customTo}
+        onCustomToChange={liveFilters.setCustomTo}
+        showCustomCalendar={liveFilters.showCustomCalendar}
+        onToggleCustomCalendar={() => {
+          if (!liveFilters.showCustomCalendar && liveFilters.dateRange !== 'custom') {
+            liveFilters.setDateRange('custom');
+          } else {
+            liveFilters.setShowCustomCalendar((prev) => !prev);
+          }
+        }}
+        statMode={liveFilters.statMode}
+        onStatModeChange={liveFilters.setStatMode}
+        showReset={showLiveReset}
+        onReset={() => {
+          const matchMode = effectiveMatch.playlist_id
+            ? modeKeyFromPlaylistId(effectiveMatch.playlist_id)
+            : '11';
+          liveFilters.resetFilters();
+          handleScopeSelect(matchMode);
+        }}
+        leadingSlot={
+          <div className="flex items-center gap-1.5 pr-1">
             <span className="w-2 h-2 t-bg-loss bg-loss animate-pulse" />
-            <span className="t-font-display font-bold text-xs tracking-widest uppercase t-text-loss">
-              LIVE TELEMETRY STREAM
+            <span className="t-font-display font-bold text-xs tracking-widest uppercase t-text-loss whitespace-nowrap">
+              LIVE
             </span>
           </div>
-          <span className="t-text-faint">|</span>
-          <span className="text-xs t-text-muted font-semibold uppercase">
-            CLICK ANY PLAYER CARD FOR QUICK SCOUTING PROFILE
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {!hideHeaderHistToggle && (
+        }
+        trailingSlot={
+          <div role="group" aria-label="Live match controls" className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="live-columns-btn"
+              onClick={openColumnsModal}
+              className={LIVE_ACTION_BTN}
+            >
+              COLUMNS
+            </button>
             <button
               type="button"
               id="btn-toggle-live-hist"
               aria-pressed={showLiveHistData}
               onClick={() => setShowLiveHistData((prev) => !prev)}
-              className={`px-2.5 py-0.5 t-border t-radius t-font-display font-bold text-xs uppercase tracking-wider transition-colors ${
-                showLiveHistData
-                  ? 't-bg-page t-text-strong border-outline'
-                  : 't-bg-page t-text-muted'
-              }`}
+              className="toolbar-btn px-2.5 py-1 t-border t-radius t-font-display font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer surface-plaque t-text-muted hover:text-ink whitespace-nowrap"
               title="Show or hide historical WITH YOU / AGAINST YOU split tables on live player cards"
             >
-              {showLiveHistData
-                ? 'HISTORICAL DATA: SHOWN (CLICK TO HIDE)'
-                : 'HISTORICAL DATA: HIDDEN (CLICK TO SHOW)'}
+              {showLiveHistData ? 'HISTORICAL DATA: SHOWN' : 'HISTORICAL DATA: HIDDEN'}
             </button>
-          )}
-
-          <span className="text-xs t-font-display font-bold uppercase tracking-wider t-text-muted">
-            SCOPE ({dateRangeLabel}):
-          </span>
-          <div
-            className="flex t-border t-radius overflow-hidden"
-            role="group"
-            aria-label="Live player card playlist scope"
-          >
-            {playlistScopes.map((sc, i) => {
-              const active = normalizedScopeKey === sc.id;
-              return (
-                <button
-                  key={sc.id}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => handleScopeSelect(sc.id)}
-                  className={`live-pl-btn px-2 py-0.5 t-font-display font-bold text-xs uppercase tracking-wider cursor-pointer ${
-                    i > 0 ? 'border-l t-border' : ''
-                  } ${
-                    active
-                      ? 't-bg-blue-ink t-text-on-accent'
-                      : 't-bg-page t-text-muted hover:opacity-80'
-                  }`}
-                >
-                  {sc.label}
-                </button>
-              );
-            })}
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <Scorebug
         match={effectiveMatch}
@@ -400,6 +385,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
                   opposingTeamPlayers={opposingTeam}
                   activePlaylistId={effectiveMatch.playlist_id}
                   playlistScope={normalizedScopeKey}
+                  statMode={liveFilters.statMode}
                   scopedHistory={scopedHistories[p.player_id]}
                   subgridPlacement={{
                     col: team + 1,
@@ -423,8 +409,8 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
       )}
 
       <ColumnConfigModal
-        isOpen={columnsOpen}
-        onClose={onCloseColumns}
+        isOpen={effectiveColumnsOpen}
+        onClose={closeColumnsModal}
         config={config}
         toggleColumn={toggleColumn}
         applyPreset={applyPreset}

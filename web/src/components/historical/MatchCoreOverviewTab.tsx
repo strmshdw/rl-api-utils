@@ -2,6 +2,7 @@ import React from 'react';
 import { ReplayPlayerStats } from '../../types/api';
 import { MvpChip } from '../common/ui';
 import { formatMmr, shortRank } from '../../utils/broadcast';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 interface MatchCoreOverviewTabProps {
   players: ReplayPlayerStats[];
@@ -20,7 +21,7 @@ export const TelemetryPendingBanner: React.FC = () => (
 );
 
 const CORE_GRID_COLS =
-  'grid-cols-[minmax(176px,1.7fr)_68px_minmax(112px,1.1fr)_repeat(8,minmax(56px,1fr))]';
+  'grid-cols-[minmax(170px,1.6fr)_68px_minmax(124px,1.15fr)_repeat(8,minmax(62px,1fr))]';
 
 export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
   players,
@@ -147,21 +148,21 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
           tabIndex={0}
           className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto"
         >
-          <div className="min-w-[880px]">
+          <div className="min-w-[920px]">
             <div
               className={`grid ${CORE_GRID_COLS} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
             >
               <span>PLAYER</span>
-              <span className="text-right">MMR</span>
-              <span className="pl-2">RANK · DIV</span>
-              <span className="text-right">SCORE</span>
-              <span className="text-right">GOALS</span>
-              <span className="text-right">ASSISTS</span>
-              <span className="text-right">SAVES</span>
-              <span className="text-right">SHOTS</span>
-              <span className="text-right">SHOT %</span>
-              <span className="text-right">DEMOS</span>
-              <span className="text-right">DEMO&apos;D</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.mmr}`}>MMR</span>
+              <span className={`pl-2 ${STAT_LABEL_CLASS.rank}`}>RANK · DIV</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.score}`}>SCORE</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>GOALS</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>ASSISTS</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>SAVES</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.shots}`}>SHOTS</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.shotpct}`}>SHOT %</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.demos}`}>DEMOS</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.demod}`}>DEMO&apos;D</span>
             </div>
             {renderCoreTeamSection(bluePlayers, 'BLUE TEAM', true)}
             {renderCoreTeamSection(orangePlayers, 'ORANGE TEAM', false)}

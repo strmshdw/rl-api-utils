@@ -79,14 +79,16 @@ describe('App shell', () => {
     expect(container.querySelector('[data-testid="session-view"]')).not.toBeNull();
   });
 
-  it('shows the live dot in red and a COLUMNS button during a match', async () => {
+  it('shows the live dot in red and a local COLUMNS button inside LiveGameView during a match (not in TopBar)', async () => {
     setHooks(SAMPLE_CURRENT_MATCH);
     const { container } = await mount(<App />);
     const live = nav(container).querySelector('button')!;
     expect(live.innerHTML).toContain('bg-loss');
-    expect(container.querySelector('[data-testid="live-match"]')).not.toBeNull();
+    const liveMatchEl = container.querySelector('[data-testid="live-match"]')!;
+    expect(liveMatchEl).not.toBeNull();
+    expect(container.querySelector('[data-testid="app-header"]')!.textContent).not.toContain('COLUMNS');
 
-    await clickText(container.querySelector('[data-testid="app-header"]')!, 'COLUMNS');
+    await clickText(liveMatchEl, 'COLUMNS');
     const dialog = container.querySelector('dialog')!;
     expect(dialog.textContent).toContain('COLUMNS');
     expect(dialog.querySelectorAll('input[type="checkbox"]')).toHaveLength(10);
@@ -94,7 +96,7 @@ describe('App shell', () => {
     expect(container.querySelector('dialog')).toBeNull();
 
     await clickText(nav(container), 'HISTORY');
-    expect(container.querySelector('[data-testid="app-header"]')!.textContent).not.toContain('COLUMNS');
+    expect(container.querySelector('[data-testid="live-columns-btn"]')).toBeNull();
   });
 
   it('hides theme and configuration complexity behind the Settings gear button and supports all 14 design styles, dark/light mode, and text scale', async () => {
@@ -153,7 +155,7 @@ describe('App shell', () => {
   it('prevents accidental modal light-dismiss when pointerdown starts inside the modal panel and releases on backdrop', async () => {
     setHooks(SAMPLE_CURRENT_MATCH);
     const { container } = await mount(<App />);
-    await clickText(container.querySelector('[data-testid="app-header"]')!, 'COLUMNS');
+    await clickText(container.querySelector('[data-testid="live-match"]')!, 'COLUMNS');
     const dialog = container.querySelector('dialog')!;
     expect(dialog).not.toBeNull();
     const backdropWrapper = dialog.firstElementChild as HTMLElement;
@@ -194,20 +196,24 @@ describe('App shell', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(container.querySelector('[data-testid="live-idle"]')).not.toBeNull();
 
-    // Toggle AVG / G vs TOTALS
-    const totalBtn = container.querySelector<HTMLButtonElement>('#btn-stat-total')!;
-    totalBtn.click();
-    await new Promise((r) => setTimeout(r, 10));
+    // Toggle AVG / G vs TOTALS locally on LIVE idle bar
+    const totalBtn = container.querySelector<HTMLButtonElement>('[data-testid="live-filter-bar"] [data-stat-mode="total"]')!;
+    await act(async () => {
+      totalBtn.click();
+    });
     expect(container.textContent).toContain('SHOWING CUMULATIVE TOTALS');
 
-    // Toggle Custom Calendar Range bar
-    const calBtn = container.querySelector<HTMLButtonElement>('#btn-cal-toggle')!;
-    calBtn.click();
-    await new Promise((r) => setTimeout(r, 10));
-    const calBar = container.querySelector('#custom-calendar-bar')!;
+    // Switch to HISTORY to toggle local Custom Calendar Range bar (not shown on idle LIVE)
+    expect(container.querySelector('[data-testid="live-cal-toggle"]')).toBeNull();
+    await clickText(nav(container), 'HISTORY');
+    const calBtn = container.querySelector<HTMLButtonElement>('[data-testid="history-cal-toggle"]')!;
+    await act(async () => {
+      calBtn.click();
+    });
+    const calBar = container.querySelector('[data-testid="custom-calendar-bar"]')!;
     expect(calBar).not.toBeNull();
-    expect(container.querySelector('#custom-date-from')).not.toBeNull();
-    expect(container.querySelector('#custom-date-to')).not.toBeNull();
+    expect(container.querySelector('[data-testid="custom-date-from"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="custom-date-to"]')).not.toBeNull();
 
     // Replay Limit Banner states (20-game hosted replay buffer guard)
     const limitSelect = container.querySelector<HTMLSelectElement>('#limit-state-select')!;
@@ -303,34 +309,45 @@ describe('App shell', () => {
     expect(container.querySelector('[data-testid="session-view"]')).not.toBeNull();
   });
 
-  it('renders Tier 2 ContextFilterBar with mode switching, EXTRA menu Escape/select, contextual AVG/TOTALS visibility, and de-triplicated SettingsPanel', async () => {
+  it('removes universal filter banner from TopBar and keeps area filters distinct & independent across LIVE, SESSION, HISTORY, and PLAYERS', async () => {
     setHooks(null);
     const { container } = await mount(<App />);
 
+    // TopBar is single-tier with zero universal filter banner controls
     const header = container.querySelector('[data-testid="app-header"]')!;
-    const toolbar = header.querySelector<HTMLElement>('#context-filter-bar[role="toolbar"][aria-label="Analytics context filters"]')!;
-    expect(toolbar).not.toBeNull();
+    expect(header.querySelector('#context-filter-bar')).toBeNull();
+    expect(header.querySelector('[role="toolbar"]')).toBeNull();
 
-    // AVG / G and TOTALS are visible on LIVE / SESSION / PLAYERS, hidden on HISTORY
-    expect(toolbar.querySelector('#btn-stat-avg')).not.toBeNull();
-    expect(toolbar.querySelector('#btn-stat-total')).not.toBeNull();
+    // LIVE idle area filter bar has Mode + AVG/TOTALS (no Timeframe clutter)
+    const liveBar = container.querySelector<HTMLElement>('[data-testid="live-filter-bar"]')!;
+    expect(liveBar).not.toBeNull();
+    expect(liveBar.querySelector('[data-stat-mode="avg"]')).not.toBeNull();
+    expect(liveBar.querySelector('[data-stat-mode="total"]')).not.toBeNull();
+    expect(liveBar.querySelector('[data-testid="live-date-range"]')).toBeNull();
 
-    // Switch mode from 2V2 to 3V3 in ContextFilterBar: updates SESSION badge (1) and header MMR pill to single-mode 3V3 without cross-mode 4–1
-    await clickText(toolbar, '3V3');
+    // Switch LIVE mode from 2V2 to 3V3 -> updates LIVE header pill to STANDARD 1421 +11 · 1–0
+    await clickText(liveBar, '3V3');
     expect(nav(container).textContent).toBe('LIVESESSION1HISTORYPLAYERS');
     expect(header.textContent).not.toContain('SESSION 4–1');
     expect(header.textContent).toContain('STANDARD 1421 +11 · 1–0');
 
-    // Switch mode to 1V1 (0 session games): SESSION badge hides (0) and status pill shows DUEL · 0–0 instead of leaking DOUBLES 1485
-    await clickText(toolbar, '1V1');
+    // Switch to SESSION -> independent from LIVE! Still defaults to 2V2 (DOUBLES 1485 +29 · 3–1, badge 4)
+    await clickText(nav(container), 'SESSION');
+    const sessionBar = container.querySelector<HTMLElement>('[data-testid="session-filter-bar"]')!;
+    expect(sessionBar).not.toBeNull();
+    expect(sessionBar.querySelector('[data-testid="session-date-range"]')).toBeNull();
+    expect(sessionBar.querySelector('[data-mode-btn="11"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(header.textContent).toContain('DOUBLES 1485 +29 · 3–1');
+
+    // Switch SESSION mode to 1V1 -> header reflects SESSION 1V1 (0–0), without affecting LIVE (still 3V3)
+    await clickText(sessionBar, '1V1');
     expect(nav(container).textContent).toBe('LIVESESSIONHISTORYPLAYERS');
     expect(header.textContent).toContain('DUEL');
     expect(header.textContent).toContain('0–0');
     expect(header.textContent).not.toContain('DOUBLES 1485');
 
     // EXTRA ▾ menu opens, supports Escape to close, and exposes only concrete individual Extra modes (no ALL EXTRA MODES)
-    const extraBtn = toolbar.querySelector<HTMLButtonElement>('#btn-mode-extra')!;
-    expect(extraBtn).not.toBeNull();
+    const extraBtn = sessionBar.querySelector<HTMLButtonElement>('[data-mode-btn="extra"]')!;
     expect(extraBtn.getAttribute('aria-haspopup')).toBe('menu');
     expect(extraBtn.getAttribute('aria-expanded')).toBe('false');
 
@@ -338,7 +355,7 @@ describe('App shell', () => {
       extraBtn.click();
     });
     expect(extraBtn.getAttribute('aria-expanded')).toBe('true');
-    const extraMenu = toolbar.querySelector<HTMLElement>('[role="menu"]')!;
+    const extraMenu = sessionBar.querySelector<HTMLElement>('[role="menu"]')!;
     expect(extraMenu).not.toBeNull();
     expect(extraMenu.textContent).toContain('HOOPS');
     expect(extraMenu.textContent).toContain('RUMBLE');
@@ -347,25 +364,40 @@ describe('App shell', () => {
     expect(extraMenu.textContent).toContain('TOURNAMENTS');
     expect(extraMenu.textContent).not.toContain('ALL EXTRA');
 
-    // Escape closes EXTRA menu
     await act(async () => {
       extraMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(extraBtn.getAttribute('aria-expanded')).toBe('false');
 
-    // Re-open EXTRA menu and select HOOPS
     await act(async () => {
       extraBtn.click();
     });
-    await clickText(toolbar.querySelector('[role="menu"]')!, 'HOOPS');
+    await clickText(sessionBar.querySelector('[role="menu"]')!, 'HOOPS');
     expect(extraBtn.getAttribute('aria-expanded')).toBe('false');
     expect(extraBtn.textContent).toContain('HOOPS');
 
-    // Navigate to HISTORY: AVG/G | TOTALS hides and duplicate playlist segmented bar is suppressed
+    // Navigate to HISTORY: has its own Mode + Timeframe bar (starts on 2V2, NOT Hoops), and hides AVG/G | TOTALS
     await clickText(nav(container), 'HISTORY');
-    expect(toolbar.querySelector('#btn-stat-avg')).toBeNull();
-    expect(toolbar.querySelector('#btn-stat-total')).toBeNull();
-    expect(container.querySelector('[data-testid="history-view"] [aria-label="Filter by playlist"]')).toBeNull();
+    const historyBar = container.querySelector<HTMLElement>('[data-testid="history-filter-bar"]')!;
+    expect(historyBar).not.toBeNull();
+    expect(historyBar.querySelector('[data-mode-btn="11"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(historyBar.querySelector('[data-testid="history-date-range"]')).not.toBeNull();
+    expect(historyBar.querySelector('[data-stat-mode="avg"]')).toBeNull();
+    expect(historyBar.querySelector('[data-stat-mode="total"]')).toBeNull();
+
+    // Navigate to PLAYERS: has its own Mode + Timeframe + AVG/TOTALS bar (independent of HISTORY/SESSION/LIVE)
+    await clickText(nav(container), 'PLAYERS');
+    const playersBar = container.querySelector<HTMLElement>('[data-testid="players-filter-bar"]')!;
+    expect(playersBar).not.toBeNull();
+    expect(playersBar.querySelector('[data-mode-btn="11"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(playersBar.querySelector('[data-testid="players-date-range"]')).not.toBeNull();
+    expect(playersBar.querySelector('[data-stat-mode="avg"]')).not.toBeNull();
+
+    // Returning to LIVE preserves LIVE's 3V3 mode (unaffected by SESSION's Hoops or HISTORY/PLAYERS's 2V2)
+    await clickText(nav(container), 'LIVE');
+    expect(
+      container.querySelector('[data-testid="live-filter-bar"] [data-mode-btn="13"]')?.getAttribute('aria-pressed'),
+    ).toBe('true');
 
     // SettingsPanel no longer duplicates HISTORICAL STAT AGGREGATION or COLUMNS
     const settingsBtn = container.querySelector<HTMLButtonElement>('#btn-settings')!;

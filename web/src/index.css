@@ -4,34 +4,50 @@
 
 :root {
   color-scheme: dark;
+  scrollbar-color: var(--t-muted-2) var(--t-page);
   --t-page: #0a0908;
   --t-panel: #181614;
   --t-plaque: #0f0d0b;
   --t-panel-hover: #221f1c;
   --t-modal: #181614;
-  --t-line: #38332d;
-  --t-line-2: #292520;
-  --t-outline: #e2dbd0;
-  --t-frieze: #d8d0c5;
-  --t-ink: #f2efe9;
-  --t-ink-strong: #fbf9f5;
+  --t-line: #453f38;
+  --t-line-2: #302b26;
+  --t-outline: #e6dfd5;
+  --t-frieze: #dfd8cd;
+  --t-ink: #f7f4ef;
+  --t-ink-strong: #ffffff;
   --t-ink-on-accent: #12100e;
   --t-on-slab: #fbf9f5;
-  --t-ink-2: #cfc7b8;
-  --t-ink-3: #b8afa0;
-  --t-muted: #918779;
-  --t-muted-2: #786f62;
-  --t-faint: #5c544b;
+  --t-ink-2: #dfd8cb;
+  --t-ink-3: #c9c1b2;
+  --t-muted: #afa596;
+  --t-muted-2: #9a9082;
+  --t-faint: #7c7367;
   --t-blue-slab: #1e3a52;
   --t-orange-slab: #9e4726;
-  --t-blue-ink: #789dba;
-  --t-orange-ink: #d9825b;
+  --t-blue-ink: #8ab4d4;
+  --t-orange-ink: #eb946a;
   --t-vermilion-display: #8f1822;
   --t-loss-slab: #8f1822;
-  --t-win: #82a890;
-  --t-loss: #e04852;
-  --t-gold: #deb052;
-  --t-carry-ink: #7da8c4;
+  --t-win: #8ac29d;
+  --t-loss: #f56c74;
+  --t-gold: #efc463;
+  --t-carry-ink: #88bad9;
+  --t-stat-score: #ffd166;
+  --t-stat-goals: #5ce69a;
+  --t-stat-assists: #52daf5;
+  --t-stat-saves: #9abaff;
+  --t-stat-shots: #d6a6ff;
+  --t-stat-shotpct: #4de8cc;
+  --t-stat-demos: #ff9966;
+  --t-stat-demod: #ff85a1;
+  --t-stat-mmr: #7cc7ff;
+  --t-stat-rank: #e3cfa6;
+  --t-stat-bpm: #c5ed6b;
+  --t-stat-boost: #c9a6ff;
+  --t-stat-speed: #ff8cd9;
+  --t-stat-games: #dde6f2;
+  --t-stat-h2h: #b7f06e;
   --t-font-display: 'Josefin Sans', 'Space Grotesk', 'Inter', sans-serif;
   --t-font-sans: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
   --t-font-mono: 'JetBrains Mono', monospace;
@@ -260,6 +276,23 @@
 .t-win, .t-text-win { color: var(--t-win); }
 .t-loss, .t-text-loss { color: var(--t-loss); }
 
+/* Distinct Semantic Stat-Attribute & Score Labels */
+.stat-lbl-score   { color: var(--t-stat-score); }
+.stat-lbl-goals   { color: var(--t-stat-goals); }
+.stat-lbl-assists { color: var(--t-stat-assists); }
+.stat-lbl-saves   { color: var(--t-stat-saves); }
+.stat-lbl-shots   { color: var(--t-stat-shots); }
+.stat-lbl-shotpct { color: var(--t-stat-shotpct); }
+.stat-lbl-demos   { color: var(--t-stat-demos); }
+.stat-lbl-demod   { color: var(--t-stat-demod); }
+.stat-lbl-mmr     { color: var(--t-stat-mmr); }
+.stat-lbl-rank    { color: var(--t-stat-rank); }
+.stat-lbl-bpm     { color: var(--t-stat-bpm); }
+.stat-lbl-boost   { color: var(--t-stat-boost); }
+.stat-lbl-speed   { color: var(--t-stat-speed); }
+.stat-lbl-games   { color: var(--t-stat-games); }
+.stat-lbl-h2h     { color: var(--t-stat-h2h); }
+
 .t-border { border-color: var(--t-line); border-width: var(--t-bw); }
 .t-border-2 { border-color: var(--t-line-2); }
 .t-outline, .t-border-outline { border-color: var(--t-outline); }
@@ -309,10 +342,12 @@ dialog.broadcast-modal::backdrop {
   overscroll-behavior: contain;
 }
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: var(--t-page); }
-::-webkit-scrollbar-thumb { background: var(--t-line-2); }
-::-webkit-scrollbar-thumb:hover { background: var(--t-outline); }
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--t-page); }
+  ::-webkit-scrollbar-thumb { background: var(--t-muted-2); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--t-outline); }
+}
 
 /* Toolbar, ARIA-pressed states, single-row nav scroller & viewport-aware menu fallbacks */
 .dashboard-nav-scroll {
@@ -344,6 +379,9 @@ dialog.broadcast-modal::backdrop {
     background-color: Highlight;
     color: HighlightText;
     border-color: Highlight;
+  }
+  [class*="stat-lbl-"] {
+    color: CanvasText;
   }
 }
 

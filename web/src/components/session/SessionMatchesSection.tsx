@@ -12,6 +12,7 @@ import {
   zeroInk,
 } from '../../utils/broadcast';
 import { formatDuration } from '../../utils/formatters';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 import {
   COLUMN_HEADER,
   EmptyLine,
@@ -170,13 +171,13 @@ export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
             style={{ gridTemplateColumns: ROW_GRID }}
           >
             <span />
-            <span>SCORE</span>
+            <span className={STAT_LABEL_CLASS.score}>SCORE</span>
             <span>MATCH</span>
-            <span className="text-right">G</span>
-            <span className="text-right">A</span>
-            <span className="text-right">SV</span>
-            <span className="text-right">PTS</span>
-            <span className="text-right">MMR</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>G</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>A</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>SV</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.score}`}>PTS</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.mmr}`}>MMR</span>
             <span className="text-right pr-[22px]">WHEN</span>
           </div>
           <div className="flex flex-col gap-1.5">

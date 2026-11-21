@@ -57,8 +57,10 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
             type="button"
             aria-pressed={active}
             onClick={() => onChange(id)}
-            className={`font-display font-bold text-sm tracking-t10 px-3.5 py-1.5 whitespace-nowrap transition-colors duration-120 ${
-              active ? 'bg-ink text-page t-bg-panel-hover border-b-2 border-blue-ink' : 'bg-transparent text-muted hover:text-ink'
+            className={`font-display font-bold text-sm tracking-t10 px-3.5 py-1.5 whitespace-nowrap transition-colors duration-120 cursor-pointer ${
+              active
+                ? 't-bg-blue-ink t-text-on-accent border-b-2 border-blue-ink'
+                : 'bg-transparent text-muted hover:text-ink'
             }`}
           >
             {text}

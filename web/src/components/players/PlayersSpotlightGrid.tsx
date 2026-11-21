@@ -10,6 +10,7 @@ import {
 } from '../../utils/broadcast';
 import { useDashboard } from '../../context/DashboardContext';
 import { isSoloDuelPlaylist, rankForPlaylist, Spotlight } from './playerData';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 export interface PinnedSlot {
   idx: number;
@@ -149,12 +150,12 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
       <div className="t-bg-page bg-page border border-line text-sm font-extrabold t-font-mono">
         <div className="grid grid-cols-[64px_42px_repeat(5,1fr)] items-center px-2.5 py-1 text-muted font-sans border-b border-line">
           <span>ROLE</span>
-          <span className="text-right">GMS</span>
-          <span className="text-right">PTS</span>
-          <span className="text-right">G</span>
-          <span className="text-right">A</span>
-          <span className="text-right">SV</span>
-          <span className="text-right">DEM</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.games}`}>GMS</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.score}`}>PTS</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>G</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>A</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>SV</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.demos}`}>DEM</span>
         </div>
         <div className="grid grid-cols-[64px_42px_repeat(5,1fr)] items-center px-2.5 py-1.5">
           <span className="text-win font-sans">WITH</span>

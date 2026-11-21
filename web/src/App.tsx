@@ -15,7 +15,7 @@ import {
   normalizeActiveModeKey,
   onlineIdOf,
 } from './utils/broadcast';
-import { DashboardProvider, useDashboard } from './context/DashboardContext';
+import { DashboardProvider, useAreaFilters, useDashboard } from './context/DashboardContext';
 import { NavigationProvider, useNavigation } from './context/NavigationContext';
 import { PlayerProfileDialog } from './components/players/PlayerProfileDialog';
 import { HistoricalMatchDetailModal } from './components/historical/HistoricalMatchDetailModal';
@@ -39,14 +39,15 @@ const DashboardShell: React.FC = () => {
   const [telemetryMatch, setTelemetryMatch] = useState<SessionMatchDetail | null>(null);
 
   const {
-    activePlaylist,
-    setActivePlaylist,
     syncLivePlaylist,
     liveModeOverride,
     refreshStampingConfig,
     isDevBuild,
     previewMode,
   } = useDashboard();
+  const liveFilters = useAreaFilters('live');
+  const sessionFilters = useAreaFilters('session');
+  const activeSessionMode = activeTab === 'live' ? liveFilters.playlist : sessionFilters.playlist;
 
   const {
     session: liveSession,
@@ -58,7 +59,7 @@ const DashboardShell: React.FC = () => {
     resetSession,
     continueSession,
     dismissContinueSession,
-  } = useSession(activePlaylist);
+  } = useSession(activeSessionMode);
   const { match: liveMatch, status } = useLiveMatch();
 
   useEffect(() => {
@@ -86,18 +87,43 @@ const DashboardShell: React.FC = () => {
     return activePreview ? SAMPLE_SESSION_RESPONSE : candidate;
   }, [liveUnfilteredSession, liveSession, activePreview]);
 
-  const normalizedActivePlaylist = useMemo(
-    () => normalizeActiveModeKey(activePlaylist),
-    [activePlaylist],
+  const normalizedLiveMode = useMemo(
+    () => normalizeActiveModeKey(liveFilters.playlist),
+    [liveFilters.playlist],
   );
+  const normalizedSessionMode = useMemo(
+    () => normalizeActiveModeKey(sessionFilters.playlist),
+    [sessionFilters.playlist],
+  );
+  const normalizedHeaderMode = activeTab === 'live' ? normalizedLiveMode : normalizedSessionMode;
 
-  const scopedSession = useMemo(() => {
+  const liveScopedSession = useMemo(() => {
     if (!rawSession) return null;
-    if (liveUnfilteredSession && rawSession === liveUnfilteredSession && liveSession) {
+    if (
+      activeTab === 'live' &&
+      liveUnfilteredSession &&
+      rawSession === liveUnfilteredSession &&
+      liveSession
+    ) {
       return liveSession;
     }
-    return filterSessionByPlaylist(rawSession, normalizedActivePlaylist);
-  }, [rawSession, normalizedActivePlaylist, liveUnfilteredSession, liveSession]);
+    return filterSessionByPlaylist(rawSession, normalizedLiveMode);
+  }, [rawSession, activeTab, normalizedLiveMode, liveUnfilteredSession, liveSession]);
+
+  const sessionScopedSession = useMemo(() => {
+    if (!rawSession) return null;
+    if (
+      activeTab !== 'live' &&
+      liveUnfilteredSession &&
+      rawSession === liveUnfilteredSession &&
+      liveSession
+    ) {
+      return liveSession;
+    }
+    return filterSessionByPlaylist(rawSession, normalizedSessionMode);
+  }, [rawSession, activeTab, normalizedSessionMode, liveUnfilteredSession, liveSession]);
+
+  const headerScopedSession = activeTab === 'live' ? liveScopedSession : sessionScopedSession;
 
   const match = useMemo(() => {
     if (liveMatch && (liveMatch.active_match || liveMatch.match_ended)) return liveMatch;
@@ -134,9 +160,9 @@ const DashboardShell: React.FC = () => {
     }
   }, [inMatch, match?.playlist_id, syncLivePlaylist]);
 
-  const lastMatch = chronological(scopedSession?.matches).pop();
+  const lastMatch = chronological(headerScopedSession?.matches).pop();
   const headerPlaylistId = useMemo(() => {
-    const param = normalizedActivePlaylist;
+    const param = normalizedHeaderMode;
     const numericId = Number(param);
     if (Number.isInteger(numericId) && numericId > 0) {
       return numericId;
@@ -148,8 +174,8 @@ const DashboardShell: React.FC = () => {
       return matched?.playlist_id;
     }
     if (inMatch && match?.playlist_id) return match.playlist_id;
-    return scopedSession?.most_played_playlist?.id ?? lastMatch?.playlist_id;
-  }, [inMatch, match?.playlist_id, normalizedActivePlaylist, rawSession, scopedSession, lastMatch?.playlist_id]);
+    return headerScopedSession?.most_played_playlist?.id ?? lastMatch?.playlist_id;
+  }, [inMatch, match?.playlist_id, normalizedHeaderMode, rawSession, headerScopedSession, lastMatch?.playlist_id]);
 
   const onTabChange = useCallback(
     (nextTab: DashboardTab) => {
@@ -174,9 +200,9 @@ const DashboardShell: React.FC = () => {
         onTabChange={onTabChange}
         inMatch={inMatch}
         session={rawSession}
-        scopedSession={scopedSession}
+        scopedSession={headerScopedSession}
+        statusMode={normalizedHeaderMode}
         playlistId={headerPlaylistId}
-        onOpenColumns={activeTab === 'live' && inMatch ? () => setColumnsOpen(true) : undefined}
         onRefreshSession={refreshSession}
       />
 
@@ -197,12 +223,12 @@ const DashboardShell: React.FC = () => {
               <LiveGameView
                 match={match}
                 session={rawSession}
-                scopedSession={scopedSession}
-                activePlaylist={activePlaylist}
-                onSelectPlaylist={setActivePlaylist}
-                hideHeaderHistToggle
+                scopedSession={liveScopedSession}
+                activePlaylist={liveFilters.playlist}
+                onSelectPlaylist={liveFilters.setPlaylist}
                 connection={status}
                 columnsOpen={columnsOpen}
+                onOpenColumns={() => setColumnsOpen(true)}
                 onCloseColumns={() => setColumnsOpen(false)}
                 onShowSession={() => onTabChange('session')}
                 onContinueSession={continueSession}
@@ -214,9 +240,9 @@ const DashboardShell: React.FC = () => {
             {activeTab === 'session' && (
               <SessionView
                 session={rawSession}
-                scopedSession={scopedSession}
-                activePlaylist={activePlaylist}
-                onSelectPlaylist={setActivePlaylist}
+                scopedSession={sessionScopedSession}
+                activePlaylist={sessionFilters.playlist}
+                onSelectPlaylist={sessionFilters.setPlaylist}
                 pastSessions={pastSessions}
                 liveMatch={match}
                 isLoading={sessionLoading}
@@ -232,7 +258,6 @@ const DashboardShell: React.FC = () => {
               <HistoryView
                 localPlayerIds={localPlayerIds}
                 liveMatch={match}
-                hidePlaylistFilter
                 onOpenFullProfile={handleOpenFullProfile}
               />
             )}

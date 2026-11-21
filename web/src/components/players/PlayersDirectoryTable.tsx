@@ -16,6 +16,7 @@ import {
 import { useDashboard } from '../../context/DashboardContext';
 import { COLUMN_HEADER, RecordCells } from '../common/ui';
 import { rankForPlaylist } from './playerData';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 interface DirectoryRowProps {
   player: PlayerSummary;
@@ -280,19 +281,19 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('mmr')}
-                className={headerBtnClass('right')}
+                className={`${headerBtnClass('right')} ${STAT_LABEL_CLASS.mmr}`}
               >
                 MMR{sortIndicator('mmr')}
               </button>
             </th>
-            <th scope="col" className="px-3 py-2.5 whitespace-nowrap">
+            <th scope="col" className={`px-3 py-2.5 whitespace-nowrap ${STAT_LABEL_CLASS.rank}`}>
               RANK · DIV
             </th>
             <th scope="col" aria-sort={ariaSort('win_rate')} className="p-0 whitespace-nowrap">
               <button
                 type="button"
                 onClick={() => onToggleSort('win_rate')}
-                className={headerBtnClass('left')}
+                className={`${headerBtnClass('left')} ${STAT_LABEL_CLASS.goals}`}
               >
                 WITH YOU{sortIndicator('win_rate')}
               </button>
@@ -301,7 +302,7 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('vs_win_rate')}
-                className={headerBtnClass('left')}
+                className={`${headerBtnClass('left')} ${STAT_LABEL_CLASS.demos}`}
               >
                 AGAINST{sortIndicator('vs_win_rate')}
               </button>
@@ -310,7 +311,7 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('total_matches')}
-                className={headerBtnClass('right')}
+                className={`${headerBtnClass('right')} ${STAT_LABEL_CLASS.games}`}
               >
                 GAMES{sortIndicator('total_matches')}
               </button>
@@ -319,7 +320,7 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('with_pts')}
-                className={headerBtnClass('right')}
+                className={`${headerBtnClass('right')} ${STAT_LABEL_CLASS.score}`}
               >
                 {isAvg ? 'WITH PTS/G' : 'WITH PTS'}
                 {sortIndicator('with_pts')}
@@ -329,7 +330,7 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('vs_pts')}
-                className={headerBtnClass('right')}
+                className={`${headerBtnClass('right')} ${STAT_LABEL_CLASS.shots}`}
               >
                 {isAvg ? 'VS PTS/G' : 'VS PTS'}
                 {sortIndicator('vs_pts')}
