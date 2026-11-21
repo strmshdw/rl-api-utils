@@ -3,6 +3,7 @@ import { ReplayPlayerStats } from '../../types/api';
 import { positioningRoleLabels } from '../../utils/broadcast';
 import { SectionLabel } from '../common/ui';
 import { TelemetryPendingBanner } from './MatchCoreOverviewTab';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 interface TeamTelemetryTabProps {
   bluePlayers: ReplayPlayerStats[];
@@ -128,15 +129,15 @@ export const MatchBoostTab: React.FC<TeamTelemetryTabProps> = ({
             className={`grid ${BOOST_GRID_COLS} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
           >
             <span>PLAYER</span>
-            <span className="text-right" title="Boost Used Per Minute">BPM</span>
-            <span className="text-right" title="Boost Collected Per Minute">BCPM</span>
-            <span className="text-right">AVG BST</span>
-            <span className="text-right">STOLEN</span>
-            <span className="text-right">100 PADS</span>
-            <span className="text-right">SML PADS</span>
-            <span className="text-right">OVERFILL</span>
-            <span className="text-right">0% TIME</span>
-            <span className="text-right">100% TIME</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.bpm}`} title="Boost Used Per Minute">BPM</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.score}`} title="Boost Collected Per Minute">BCPM</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.boost}`}>AVG BST</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.demos}`}>STOLEN</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>100 PADS</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.shotpct}`}>SML PADS</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.shots}`}>OVERFILL</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.demod}`}>0% TIME</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.mmr}`}>100% TIME</span>
           </div>
           {renderTeam(bluePlayers, 'BLUE TEAM', true)}
           {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
@@ -228,14 +229,14 @@ export const MatchMovementTab: React.FC<TeamTelemetryTabProps> = ({
             className={`grid ${MOVEMENT_GRID_COLS} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
           >
             <span>PLAYER</span>
-            <span className="text-right">AVG SPEED</span>
-            <span className="text-right">SUPERSONIC</span>
-            <span className="text-right">BOOST SPD</span>
-            <span className="text-right">SLOW SPD</span>
-            <span className="text-right">GROUND %</span>
-            <span className="text-right">LOW AIR</span>
-            <span className="text-right">HIGH AIR</span>
-            <span className="text-right">POWERSLIDES</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.score}`}>AVG SPEED</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.speed}`}>SUPERSONIC</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.bpm}`}>BOOST SPD</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.rank}`}>SLOW SPD</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>GROUND %</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>LOW AIR</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>HIGH AIR</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.shots}`}>POWERSLIDES</span>
           </div>
           {renderTeam(bluePlayers, 'BLUE TEAM', true)}
           {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
@@ -336,18 +337,18 @@ export const MatchPositioningTab: React.FC<MatchPositioningTabProps> = ({
             className={`grid ${gridColsClass} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
           >
             <span>PLAYER</span>
-            <span className="text-right">DEF 1/3</span>
-            <span className="text-right">NEUT 1/3</span>
-            <span className="text-right">OFF 1/3</span>
-            <span className="text-right">BEHIND BALL</span>
-            <span className="text-right">IN FRONT</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>DEF 1/3</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>NEUT 1/3</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>OFF 1/3</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.shotpct}`}>BEHIND BALL</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.demos}`}>IN FRONT</span>
             {showRotation && (
               <>
-                <span className="text-right">{forwardLabel}</span>
-                <span className="text-right">{backLabel}</span>
+                <span className={`text-right ${STAT_LABEL_CLASS.score}`}>{forwardLabel}</span>
+                <span className={`text-right ${STAT_LABEL_CLASS.shots}`}>{backLabel}</span>
               </>
             )}
-            <span className="text-right">DIST BALL</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.demod}`}>DIST BALL</span>
           </div>
           {renderTeam(bluePlayers, 'BLUE TEAM', true)}
           {renderTeam(orangePlayers, 'ORANGE TEAM', false)}
@@ -359,6 +360,7 @@ export const MatchPositioningTab: React.FC<MatchPositioningTabProps> = ({
 
 interface H2HRowMetric {
   label: string;
+  colorClass: string;
   blueRaw: number;
   orangeRaw: number;
   blueText: string;
@@ -381,11 +383,12 @@ export const MatchH2HTab: React.FC<{
   const blueSupPct = blueSupRows.length > 0 ? meanBy(blueSupRows, (p) => p.movement!.percent_supersonic_speed!) : 0;
   const orangeSupPct = orangeSupRows.length > 0 ? meanBy(orangeSupRows, (p) => p.movement!.percent_supersonic_speed!) : 0;
 
-  const makeShareMetric = (label: string, bVal: number, oVal: number): H2HRowMetric => {
+  const makeShareMetric = (label: string, colorClass: string, bVal: number, oVal: number): H2HRowMetric => {
     const total = bVal + oVal;
     const pct = total > 0 ? Math.round((bVal / total) * 100) : 50;
     return {
       label,
+      colorClass,
       blueRaw: bVal,
       orangeRaw: oVal,
       blueText: `BLUE ${bVal} (${pct}%)`,
@@ -394,20 +397,23 @@ export const MatchH2HTab: React.FC<{
   };
 
   const h2hMetrics: H2HRowMetric[] = [
-    makeShareMetric('TEAM SCORE (PTS)', sumBy(bluePlayers, (p) => p.score || 0), sumBy(orangePlayers, (p) => p.score || 0)),
-    makeShareMetric('SHOTS ON TARGET', sumBy(bluePlayers, (p) => p.shots || 0), sumBy(orangePlayers, (p) => p.shots || 0)),
+    makeShareMetric('TEAM SCORE (PTS)', STAT_LABEL_CLASS.score, sumBy(bluePlayers, (p) => p.score || 0), sumBy(orangePlayers, (p) => p.score || 0)),
+    makeShareMetric('SHOTS ON TARGET', STAT_LABEL_CLASS.shots, sumBy(bluePlayers, (p) => p.shots || 0), sumBy(orangePlayers, (p) => p.shots || 0)),
     makeShareMetric(
       'TOTAL BOOST COLLECTED',
+      STAT_LABEL_CLASS.boost,
       sumBy(bluePlayers, (p) => p.boost?.amount_collected ?? 0),
       sumBy(orangePlayers, (p) => p.boost?.amount_collected ?? 0),
     ),
     makeShareMetric(
       'STOLEN BOOST',
+      STAT_LABEL_CLASS.bpm,
       sumBy(bluePlayers, (p) => p.boost?.amount_stolen ?? 0),
       sumBy(orangePlayers, (p) => p.boost?.amount_stolen ?? 0),
     ),
     {
       label: 'AVG SPEED',
+      colorClass: STAT_LABEL_CLASS.assists,
       blueRaw: blueSpeedUu,
       orangeRaw: orangeSpeedUu,
       blueText: `BLUE ${blueSpeedRounded} uu/s`,
@@ -415,6 +421,7 @@ export const MatchH2HTab: React.FC<{
     },
     {
       label: 'AVG SUPERSONIC %',
+      colorClass: STAT_LABEL_CLASS.speed,
       blueRaw: blueSupPct,
       orangeRaw: orangeSupPct,
       blueText: `BLUE ${formatTrimmedTenths(blueSupPct)}%`,
@@ -422,6 +429,7 @@ export const MatchH2HTab: React.FC<{
     },
     makeShareMetric(
       'DEMOLITIONS INFLICTED',
+      STAT_LABEL_CLASS.demos,
       sumBy(bluePlayers, (p) => p.demo?.inflicted ?? p.demos ?? 0),
       sumBy(orangePlayers, (p) => p.demo?.inflicted ?? p.demos ?? 0),
     ),
@@ -439,7 +447,7 @@ export const MatchH2HTab: React.FC<{
                 <span className="t-text-blue text-blue-ink t-font-mono">
                   {m.blueText}
                 </span>
-                <span className="t-text-strong text-ink-strong tracking-wider">{m.label}</span>
+                <span className={`${m.colorClass} tracking-wider`}>{m.label}</span>
                 <span className="t-text-orange text-orange-ink t-font-mono">
                   {m.orangeText}
                 </span>

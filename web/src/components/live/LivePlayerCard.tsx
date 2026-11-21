@@ -15,19 +15,20 @@ import {
   shortRank,
 } from '../../utils/broadcast';
 import { RecordCells } from '../common/ui';
-import { useDashboard } from '../../context/DashboardContext';
+import { StatMode, useDashboard } from '../../context/DashboardContext';
 import type { ScopedLivePlayerHistory } from '../../hooks/useLiveLobbyHistories';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 export type StatKey = keyof PlayerStatsSummary;
 export type StatLeaders = Record<StatKey, number>;
 
-export const STRIP_STATS: ReadonlyArray<{ key: StatKey; label: string }> = [
-  { key: 'score', label: 'SCORE' },
-  { key: 'goals', label: 'G' },
-  { key: 'assists', label: 'A' },
-  { key: 'saves', label: 'SV' },
-  { key: 'shots', label: 'SH' },
-  { key: 'demos', label: 'D' },
+export const STRIP_STATS: ReadonlyArray<{ key: StatKey; label: string; colorClass: string }> = [
+  { key: 'score', label: 'SCORE', colorClass: STAT_LABEL_CLASS.score },
+  { key: 'goals', label: 'G', colorClass: STAT_LABEL_CLASS.goals },
+  { key: 'assists', label: 'A', colorClass: STAT_LABEL_CLASS.assists },
+  { key: 'saves', label: 'SV', colorClass: STAT_LABEL_CLASS.saves },
+  { key: 'shots', label: 'SH', colorClass: STAT_LABEL_CLASS.shots },
+  { key: 'demos', label: 'D', colorClass: STAT_LABEL_CLASS.demos },
 ];
 
 const EMPTY_STATS: PlayerStatsSummary = { score: 0, goals: 0, assists: 0, saves: 0, shots: 0, demos: 0 };
@@ -69,6 +70,7 @@ interface LivePlayerCardProps {
   opposingTeamPlayers?: LobbyPlayer[];
   activePlaylistId?: number;
   playlistScope?: string;
+  statMode?: StatMode;
   scopedHistory?: ScopedLivePlayerHistory;
   subgridPlacement?: LiveCardSubgridPlacement;
   onInspectPlayer?: (playerId: string, playerName?: string) => void;
@@ -85,12 +87,13 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
   opposingTeamPlayers = [],
   activePlaylistId = 11,
   playlistScope = '11',
+  statMode: statModeProp,
   scopedHistory,
   subgridPlacement,
   onInspectPlayer,
 }) => {
-  const { statMode, showLiveHistData, stampingConfig } = useDashboard();
-  const isAvg = statMode === 'avg';
+  const { statMode: contextStatMode, showLiveHistData, stampingConfig } = useDashboard();
+  const isAvg = (statModeProp ?? contextStatMode) === 'avg';
 
   const param = playlistFilterToParam(playlistScope);
   const parsedId = Number(param);
@@ -214,11 +217,11 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
       return (
         <div
           key={roleLabel}
-          className={`${HIST_GRID_COLS} border-t border-line text-xs t-font-mono opacity-45`}
+          className={`${HIST_GRID_COLS} border-t border-line text-xs t-font-mono`}
         >
           <div className="font-bold t-text-muted uppercase whitespace-nowrap">{roleLabel}</div>
           <div className="text-right t-text-faint tabular-nums">0G</div>
-          <div className="col-span-7 text-center text-xs t-font-display tracking-wider t-text-faint uppercase">
+          <div className="col-span-7 text-center text-xs t-font-display tracking-wider t-text-muted2 uppercase">
             — NO MATCHES IN SELECTED RANGE —
           </div>
         </div>
@@ -433,9 +436,9 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
               .join(' '),
           }}
         >
-          {strip.map(({ key, label }) => (
+          {strip.map(({ key, label, colorClass }) => (
             <div key={key} data-stat={key} className="px-2.5 py-1.5 flex items-baseline justify-between gap-1 min-w-0">
-              <span className="font-bold text-[10px] sm:text-[11px] tracking-wider text-muted uppercase shrink-0">
+              <span className={`font-extrabold text-[10px] sm:text-[11px] tracking-wider uppercase shrink-0 ${colorClass}`}>
                 {label}
               </span>
               <span
@@ -462,14 +465,14 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         >
           <div className={`${HIST_GRID_COLS} text-[11px] t-font-display font-bold uppercase tracking-wider t-text-muted`}>
             <div className="whitespace-nowrap">HIST ({isAvg ? 'AVG/G' : 'TOTAL'})</div>
-            <div className="text-right">GMS</div>
-            <div className="text-right">PTS</div>
-            <div className="text-right">G</div>
-            <div className="text-right">A</div>
-            <div className="text-right">SV</div>
-            <div className="text-right">SH%</div>
-            <div className="text-right">DEM</div>
-            <div className="text-right">BST</div>
+            <div className={`text-right ${STAT_LABEL_CLASS.games}`}>GMS</div>
+            <div className={`text-right ${STAT_LABEL_CLASS.score}`}>PTS</div>
+            <div className={`text-right ${STAT_LABEL_CLASS.goals}`}>G</div>
+            <div className={`text-right ${STAT_LABEL_CLASS.assists}`}>A</div>
+            <div className={`text-right ${STAT_LABEL_CLASS.saves}`}>SV</div>
+            <div className={`text-right ${STAT_LABEL_CLASS.shotpct}`}>SH%</div>
+            <div className={`text-right ${STAT_LABEL_CLASS.demos}`}>DEM</div>
+            <div className={`text-right ${STAT_LABEL_CLASS.boost}`}>BST</div>
           </div>
           {isLocal ? (
             <>

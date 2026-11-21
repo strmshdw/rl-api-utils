@@ -7,26 +7,15 @@ import {
 } from '../../utils/broadcast';
 import { isDemoMode, SAMPLE_HISTORICAL_MATCHES } from '../../utils/sampleData';
 import { COLUMN_HEADER, GhostButton, PageHeader, PrimaryButton, SearchInput, Segmented } from '../common/ui';
+import { AreaFilterBar } from '../common/AreaFilterBar';
 import { HistoricalMatchDetailModal } from './HistoricalMatchDetailModal';
 import { HISTORY_ROW_GRID, HistoryRow } from './HistoryRow';
 import { historyOutcome, isLocal, replayStatus } from './historyData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
-import { useDashboard } from '../../context/DashboardContext';
+import { useAreaFilters, useDashboard } from '../../context/DashboardContext';
 import { useBallchasingSync } from '../../hooks/useBallchasingSync';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
-const PLAYLIST_OPTIONS = [
-  ['11', '2V2'],
-  ['13', '3V3'],
-  ['10', '1V1'],
-  ['27', 'HOOPS'],
-  ['28', 'RUMBLE'],
-  ['29', 'DROPSHOT'],
-  ['30', 'SNOW DAY'],
-  ['34', 'TOURNAMENT'],
-  ['casual', 'CASUAL'],
-] as const;
-
-type PlaylistFilter = (typeof PLAYLIST_OPTIONS)[number][0];
 type StatusFilter = 'all' | 'BALLCHASING' | 'LOCAL';
 type OutcomeFilter = 'all' | 'W' | 'L';
 type HistorySortOption =
@@ -53,12 +42,6 @@ const OUTCOME_OPTIONS = [
 const PAGE_SIZE = 20;
 const EMPTY_IDS = new Set<string>();
 
-function toHistoryPlaylistOption(raw?: string | null): PlaylistFilter {
-  const norm = normalizeActiveModeKey(raw);
-  const valid = PLAYLIST_OPTIONS.some(([k]) => k === norm);
-  return (valid ? norm : '11') as PlaylistFilter;
-}
-
 interface HistoryViewProps {
   /** Lower-cased online IDs of the local player, used to orient W/L and highlight "you". */
   localPlayerIds?: Set<string>;
@@ -73,13 +56,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   hidePlaylistFilter = false,
   onOpenFullProfile,
 }) => {
-  const {
-    dateRangeQueryParams,
-    activePlaylist,
-    setActivePlaylist,
-    isDevBuild,
-    previewMode,
-  } = useDashboard();
+  const { isDevBuild, previewMode } = useDashboard();
+  const historyFilters = useAreaFilters('history');
   const [matches, setMatches] = useState<HistoricalMatchRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [serverLocalIds, setServerLocalIds] = useState<string[]>([]);
@@ -89,9 +67,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [localPlaylistFilter, setLocalPlaylistFilter] = useState<PlaylistFilter>(() =>
-    toHistoryPlaylistOption(activePlaylist),
-  );
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
   const [sortOption, setSortOption] = useState<HistorySortOption>('date-desc');
@@ -103,22 +78,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [profilePlayerId, setProfilePlayerId] = useState<string | null>(null);
   const [profilePlayerName, setProfilePlayerName] = useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    setLocalPlaylistFilter(toHistoryPlaylistOption(activePlaylist));
-  }, [activePlaylist]);
-
   const effectivePlaylistFilter = useMemo(
-    () => normalizeActiveModeKey(hidePlaylistFilter ? activePlaylist : localPlaylistFilter),
-    [hidePlaylistFilter, activePlaylist, localPlaylistFilter],
+    () => normalizeActiveModeKey(historyFilters.playlist),
+    [historyFilters.playlist],
   );
   const playlistParam = useMemo(
     () => playlistFilterToParam(effectivePlaylistFilter),
     [effectivePlaylistFilter],
   );
+  const dateRangeQueryParams = historyFilters.dateRangeQueryParams;
 
   useEffect(() => {
     setPage(1);
-  }, [playlistParam]);
+  }, [playlistParam, dateRangeQueryParams.from, dateRangeQueryParams.to]);
 
   const effectiveLocalIds = useMemo(() => {
     if (serverLocalIds.length === 0) return localPlayerIds;
@@ -351,66 +323,103 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         </div>
       )}
 
-      <div className="t-bg-panel bg-panel t-border border border-line p-3.5 mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <SearchInput
-            id="history-search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="SEARCH ARENA, PLAYER OR GUID…"
-            className="w-64 sm:w-72"
-          />
-          {!hidePlaylistFilter && (
+      <div className="surface-plaque t-border border border-line p-3.5 mb-4 flex flex-col gap-3 t-radius">
+        <AreaFilterBar
+          area="history"
+          ariaLabel="Match history scope filters"
+          embedded
+          showModeFilter={!hidePlaylistFilter}
+          playlist={effectivePlaylistFilter}
+          onPlaylistChange={(mode) => {
+            historyFilters.setPlaylist(mode);
+            setPage(1);
+          }}
+          dateRange={historyFilters.dateRange}
+          onDateRangeChange={(range) => {
+            historyFilters.setDateRange(range);
+            setPage(1);
+          }}
+          customFrom={historyFilters.customFrom}
+          onCustomFromChange={historyFilters.setCustomFrom}
+          customTo={historyFilters.customTo}
+          onCustomToChange={historyFilters.setCustomTo}
+          showCustomCalendar={historyFilters.showCustomCalendar}
+          onToggleCustomCalendar={() => {
+            if (!historyFilters.showCustomCalendar && historyFilters.dateRange !== 'custom') {
+              historyFilters.setDateRange('custom');
+            } else {
+              historyFilters.setShowCustomCalendar((prev) => !prev);
+            }
+          }}
+          showReset={
+            effectivePlaylistFilter !== '11' ||
+            historyFilters.dateRange !== 'all' ||
+            historyFilters.showCustomCalendar ||
+            query.trim() !== '' ||
+            statusFilter !== 'all' ||
+            outcomeFilter !== 'all' ||
+            sortOption !== 'date-desc'
+          }
+          onReset={() => {
+            historyFilters.resetFilters();
+            setQuery('');
+            setDebouncedQuery('');
+            setStatusFilter('all');
+            setOutcomeFilter('all');
+            setSortOption('date-desc');
+            setPage(1);
+          }}
+        />
+
+        <div className="border-t border-line pt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <SearchInput
+              id="history-search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="SEARCH ARENA, PLAYER OR GUID…"
+              className="w-64 sm:w-72"
+            />
             <Segmented
-              label="Filter by playlist"
-              options={PLAYLIST_OPTIONS}
-              value={localPlaylistFilter}
+              label="Filter by status"
+              options={STATUS_OPTIONS}
+              value={statusFilter}
               onChange={(v) => {
-                setLocalPlaylistFilter(v);
-                setActivePlaylist(v);
+                setStatusFilter(v);
                 setPage(1);
               }}
             />
-          )}
-          <Segmented
-            label="Filter by status"
-            options={STATUS_OPTIONS}
-            value={statusFilter}
-            onChange={(v) => {
-              setStatusFilter(v);
-              setPage(1);
-            }}
-          />
-          <Segmented
-            label="Filter by result"
-            options={OUTCOME_OPTIONS}
-            value={outcomeFilter}
-            onChange={(v) => {
-              setOutcomeFilter(v);
-              setPage(1);
-            }}
-          />
-        </div>
+            <Segmented
+              label="Filter by result"
+              options={OUTCOME_OPTIONS}
+              value={outcomeFilter}
+              onChange={(v) => {
+                setOutcomeFilter(v);
+                setPage(1);
+              }}
+            />
+          </div>
 
-        <div className="flex items-center gap-2">
-          <select
-            id="history-sort"
-            aria-label="Sort matches"
-            value={sortOption}
-            onChange={(e) => {
-              setSortOption(e.target.value as HistorySortOption);
-              setPage(1);
-            }}
-            className="h-[38px] t-bg-page bg-page t-border border border-outline px-3 text-sm font-extrabold t-text-strong text-ink-strong uppercase outline-none t-radius"
-          >
-            <option value="date-desc">SORT: NEWEST FIRST</option>
-            <option value="date-asc">SORT: OLDEST FIRST</option>
-            <option value="pts-desc">SORT: YOUR SCORE</option>
-            <option value="goals-desc">SORT: YOUR GOALS</option>
-            <option value="saves-desc">SORT: YOUR SAVES</option>
-            <option value="demos-desc">SORT: YOUR DEMOS</option>
-            <option value="duration-desc">SORT: DURATION</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              id="history-sort"
+              aria-label="Sort matches"
+              value={sortOption}
+              onChange={(e) => {
+                setSortOption(e.target.value as HistorySortOption);
+                setPage(1);
+              }}
+              className="h-[38px] t-bg-page bg-page t-border border border-outline px-3 text-sm font-extrabold t-text-strong text-ink-strong uppercase outline-none t-radius"
+            >
+              <option value="date-desc">SORT: NEWEST FIRST</option>
+              <option value="date-asc">SORT: OLDEST FIRST</option>
+              <option value="pts-desc">SORT: YOUR SCORE</option>
+              <option value="goals-desc">SORT: YOUR GOALS</option>
+              <option value="saves-desc">SORT: YOUR SAVES</option>
+              <option value="demos-desc">SORT: YOUR DEMOS</option>
+              <option value="duration-desc">SORT: DURATION</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -436,7 +445,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 style={{ gridTemplateColumns: HISTORY_ROW_GRID }}
               >
                 <span className="pl-4">RESULT</span>
-                <span className="pl-[22px]">SCORE</span>
+                <span className={`pl-[22px] ${STAT_LABEL_CLASS.score}`}>SCORE</span>
                 <span>PLAYLIST · ARENA</span>
                 <span>ROSTER</span>
                 <span className="text-right">DURATION</span>

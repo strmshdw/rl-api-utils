@@ -71,7 +71,7 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
               key={opt.id}
               type="button"
               onClick={() => applyThemeSelection(opt.id)}
-              className={`p-2.5 text-left surface-plaque border transition-colors cursor-pointer flex flex-col justify-between gap-2 t-radius min-w-0 ${
+              className={`p-2.5 text-left t-bg-panel border transition-colors cursor-pointer flex flex-col justify-between gap-2 t-radius min-w-0 ${
                 active
                   ? 'border-blue-ink ring-1 ring-blue-ink t-bg-panel-hover'
                   : 'border-line hover:border-outline'

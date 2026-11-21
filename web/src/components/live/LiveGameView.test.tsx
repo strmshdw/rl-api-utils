@@ -133,6 +133,14 @@ describe('LiveGameView — in match', () => {
     const { container } = await renderLive(liveMatch());
     const byId = (id: string) => cards(container).find((c) => c.dataset.playerId === id)!;
     const you = byId('Epic|demo_local_player|0');
+    const statLabel = (card: HTMLElement, key: string) => card.querySelector<HTMLElement>(`[data-stat="${key}"] span:first-child`)!;
+    expect(statLabel(you, 'score').className).toContain('stat-lbl-score');
+    expect(statLabel(you, 'goals').className).toContain('stat-lbl-goals');
+    expect(statLabel(you, 'assists').className).toContain('stat-lbl-assists');
+    expect(statLabel(you, 'saves').className).toContain('stat-lbl-saves');
+    expect(statLabel(you, 'shots').className).toContain('stat-lbl-shots');
+    expect(statLabel(you, 'demos').className).toContain('stat-lbl-demos');
+
     expect(statEl(you, 'score').className).toContain('text-ink-strong'); // 480 is the lobby high
     expect(statEl(you, 'goals').className).toContain('text-ink-strong'); // 2 goals
     expect(statEl(byId('Steam|76561198000000020|0'), 'demos').className).toContain('text-faint'); // 0 demos
@@ -524,6 +532,14 @@ describe('LiveGameView — between matches', () => {
     const blue = container.querySelector('[data-testid="box-score-blue"]')!;
     expect(blue.textContent).toContain('BLUE · WIN');
     expect(blue.textContent).toContain('MVP');
+    expect(blue.querySelector('.stat-lbl-score')?.textContent).toBe('PTS');
+    expect(blue.querySelector('.stat-lbl-goals')?.textContent).toBe('G');
+    expect(blue.querySelector('.stat-lbl-assists')?.textContent).toBe('A');
+    expect(blue.querySelector('.stat-lbl-saves')?.textContent).toBe('SV');
+    expect(blue.querySelector('.stat-lbl-shots')?.textContent).toBe('SH');
+    expect(blue.querySelector('.stat-lbl-demos')?.textContent).toBe('D');
+    expect(blue.querySelector('.stat-lbl-mmr')?.textContent).toBe('MMR');
+    expect(blue.querySelector('.stat-lbl-rank')?.textContent).toBe('RANK · DIV');
     expect(container.querySelector('[data-testid="box-score-orange"]')!.textContent).not.toContain('MVP');
 
     const kpis = container.querySelector('[data-testid="session-kpis"]')!;

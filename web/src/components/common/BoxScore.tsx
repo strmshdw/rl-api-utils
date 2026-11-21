@@ -11,6 +11,7 @@ import {
   shortRank,
   zeroInk,
 } from '../../utils/broadcast';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 export interface BoxScoreRow {
   key: string;
@@ -103,7 +104,7 @@ export function sessionMatchRows(match: SessionMatchDetail, team: number, mvpId?
 }
 
 const WITH_RANKS =
-  'minmax(112px,1.55fr) minmax(44px,0.55fr) minmax(94px,1.05fr) minmax(42px,0.55fr) repeat(5,minmax(26px,0.38fr))';
+  'minmax(112px,1.45fr) minmax(44px,0.52fr) minmax(112px,1.18fr) minmax(42px,0.52fr) repeat(5,minmax(26px,0.36fr))';
 const STATS_ONLY = 'minmax(110px,1fr) minmax(44px,0.55fr) repeat(5,minmax(28px,0.42fr))';
 
 /** One team's box score panel with a 3px rule in the team slab colour. */
@@ -131,15 +132,15 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
         <span className={team === 0 ? 't-text-blue' : 't-text-orange'}>
           {label}
         </span>
-        {withRanks && <span className="text-right">MMR</span>}
-        {withRanks && <span className="pl-1">RANK · DIV</span>}
-        <span className="text-right">PTS</span>
-        <span className="text-right">G</span>
-        <span className="text-right">A</span>
-        <span className="text-right">SV</span>
-        <span className="text-right">SH</span>
-        <span className="text-right">D</span>
-        {withH2H && <span className="text-right">H2H</span>}
+        {withRanks && <span className={`text-right ${STAT_LABEL_CLASS.mmr}`}>MMR</span>}
+        {withRanks && <span className={`pl-1 ${STAT_LABEL_CLASS.rank}`}>RANK · DIV</span>}
+        <span className={`text-right ${STAT_LABEL_CLASS.score}`}>PTS</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>G</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>A</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>SV</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.shots}`}>SH</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.demos}`}>D</span>
+        {withH2H && <span className={`text-right ${STAT_LABEL_CLASS.h2h}`}>H2H</span>}
       </div>
       {rows.map((p) => {
         const formattedRank = shortRank(p.rank, p.division, p.shortRank, p.tier);

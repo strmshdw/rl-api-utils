@@ -9,6 +9,7 @@ import {
   recordInk,
 } from '../../utils/broadcast';
 import { h2hTag } from './playerData';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 export type ProfilePlaylistScope =
   | '2v2'
@@ -219,15 +220,15 @@ export const CompactRoleSplitCard: React.FC<CompactRoleSplitCardProps> = ({
         <div className="t-bg-page bg-page t-border border border-line overflow-x-auto">
           <div className="min-w-[420px]">
             <div className="grid grid-cols-9 items-center py-1.5 px-2 text-right text-sm font-extrabold text-muted border-b t-border border-line uppercase">
-              <span>PTS</span>
-              <span>G</span>
-              <span>A</span>
-              <span>SV</span>
-              <span>SH%</span>
-              <span>DEM</span>
-              <span>BPM</span>
-              <span>BST</span>
-              <span>SUP%</span>
+              <span className={STAT_LABEL_CLASS.score}>PTS</span>
+              <span className={STAT_LABEL_CLASS.goals}>G</span>
+              <span className={STAT_LABEL_CLASS.assists}>A</span>
+              <span className={STAT_LABEL_CLASS.saves}>SV</span>
+              <span className={STAT_LABEL_CLASS.shotpct}>SH%</span>
+              <span className={STAT_LABEL_CLASS.demos}>DEM</span>
+              <span className={STAT_LABEL_CLASS.bpm}>BPM</span>
+              <span className={STAT_LABEL_CLASS.boost}>BST</span>
+              <span className={STAT_LABEL_CLASS.speed}>SUP%</span>
             </div>
             <div className="grid grid-cols-9 items-center py-2 px-2 text-right text-base font-extrabold t-font-mono text-muted">
               <span>—</span>
@@ -252,15 +253,15 @@ export const CompactRoleSplitCard: React.FC<CompactRoleSplitCardProps> = ({
         <div className="t-bg-page bg-page t-border border border-line overflow-x-auto">
           <div className="min-w-[420px]">
             <div className="grid grid-cols-9 items-center py-1.5 px-2 text-right text-sm font-extrabold text-muted border-b t-border border-line uppercase">
-              <span>PTS</span>
-              <span>G</span>
-              <span>A</span>
-              <span>SV</span>
-              <span>SH%</span>
-              <span>DEM</span>
-              <span>BPM</span>
-              <span>BST</span>
-              <span>SUP%</span>
+              <span className={STAT_LABEL_CLASS.score}>PTS</span>
+              <span className={STAT_LABEL_CLASS.goals}>G</span>
+              <span className={STAT_LABEL_CLASS.assists}>A</span>
+              <span className={STAT_LABEL_CLASS.saves}>SV</span>
+              <span className={STAT_LABEL_CLASS.shotpct}>SH%</span>
+              <span className={STAT_LABEL_CLASS.demos}>DEM</span>
+              <span className={STAT_LABEL_CLASS.bpm}>BPM</span>
+              <span className={STAT_LABEL_CLASS.boost}>BST</span>
+              <span className={STAT_LABEL_CLASS.speed}>SUP%</span>
             </div>
             <div className="grid grid-cols-9 items-center py-2 px-2 text-right text-base font-extrabold t-font-mono">
               <span className="t-text-strong text-ink-strong">{pts.toLocaleString()}</span>

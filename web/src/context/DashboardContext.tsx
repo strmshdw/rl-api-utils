@@ -34,16 +34,78 @@ export { THEME_STYLES, buildDateRangeQueryParams, getDateRangeLabel };
 export type { ThemeStyleKey, ColorMode, FontScale, DateRangePreset };
 
 export type StatMode = 'avg' | 'total';
+export type FilterArea = 'live' | 'session' | 'history' | 'players';
 export type ReplayLimitPreviewState = 'auto' | 'warn' | 'error' | 'ok';
 export type LiveViewMode = 'match' | 'idle';
 export type StampingSyncState = 'idle' | 'saving' | 'saved' | 'reset' | 'error';
 
+export interface AreaFilterState {
+  playlist: string;
+  dateRange: DateRangePreset;
+  customFrom: string;
+  customTo: string;
+  showCustomCalendar: boolean;
+  statMode: StatMode;
+}
+
+export interface AreaFilterControls extends AreaFilterState {
+  dateRangeQueryParams: { from?: string; to?: string };
+  dateRangeLabel: string;
+  setPlaylist: (playlist: string) => void;
+  setDateRange: (range: DateRangePreset) => void;
+  setCustomFrom: (date: string) => void;
+  setCustomTo: (date: string) => void;
+  setShowCustomCalendar: (open: boolean | ((prev: boolean) => boolean)) => void;
+  setStatMode: (mode: StatMode) => void;
+  resetFilters: () => void;
+}
+
+const ACTIVE_PLAYLIST_STORAGE_KEY = 'rlsync_active_playlist';
+const AREA_PLAYLIST_KEY_PREFIX = 'rlsync_area_playlist_';
+const ALL_FILTER_AREAS: readonly FilterArea[] = ['live', 'session', 'history', 'players'];
+
+export function createDefaultAreaFilterState(playlist = '11'): AreaFilterState {
+  return {
+    playlist: normalizeActiveModeKey(playlist),
+    dateRange: 'all',
+    customFrom: DEFAULT_CUSTOM_FROM,
+    customTo: DEFAULT_CUSTOM_TO,
+    showCustomCalendar: false,
+    statMode: 'avg',
+  };
+}
+
+function loadAreaPlaylist(area: FilterArea): string {
+  const areaStored = safeStorageGet(`${AREA_PLAYLIST_KEY_PREFIX}${area}`);
+  if (areaStored) return normalizeActiveModeKey(areaStored);
+  const legacyStored = safeStorageGet(ACTIVE_PLAYLIST_STORAGE_KEY);
+  return normalizeActiveModeKey(legacyStored);
+}
+
+function buildInitialAreaFilters(): Record<FilterArea, AreaFilterState> {
+  return {
+    live: createDefaultAreaFilterState(loadAreaPlaylist('live')),
+    session: createDefaultAreaFilterState(loadAreaPlaylist('session')),
+    history: createDefaultAreaFilterState(loadAreaPlaylist('history')),
+    players: createDefaultAreaFilterState(loadAreaPlaylist('players')),
+  };
+}
+
 export interface DashboardContextValue {
+  isProvided: boolean;
   themeStyle: ThemeStyleKey;
   colorMode: ColorMode;
   setTheme: (style: ThemeStyleKey, mode: ColorMode) => void;
   fontScale: FontScale;
   setFontScale: (scale: FontScale) => void;
+  areaFilters: Record<FilterArea, AreaFilterState>;
+  setAreaPlaylist: (area: FilterArea, playlist: string) => void;
+  setAreaDateRange: (area: FilterArea, range: DateRangePreset) => void;
+  setAreaCustomFrom: (area: FilterArea, date: string) => void;
+  setAreaCustomTo: (area: FilterArea, date: string) => void;
+  setAreaShowCustomCalendar: (area: FilterArea, open: boolean | ((prev: boolean) => boolean)) => void;
+  setAreaStatMode: (area: FilterArea, mode: StatMode) => void;
+  resetAreaFilters: (area: FilterArea) => void;
   statMode: StatMode;
   setStatMode: (mode: StatMode) => void;
   activePlaylist: string;
@@ -81,12 +143,28 @@ export interface DashboardContextValue {
   setPreviewMode: (enabled: boolean) => void;
 }
 
+const DEFAULT_AREA_MAP: Record<FilterArea, AreaFilterState> = {
+  live: createDefaultAreaFilterState('11'),
+  session: createDefaultAreaFilterState('11'),
+  history: createDefaultAreaFilterState('11'),
+  players: createDefaultAreaFilterState('11'),
+};
+
 const DEFAULT_CONTEXT: DashboardContextValue = {
+  isProvided: false,
   themeStyle: 'broadcast',
   colorMode: 'dark',
   setTheme: () => {},
   fontScale: 'normal',
   setFontScale: () => {},
+  areaFilters: DEFAULT_AREA_MAP,
+  setAreaPlaylist: () => {},
+  setAreaDateRange: () => {},
+  setAreaCustomFrom: () => {},
+  setAreaCustomTo: () => {},
+  setAreaShowCustomCalendar: () => {},
+  setAreaStatMode: () => {},
+  resetAreaFilters: () => {},
   statMode: 'avg',
   setStatMode: () => {},
   activePlaylist: '11',
@@ -126,24 +204,17 @@ const DEFAULT_CONTEXT: DashboardContextValue = {
 
 const DashboardContext = createContext<DashboardContextValue>(DEFAULT_CONTEXT);
 
-const ACTIVE_PLAYLIST_STORAGE_KEY = 'rlsync_active_playlist';
-
 const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { themeStyle, colorMode, setTheme, fontScale, setFontScale } = useTheme();
   const isDevBuild = useMemo(() => isPreviewBuildAllowed(), []);
   const appVersion = useMemo(() => getAppVersion(), []);
 
   const [previewMode, setPreviewModeState] = useState<boolean>(() => isDemoMode());
-  const [statMode, setStatMode] = useState<StatMode>('avg');
-  const [activePlaylist, setActivePlaylistState] = useState<string>(
-    () => normalizeActiveModeKey(safeStorageGet(ACTIVE_PLAYLIST_STORAGE_KEY)),
+  const [areaFilters, setAreaFilters] = useState<Record<FilterArea, AreaFilterState>>(
+    () => buildInitialAreaFilters(),
   );
   const lastSyncedLivePlaylistRef = useRef<number | null>(null);
   const userOverrodeInCurrentMatchRef = useRef<boolean>(false);
-  const [dateRange, setDateRangeState] = useState<DateRangePreset>('all');
-  const [customFrom, setCustomFromState] = useState<string>(DEFAULT_CUSTOM_FROM);
-  const [customTo, setCustomToState] = useState<string>(DEFAULT_CUSTOM_TO);
-  const [showCustomCalendar, setShowCustomCalendar] = useState<boolean>(false);
 
   const [replayLimitPreview, setReplayLimitPreviewState] = useState<ReplayLimitPreviewState>('auto');
   const [replayBannerDismissed, setReplayBannerDismissedState] = useState<boolean>(
@@ -154,6 +225,156 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [pinnedPlayerIds, setPinnedPlayerIds] = useState<string[]>(() => loadPinnedPlayerIds());
   const [stampingConfig, setStampingConfig] = useState<StampingConfig>(() => loadStampingConfig());
   const [stampingSyncState, setStampingSyncState] = useState<StampingSyncState>('idle');
+
+  const updateArea = useCallback(
+    (area: FilterArea, updater: (prev: AreaFilterState) => AreaFilterState) => {
+      setAreaFilters((prev) => ({
+        ...prev,
+        [area]: updater(prev[area]),
+      }));
+    },
+    [],
+  );
+
+  const setAreaPlaylist = useCallback(
+    (area: FilterArea, playlist: string) => {
+      const next = normalizeActiveModeKey(playlist);
+      updateArea(area, (prev) => ({ ...prev, playlist: next }));
+      safeStorageSet(`${AREA_PLAYLIST_KEY_PREFIX}${area}`, next);
+      if (area === 'live') {
+        safeStorageSet(ACTIVE_PLAYLIST_STORAGE_KEY, next);
+        if (lastSyncedLivePlaylistRef.current !== null && lastSyncedLivePlaylistRef.current > 0) {
+          userOverrodeInCurrentMatchRef.current = true;
+        }
+      }
+    },
+    [updateArea],
+  );
+
+  const setAreaDateRange = useCallback(
+    (area: FilterArea, range: DateRangePreset) => {
+      updateArea(area, (prev) => ({
+        ...prev,
+        dateRange: range,
+        showCustomCalendar: range === 'custom',
+      }));
+    },
+    [updateArea],
+  );
+
+  const setAreaCustomFrom = useCallback(
+    (area: FilterArea, date: string) => {
+      updateArea(area, (prev) => ({
+        ...prev,
+        customFrom: date,
+        customTo: date && prev.customTo && date > prev.customTo ? date : prev.customTo,
+        dateRange: 'custom',
+      }));
+    },
+    [updateArea],
+  );
+
+  const setAreaCustomTo = useCallback(
+    (area: FilterArea, date: string) => {
+      updateArea(area, (prev) => ({
+        ...prev,
+        customFrom: prev.customFrom && date && prev.customFrom > date ? date : prev.customFrom,
+        customTo: date,
+        dateRange: 'custom',
+      }));
+    },
+    [updateArea],
+  );
+
+  const setAreaShowCustomCalendar = useCallback(
+    (area: FilterArea, open: boolean | ((prev: boolean) => boolean)) => {
+      updateArea(area, (prev) => ({
+        ...prev,
+        showCustomCalendar: typeof open === 'function' ? open(prev.showCustomCalendar) : open,
+      }));
+    },
+    [updateArea],
+  );
+
+  const setAreaStatMode = useCallback(
+    (area: FilterArea, mode: StatMode) => {
+      updateArea(area, (prev) => ({ ...prev, statMode: mode }));
+    },
+    [updateArea],
+  );
+
+  const resetAreaFilters = useCallback(
+    (area: FilterArea) => {
+      updateArea(area, () => createDefaultAreaFilterState('11'));
+      safeStorageSet(`${AREA_PLAYLIST_KEY_PREFIX}${area}`, '11');
+      if (area === 'live') {
+        safeStorageSet(ACTIVE_PLAYLIST_STORAGE_KEY, '11');
+      }
+    },
+    [updateArea],
+  );
+
+  const syncLivePlaylist = useCallback(
+    (playlistId: number | null | undefined) => {
+      if (!playlistId || playlistId <= 0) {
+        lastSyncedLivePlaylistRef.current = null;
+        userOverrodeInCurrentMatchRef.current = false;
+        return;
+      }
+      if (lastSyncedLivePlaylistRef.current !== playlistId) {
+        lastSyncedLivePlaylistRef.current = playlistId;
+        userOverrodeInCurrentMatchRef.current = false;
+        const next = modeKeyFromPlaylistId(playlistId);
+        updateArea('live', (prev) => ({ ...prev, playlist: next }));
+        safeStorageSet(`${AREA_PLAYLIST_KEY_PREFIX}live`, next);
+        safeStorageSet(ACTIVE_PLAYLIST_STORAGE_KEY, next);
+      }
+    },
+    [updateArea],
+  );
+
+  // Legacy convenience aliases operate on the live area (while keeping per-area isolation intact)
+  const setActivePlaylist = useCallback(
+    (playlist: string) => {
+      setAreaPlaylist('live', playlist);
+    },
+    [setAreaPlaylist],
+  );
+
+  const setStatMode = useCallback(
+    (mode: StatMode) => {
+      setAreaStatMode('live', mode);
+    },
+    [setAreaStatMode],
+  );
+
+  const setDateRange = useCallback(
+    (range: DateRangePreset) => {
+      setAreaDateRange('live', range);
+    },
+    [setAreaDateRange],
+  );
+
+  const setCustomFrom = useCallback(
+    (date: string) => {
+      setAreaCustomFrom('live', date);
+    },
+    [setAreaCustomFrom],
+  );
+
+  const setCustomTo = useCallback(
+    (date: string) => {
+      setAreaCustomTo('live', date);
+    },
+    [setAreaCustomTo],
+  );
+
+  const setShowCustomCalendar = useCallback(
+    (open: boolean | ((prev: boolean) => boolean)) => {
+      setAreaShowCustomCalendar('live', open);
+    },
+    [setAreaShowCustomCalendar],
+  );
 
   const refreshStampingConfig = useCallback(async () => {
     try {
@@ -229,57 +450,6 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  const setDateRange = useCallback((range: DateRangePreset) => {
-    setDateRangeState(range);
-    setShowCustomCalendar(range === 'custom');
-  }, []);
-
-  const setActivePlaylist = useCallback((playlist: string) => {
-    const next = normalizeActiveModeKey(playlist);
-    setActivePlaylistState(next);
-    safeStorageSet(ACTIVE_PLAYLIST_STORAGE_KEY, next);
-    if (lastSyncedLivePlaylistRef.current !== null && lastSyncedLivePlaylistRef.current > 0) {
-      userOverrodeInCurrentMatchRef.current = true;
-    }
-  }, []);
-
-  const syncLivePlaylist = useCallback((playlistId: number | null | undefined) => {
-    if (!playlistId || playlistId <= 0) {
-      lastSyncedLivePlaylistRef.current = null;
-      userOverrodeInCurrentMatchRef.current = false;
-      return;
-    }
-    if (lastSyncedLivePlaylistRef.current !== playlistId) {
-      lastSyncedLivePlaylistRef.current = playlistId;
-      userOverrodeInCurrentMatchRef.current = false;
-      const next = modeKeyFromPlaylistId(playlistId);
-      setActivePlaylistState(next);
-      safeStorageSet(ACTIVE_PLAYLIST_STORAGE_KEY, next);
-    }
-  }, []);
-
-  const setCustomFrom = useCallback(
-    (date: string) => {
-      if (date && customTo && date > customTo) {
-        setCustomToState(date);
-      }
-      setCustomFromState(date);
-      setDateRangeState('custom');
-    },
-    [customTo],
-  );
-
-  const setCustomTo = useCallback(
-    (date: string) => {
-      if (customFrom && date && customFrom > date) {
-        setCustomFromState(date);
-      }
-      setCustomToState(date);
-      setDateRangeState('custom');
-    },
-    [customFrom],
-  );
-
   const setReplayBannerDismissed = useCallback((dismissed: boolean) => {
     setReplayBannerDismissedState(dismissed);
     safeStorageSet(STORAGE_KEYS.replayBannerDismissed, dismissed ? 'true' : 'false');
@@ -323,35 +493,45 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [pinnedPlayerIds],
   );
 
+  const liveArea = areaFilters.live;
   const dateRangeQueryParams = useMemo(
-    () => buildDateRangeQueryParams(dateRange, customFrom, customTo),
-    [dateRange, customFrom, customTo],
+    () => buildDateRangeQueryParams(liveArea.dateRange, liveArea.customFrom, liveArea.customTo),
+    [liveArea.dateRange, liveArea.customFrom, liveArea.customTo],
   );
 
   const dateRangeLabel = useMemo(
-    () => getDateRangeLabel(dateRange, customFrom, customTo),
-    [dateRange, customFrom, customTo],
+    () => getDateRangeLabel(liveArea.dateRange, liveArea.customFrom, liveArea.customTo),
+    [liveArea.dateRange, liveArea.customFrom, liveArea.customTo],
   );
 
   const value = useMemo<DashboardContextValue>(
     () => ({
+      isProvided: true,
       themeStyle,
       colorMode,
       setTheme,
       fontScale,
       setFontScale,
-      statMode,
+      areaFilters,
+      setAreaPlaylist,
+      setAreaDateRange,
+      setAreaCustomFrom,
+      setAreaCustomTo,
+      setAreaShowCustomCalendar,
+      setAreaStatMode,
+      resetAreaFilters,
+      statMode: liveArea.statMode,
       setStatMode,
-      activePlaylist,
+      activePlaylist: liveArea.playlist,
       setActivePlaylist,
       syncLivePlaylist,
-      dateRange,
+      dateRange: liveArea.dateRange,
       setDateRange,
-      customFrom,
+      customFrom: liveArea.customFrom,
       setCustomFrom,
-      customTo,
+      customTo: liveArea.customTo,
       setCustomTo,
-      showCustomCalendar,
+      showCustomCalendar: liveArea.showCustomCalendar,
       setShowCustomCalendar,
       dateRangeQueryParams,
       dateRangeLabel,
@@ -382,17 +562,27 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setTheme,
       fontScale,
       setFontScale,
-      statMode,
-      activePlaylist,
+      areaFilters,
+      setAreaPlaylist,
+      setAreaDateRange,
+      setAreaCustomFrom,
+      setAreaCustomTo,
+      setAreaShowCustomCalendar,
+      setAreaStatMode,
+      resetAreaFilters,
+      liveArea.statMode,
+      liveArea.playlist,
+      liveArea.dateRange,
+      liveArea.customFrom,
+      liveArea.customTo,
+      liveArea.showCustomCalendar,
+      setStatMode,
       setActivePlaylist,
       syncLivePlaylist,
-      dateRange,
       setDateRange,
-      customFrom,
       setCustomFrom,
-      customTo,
       setCustomTo,
-      showCustomCalendar,
+      setShowCustomCalendar,
       dateRangeQueryParams,
       dateRangeLabel,
       replayLimitPreview,
@@ -428,3 +618,130 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 export function useDashboard(): DashboardContextValue {
   return useContext(DashboardContext);
 }
+
+/**
+ * Per-area independent filter hook.
+ * Persists independent filter state per dashboard area when mounted under
+ * DashboardProvider, and seamlessly falls back to local component state when
+ * a view is rendered standalone (e.g., isolated unit tests).
+ */
+export function useAreaFilters(area: FilterArea): AreaFilterControls {
+  const ctx = useContext(DashboardContext);
+  const [localState, setLocalState] = useState<AreaFilterState>(() =>
+    createDefaultAreaFilterState('11'),
+  );
+
+  const state = ctx.isProvided ? ctx.areaFilters[area] : localState;
+
+  const setPlaylist = useCallback(
+    (playlist: string) => {
+      const next = normalizeActiveModeKey(playlist);
+      if (ctx.isProvided) ctx.setAreaPlaylist(area, next);
+      else setLocalState((prev) => ({ ...prev, playlist: next }));
+    },
+    [ctx, area],
+  );
+
+  const setDateRange = useCallback(
+    (range: DateRangePreset) => {
+      if (ctx.isProvided) ctx.setAreaDateRange(area, range);
+      else setLocalState((prev) => ({ ...prev, dateRange: range, showCustomCalendar: range === 'custom' }));
+    },
+    [ctx, area],
+  );
+
+  const setCustomFrom = useCallback(
+    (date: string) => {
+      if (ctx.isProvided) ctx.setAreaCustomFrom(area, date);
+      else {
+        setLocalState((prev) => ({
+          ...prev,
+          customFrom: date,
+          customTo: date && prev.customTo && date > prev.customTo ? date : prev.customTo,
+          dateRange: 'custom',
+        }));
+      }
+    },
+    [ctx, area],
+  );
+
+  const setCustomTo = useCallback(
+    (date: string) => {
+      if (ctx.isProvided) ctx.setAreaCustomTo(area, date);
+      else {
+        setLocalState((prev) => ({
+          ...prev,
+          customFrom: prev.customFrom && date && prev.customFrom > date ? date : prev.customFrom,
+          customTo: date,
+          dateRange: 'custom',
+        }));
+      }
+    },
+    [ctx, area],
+  );
+
+  const setShowCustomCalendar = useCallback(
+    (open: boolean | ((prev: boolean) => boolean)) => {
+      if (ctx.isProvided) ctx.setAreaShowCustomCalendar(area, open);
+      else {
+        setLocalState((prev) => ({
+          ...prev,
+          showCustomCalendar: typeof open === 'function' ? open(prev.showCustomCalendar) : open,
+        }));
+      }
+    },
+    [ctx, area],
+  );
+
+  const setStatMode = useCallback(
+    (mode: StatMode) => {
+      if (ctx.isProvided) ctx.setAreaStatMode(area, mode);
+      else setLocalState((prev) => ({ ...prev, statMode: mode }));
+    },
+    [ctx, area],
+  );
+
+  const resetFilters = useCallback(() => {
+    if (ctx.isProvided) ctx.resetAreaFilters(area);
+    else setLocalState(createDefaultAreaFilterState('11'));
+  }, [ctx, area]);
+
+  const dateRangeQueryParams = useMemo(
+    () => buildDateRangeQueryParams(state.dateRange, state.customFrom, state.customTo),
+    [state.dateRange, state.customFrom, state.customTo],
+  );
+
+  const dateRangeLabel = useMemo(
+    () => getDateRangeLabel(state.dateRange, state.customFrom, state.customTo),
+    [state.dateRange, state.customFrom, state.customTo],
+  );
+
+  return useMemo<AreaFilterControls>(
+    () => ({
+      ...state,
+      dateRangeQueryParams,
+      dateRangeLabel,
+      setPlaylist,
+      setDateRange,
+      setCustomFrom,
+      setCustomTo,
+      setShowCustomCalendar,
+      setStatMode,
+      resetFilters,
+    }),
+    [
+      state,
+      dateRangeQueryParams,
+      dateRangeLabel,
+      setPlaylist,
+      setDateRange,
+      setCustomFrom,
+      setCustomTo,
+      setShowCustomCalendar,
+      setStatMode,
+      resetFilters,
+    ],
+  );
+}
+
+export { ALL_FILTER_AREAS };

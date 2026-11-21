@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CurrentMatchResponse, PlayerSummary } from '../../types/api';
 import { usePlayerSearch } from '../../hooks/usePlayerSearch';
 import { EmptyLine, GhostButton, PageHeader, SearchInput, Segmented } from '../common/ui';
+import { AreaFilterBar } from '../common/AreaFilterBar';
 import { PlayerProfilePage } from './PlayerProfilePage';
 import { PlayersSpotlightGrid } from './PlayersSpotlightGrid';
 import { PlayersDirectoryTable } from './PlayersDirectoryTable';
 import { isSoloDuelPlaylist, matchesRole, spotlights } from './playerData';
-import { useDashboard } from '../../context/DashboardContext';
+import { useAreaFilters, useDashboard } from '../../context/DashboardContext';
 
 const ROLE_OPTIONS = [
   ['all', 'ALL'],
@@ -41,8 +42,9 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
   onInspectPlayerChange,
   onClearInitialPlayer,
 }) => {
-  const { statMode, activePlaylist, pinnedPlayerIds, togglePinPlayer } = useDashboard();
-  const isAvg = statMode === 'avg';
+  const { pinnedPlayerIds, togglePinPlayer } = useDashboard();
+  const playersFilters = useAreaFilters('players');
+  const isAvg = playersFilters.statMode === 'avg';
 
   const {
     query,
@@ -52,6 +54,7 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
     role,
     setRole,
     playlist,
+    setPlaylist,
     sort,
     order,
     toggleSort,
@@ -63,6 +66,7 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
     isLoading,
     error,
   } = usePlayerSearch();
+  const activePlaylist = playlist;
 
   const [selectedFullPagePlayer, setSelectedFullPagePlayer] = useState<{
     id: string;
@@ -231,6 +235,43 @@ export const PlayersView: React.FC<PlayersViewProps> = ({
             VIEW MY PROFILE →
           </button>
         }
+      />
+
+      <AreaFilterBar
+        area="players"
+        ariaLabel="Players directory scope filters"
+        className="mb-4"
+        playlist={activePlaylist}
+        onPlaylistChange={(mode) => {
+          setPlaylist(mode);
+          playersFilters.setPlaylist(mode);
+        }}
+        dateRange={playersFilters.dateRange}
+        onDateRangeChange={playersFilters.setDateRange}
+        customFrom={playersFilters.customFrom}
+        onCustomFromChange={playersFilters.setCustomFrom}
+        customTo={playersFilters.customTo}
+        onCustomToChange={playersFilters.setCustomTo}
+        showCustomCalendar={playersFilters.showCustomCalendar}
+        onToggleCustomCalendar={() => {
+          if (!playersFilters.showCustomCalendar && playersFilters.dateRange !== 'custom') {
+            playersFilters.setDateRange('custom');
+          } else {
+            playersFilters.setShowCustomCalendar((prev) => !prev);
+          }
+        }}
+        statMode={playersFilters.statMode}
+        onStatModeChange={playersFilters.setStatMode}
+        showReset={
+          activePlaylist !== '11' ||
+          playersFilters.dateRange !== 'all' ||
+          playersFilters.showCustomCalendar ||
+          playersFilters.statMode !== 'avg'
+        }
+        onReset={() => {
+          playersFilters.resetFilters();
+          setPlaylist('11');
+        }}
       />
 
       <PlayersSpotlightGrid

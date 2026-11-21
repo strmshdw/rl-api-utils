@@ -22,15 +22,17 @@ import {
 import { formatDuration } from '../../utils/formatters';
 import { TeamBoxScore, sessionMatchRows } from '../common/BoxScore';
 import { EmptyLine, GhostButton, SectionLabel, StatusDot } from '../common/ui';
+import { AreaFilterBar } from '../common/AreaFilterBar';
 import { PlaylistRows, SessionForAgainstTable, SessionKpiStrip } from '../session/SessionKpis';
 import { ContinueSessionBanner } from '../session/SessionView';
 import { useMMRHistory } from '../../hooks/useMMRHistory';
-import { useDashboard } from '../../context/DashboardContext';
+import { useAreaFilters, useDashboard } from '../../context/DashboardContext';
 
 interface IdleStateViewProps {
   session: SessionResponse | null;
   scopedSession?: SessionResponse | null;
   activePlaylist?: string;
+  onSelectPlaylist?: (playlist: string) => void;
   connection: ConnectionStatus;
   onShowSession: () => void;
   onContinueSession?: (sessionId?: string) => void;
@@ -135,6 +137,7 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
   session,
   scopedSession,
   activePlaylist,
+  onSelectPlaylist,
   connection,
   onShowSession,
   onContinueSession,
@@ -143,18 +146,24 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
   onOpenMatchTelemetry,
 }) => {
   const {
-    activePlaylist: contextActivePlaylist,
     setLiveModeOverride,
     isDevBuild,
     previewMode,
   } = useDashboard();
+  const liveFilters = useAreaFilters('live');
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
   const [showAllModes, setShowAllModes] = useState(false);
 
   const resolvedPlaylist = useMemo(
-    () => normalizeActiveModeKey(activePlaylist ?? contextActivePlaylist),
-    [activePlaylist, contextActivePlaylist],
+    () => normalizeActiveModeKey(activePlaylist ?? liveFilters.playlist),
+    [activePlaylist, liveFilters.playlist],
   );
+
+  const handleModeChange = (nextMode: string) => {
+    const normalized = normalizeActiveModeKey(nextMode);
+    liveFilters.setPlaylist(normalized);
+    onSelectPlaylist?.(normalized);
+  };
 
   const effectiveScopedSession = useMemo(() => {
     if (!session) return null;
@@ -282,6 +291,21 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
         )}
       </div>
 
+      {/* Local Live/Idle Area Filters (Mode + Stat Aggregation Only) */}
+      <AreaFilterBar
+        area="live"
+        ariaLabel="Live view filters"
+        playlist={resolvedPlaylist}
+        onPlaylistChange={handleModeChange}
+        statMode={liveFilters.statMode}
+        onStatModeChange={liveFilters.setStatMode}
+        showReset={resolvedPlaylist !== '11' || liveFilters.statMode !== 'avg'}
+        onReset={() => {
+          liveFilters.resetFilters();
+          onSelectPlaylist?.('11');
+        }}
+      />
+
       {scopedContinuableSession && (
         <ContinueSessionBanner
           continuableSession={scopedContinuableSession}
@@ -296,7 +320,12 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4">
             <div className="flex flex-col gap-2 min-w-0">
               <SectionLabel>THIS SESSION · {formatElapsed(session.started_at)}</SectionLabel>
-              <SessionKpiStrip kpis={summary.kpis} variant="idle" session={effectiveScopedSession} />
+              <SessionKpiStrip
+                kpis={summary.kpis}
+                variant="idle"
+                session={effectiveScopedSession}
+                scopeLabel="CURRENT SESSION"
+              />
             </div>
             {playlists.length > 0 && (
               <div className="flex flex-col gap-2 min-w-0">
@@ -305,7 +334,11 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
               </div>
             )}
           </div>
-          <SessionForAgainstTable session={effectiveScopedSession} />
+          <SessionForAgainstTable
+            session={effectiveScopedSession}
+            statMode={liveFilters.statMode}
+            scopeLabel="CURRENT SESSION"
+          />
 
           {/* Top-3 Core Playlist Rank Cards (3v3, 2v2, 1v1) + ALL 8 MODES Drawer */}
           <div data-testid="idle-core-ranks" className="surface-plaque border border-outline p-4 flex flex-col gap-3">

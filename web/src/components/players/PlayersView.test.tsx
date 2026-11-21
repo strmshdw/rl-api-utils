@@ -377,35 +377,23 @@ describe('PlayersView', () => {
     expect(container.querySelector('[data-testid="player-profile-page"]')).not.toBeNull();
   });
 
-  it('syncs PlayersView directory & spotlights with DashboardContext activePlaylist (3v3 and 1v1 ranks + 1v1 spotlight, STAT-03, STAT-04)', async () => {
-    const { DashboardProvider, useDashboard } = await import('../../context/DashboardContext');
+  it('scopes PlayersView directory & spotlights locally via its Players AreaFilterBar (3v3 and 1v1 ranks + 1v1 spotlight, STAT-03, STAT-04)', async () => {
+    const { DashboardProvider } = await import('../../context/DashboardContext');
     localStorage.clear();
     const calls = mockFetch();
 
-    const PlaylistSwitcher = () => {
-      const { setActivePlaylist } = useDashboard();
-      return (
-        <div>
-          <button type="button" data-testid="switch-3v3" onClick={() => setActivePlaylist('13')}>
-            SWITCH 3V3
-          </button>
-          <button type="button" data-testid="switch-1v1" onClick={() => setActivePlaylist('10')}>
-            SWITCH 1V1
-          </button>
-        </div>
-      );
-    };
-
     const { container } = await mount(
       <DashboardProvider>
-        <PlaylistSwitcher />
         <PlayersView />
       </DashboardProvider>,
     );
     await flush();
 
+    const filterBar = container.querySelector('[data-testid="players-filter-bar"]')!;
+    expect(filterBar).not.toBeNull();
+
     // Switch to 3v3 -> fetches playlist=13 and displays 3v3 MMR (1468 / Champion III) instead of 2v2 1502
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="switch-3v3"]')!.click());
+    await clickText(filterBar, '3V3');
     await flush();
     expect(calls.some((c) => c.startsWith('/api/players?') && c.includes('playlist=13'))).toBe(true);
     const daniel3v3 = rows(container).find((r) => r.textContent?.includes('DanielRL'))!;
@@ -415,7 +403,7 @@ describe('PlayersView', () => {
     expect(container.querySelector('[data-testid="spotlight-mate"]')!.textContent).toContain('1468 MMR');
 
     // Switch to 1v1 -> fetches playlist=10, displays 1v1 MMR (1240), and adapts spotlight-mate for Solo Duel
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="switch-1v1"]')!.click());
+    await clickText(filterBar, '1V1');
     await flush();
     expect(calls.some((c) => c.startsWith('/api/players?') && c.includes('playlist=10'))).toBe(true);
     const daniel1v1 = rows(container).find((r) => r.textContent?.includes('DanielRL'))!;
@@ -581,18 +569,9 @@ describe('PlayersView', () => {
   it('hides TEAMMATES and SYNERGY role filter pills and resets teammate role when 1v1 mode is active (MED-02)', async () => {
     localStorage.clear();
     mockFetch();
-    const { DashboardProvider, useDashboard } = await import('../../context/DashboardContext');
-    const ModeSwitcher: React.FC = () => {
-      const { setActivePlaylist } = useDashboard();
-      return (
-        <button type="button" data-testid="switch-1v1" onClick={() => setActivePlaylist('10')}>
-          SWITCH 1V1
-        </button>
-      );
-    };
+    const { DashboardProvider } = await import('../../context/DashboardContext');
     const { container } = await mount(
       <DashboardProvider>
-        <ModeSwitcher />
         <PlayersView />
       </DashboardProvider>,
     );
@@ -601,9 +580,7 @@ describe('PlayersView', () => {
     expect(roleBar().textContent).toContain('SYNERGY ≥50%');
 
     await clickText(roleBar(), 'TEAMMATES (WITH YOU)');
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="switch-1v1"]')!.click();
-    });
+    await clickText(container.querySelector('[data-testid="players-filter-bar"]')!, '1V1');
     await flush();
 
     expect(roleBar().textContent).not.toContain('TEAMMATES (WITH YOU)');

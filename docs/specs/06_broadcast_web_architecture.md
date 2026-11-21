@@ -4,9 +4,9 @@
 
 ## 1. Visual Design System & Persistent User Settings
 
-### 1.1 Exact 14 `THEME_STYLES` & CSS Variables (`themeRegistry.ts`)
-Preserve all 14 `ThemeStyleKey` IDs with their complete `--t-*` token dictionaries (dark & light mode variants):
-1. `broadcast` — `01 · Deco Monolith: Woodblock (Default)` (`#0a0908` / `#181614` / `#789dba` / `#d9825b`)
+### 1.1 Exact 14 `THEME_STYLES`, WCAG 2.1 AA Contrast Calibration & Distinct Stat Label Palette (`themeRegistry.ts`, `statColors.ts`)
+Preserve all 14 `ThemeStyleKey` IDs with their complete `--t-*` token dictionaries (dark & light mode variants), calibrated to exceed WCAG 2.1 AA contrast across every `page`, `panel`, `plaque`, and `panelHover` surface (`>= 4.5:1` for `ink`, `strong`, `ink2`, `ink3`, `muted`, `muted2`, `blueInk`, `orangeInk`, `win`, `loss`, `gold`, `carryInk`, `onSlab`, `onAccent`; `>= 3.0:1` for `faint` and scrollbar thumbs; `arashi` always resolves `effectiveMode = 'light'` even under `colorMode === 'dark'`):
+1. `broadcast` — `01 · Deco Monolith: Woodblock (Default)` (`#0a0908` / `#181614` / `#8ab4d4` / `#eb946a`)
 2. `tactical` — `02 · Deco Monolith: Lacquer & Brass`
 3. `swiss` — `03 · Deco Monolith: Carved Inkstone`
 4. `arashi` — `04 · Deco Monolith: Warm Parchment (Light)`
@@ -22,8 +22,10 @@ Preserve all 14 `ThemeStyleKey` IDs with their complete `--t-*` token dictionari
 14. `oled` — `14 · Pure OLED Pitch (Zero-Glow True Black)`
 
 Additional styling tokens:
-- `ColorMode`: `'dark' | 'light'` (updates `document.documentElement.dataset.style`, `dataset.theme`/`data-mode`, and `colorScheme`)
+- `ColorMode`: `'dark' | 'light'` (updates `document.documentElement.dataset.style`, `dataset.mode`, and `colorScheme`)
 - `FontScale`: `'normal' | 'xl'` (`16px` / `18.4px` root `fontSize`)
+- **15 Distinct Semantic Stat-Attribute Label Tokens (`--t-stat-*` / `.stat-lbl-*` in `statColors.ts` & `index.css`)**: Unique visually contrasting hues (`>= 4.5:1` on all 28 theme variants, with `@media (forced-colors: active)` `CanvasText` fallback) assigned consistently across `TeamBoxScore`, `LivePlayerCard` (`stat-strip` & `HIST` split), `SessionForAgainstTable`, `SessionMatchesSection`, `HistoryView`, `MatchCoreOverviewTab`, `MatchTelemetryTabs`, `PlayerRoleSplitCard`, `PlayersSpotlightGrid`, `PlayersDirectoryTable`, and `PlayerDossierView`:
+  - `score` (`SCORE`/`PTS`), `goals` (`GOALS`/`G`), `assists` (`ASSISTS`/`A`), `saves` (`SAVES`/`SV`), `shots` (`SHOTS`/`SH`), `shotpct` (`SHOT %`/`SH%`), `demos` (`DEMOS`/`D`/`DEM`), `demod` (`DEMO'D`), `mmr` (`MMR`), `rank` (`RANK · DIV`), `bpm` (`BPM`), `boost` (`BOOST`/`BST`), `speed` (`SUPER %`/`SUP%`), `games` (`GAMES`/`GMS`), and `h2h` (`H2H`).
 
 ### 1.2 LocalStorage Keys & Custom DOM Events (Preserved 100%)
 1. `rlsync_theme_style`
@@ -33,7 +35,7 @@ Additional styling tokens:
 5. `rlsync_pinned_players`
 6. `rl_sync_column_config` (dispatches/listens to `window` custom event `'rl_sync_column_config_change'`)
 7. `rlsync_preview_mode` (active **only** when `__ENABLE_PREVIEW__` is true in dev mode)
-8. `rlsync_active_playlist` (persists active mode filter across reloads, defaulting to `'11'`/`2v2` when idle and auto-syncing on live match kickoff)
+8. `rlsync_area_playlist_{live|session|history|players}` + legacy `rlsync_active_playlist` fallback (persists independent per-area mode selection across reloads, defaulting to `'11'`/`2v2`; live match kickoff auto-syncs only the `live` area)
 9. `rlsync_stamping_config` (caches `StampingConfig` thresholds & toggles for instant live reactivity, synced with `/api/stamping/config`)
 
 ---
@@ -58,16 +60,22 @@ Decompose dashboard state into 4 focused context modules (`< 350 LOC` each, stri
   - Remove `getDateRangeFactor` (`0.35 / 0.65 / 0.85` synthetic multipliers — always query real filtered data from `/api/players/{id}?playlist=...&date_range=...`!).
   - Never synthesize `bcpm` (`bpm * 0.96`); display recorded `bcpm` or `'—'`.
   - Default missing match/session counts neutrally (`pending_count ?? 0`, `map_name: ''`, `'PENDING'`) instead of fabricating `'DFH Stadium'`, `'UPLOADED'`, or `5`.
-  - **Per-Game-Mode Stat & Match-Log Isolation**: Every surface where Session, Match History, or Player/Role Stats appear (`TopBar`, `ContextFilterBar`, `IdleStateView`, `LiveGameView`, `OBSOverlayView`, `SessionView`, `SessionKpis`, `SessionForAgainstTable`, `SessionHistorySection`, `HistoryView`, `PlayersSpotlightGrid`, `PlayersDirectoryTable`, `PlayerDossierView`) is strictly isolated to a single concrete game mode (`activePlaylist` normalized via `normalizeActiveModeKey`, defaulting to `'11'`/`2v2` and auto-syncing on live match kickoff). Cross-mode `'all'` / `'extra'` rollups are eliminated; multi-playlist session strips present side-by-side concrete playlist pills for fast switching without blending stats across modes.
+  - **Per-Game-Mode Stat & Match-Log Isolation**: Every surface where Session, Match History, or Player/Role Stats appear (`TopBar`, `AreaFilterBar`, `IdleStateView`, `LiveGameView`, `OBSOverlayView`, `SessionView`, `SessionKpis`, `SessionForAgainstTable`, `SessionHistorySection`, `HistoryView`, `PlayersSpotlightGrid`, `PlayersDirectoryTable`, `PlayerDossierView`) is strictly isolated to a single concrete game mode (normalized via `normalizeActiveModeKey`, defaulting to `'11'`/`2v2`; live match kickoff auto-syncs only the `live` area). Cross-mode `'all'` / `'extra'` rollups are eliminated; multi-playlist session strips present side-by-side concrete playlist pills for fast switching without blending stats across modes.
 
-### 3.2 2-Tier Mode-First Filter Architecture & Views (`< 650 LOC` each, strictly `< 800 LOC` per `SOLID-LOC-01`)
-- **Tier 1 Slim `TopBar`**: Brand, primary view navigation (`LIVE`, `SESSION`, `HISTORY`, `PLAYERS`), active playlist session W–L + MMR status pill, replay sync indicator, `OVERLAY ↗`, and `SETTINGS` — zero overflow at `1280px` + `XL` (`+15%`) font scale.
-- **Tier 2 Unified `ContextFilterBar`** (`role="toolbar"`): Shared concrete Game Mode selector (`2V2`, `3V3`, `1V1`, `EXTRA ▾` [`Hoops`, `Rumble`, `Dropshot`, `Snow Day`, `Tournaments`], `CASUAL` — zero `'ALL'` or `'ALL EXTRA MODES'` rollups), Timeframe selector with anchored custom date-range popover, and contextual `AVG / G | TOTALS` toggle (shown only on aggregate stat views, never triplicated in `SettingsPanel` or sub-tables).
+### 3.2 Slim Single-Tier Header & Per-Area Independent Filter Architecture (`< 750 LOC` each, strictly `< 800 LOC` per `SOLID-LOC-01`)
+- **Single-Tier Slim `TopBar`**: Brand, primary view navigation (`LIVE`, `SESSION`, `HISTORY`, `PLAYERS`), active-mode session W–L + MMR status pill, `OVERLAY ↗`, and `SETTINGS` — zero global filter banner or universal custom-date strip consuming vertical space across tabs, zero overflow at `1280px` + `XL` (`+15%`) font scale.
+- **Composable Local `AreaFilterBar` (`web/src/components/common/AreaFilterBar.tsx`) & Independent `useAreaFilters(area)` State (`DashboardContext.tsx`)**: Reuses a single accessible `role="toolbar"` component locally within each view with independent filter state per area (`live`, `session`, `history`, `players`, plus independent local `dossier` scope in `usePlayerDossierData`) and renders **only** controls relevant to that surface:
+  - **Live In-Match (`live`)**: Mode (`2V2 | 3V3 | 1V1 | EXTRA ▾ | CASUAL`), `TIMEFRAME` + local `◆ DATES`, `AVG / G | TOTALS`, colocated `COLUMNS` + `HISTORICAL DATA: SHOWN/HIDDEN`, and `RESET`.
+  - **Live Idle (`live`)**: Mode + `AVG / G | TOTALS` + `RESET` (no timeframe clutter for active-session snapshot).
+  - **Session (`session`)**: Mode (synced with `SessionModeBreakdownStrip`) + `AVG / G | TOTALS` + `RESET` (no timeframe clutter for discrete session epochs).
+  - **History (`history`)**: Embedded Mode + `TIMEFRAME` + local `◆ DATES` + `RESET` paired with Search, Status (`ALL STATUS | BALLCHASING | LOCAL`), Result (`ALL | WINS | LOSSES`), and Sort (no `AVG / G | TOTALS`).
+  - **Players Directory (`players`)**: Mode + `TIMEFRAME` + local `◆ DATES` + `AVG / G | TOTALS` + `RESET` scoping both spotlights and directory rows, paired with Search, Role, and Platform filters.
+  - **Player Dossier (`dossier`)**: Independent local Mode + `TIMEFRAME` + local `◆ DATES` + `AVG / G | TOTALS` + `MMR TREND` + `★ PIN PLAYER` inside both `PlayerProfilePage` and `PlayerProfileDialog`.
 - **Live Game View** (`LiveGameView`, `Scorebug`, `LivePlayerCard`, `IdleStateView`, `ColumnConfigModal`): Live lobby cards with custom preset/column selection via `contracts.STAT_COLUMNS` + `contracts.PRESETS`, colocated `COLUMNS` + `HISTORICAL DATA` controls, per-playlist H2H record badges, ranks, disconnect indicators, live countdown/OT timer.
 - **Session View** (`SessionView`, `SessionKpis`, `MatchDetailModal`): Side-by-side played-playlist breakdown strip + playlist-scoped KPIs (`/api/session?playlist=...`), continuation banner (`Continue Previous Session` / `Dismiss`), chronological match list (`You – Opponent` score orientation) with expandable/modal box score (`<BoxScore />`).
-- **Players View** (`PlayersView`, `PlayerDossierView`, `PlayerNotesModal`, `PlayersSpotlightGrid`): Playlist- and timeframe-scoped spotlights (`BestTeammate`, `MostFaced`, `ToughestRival`), semantic responsive directory table, single-source playlist/role controls in Dossier, server-backed match-list filtering/sorting.
+- **Players View** (`PlayersView`, `PlayerDossierView`, `PlayerNotesModal`, `PlayersSpotlightGrid`): Playlist- and timeframe-scoped spotlights (`BestTeammate`, `MostFaced`, `ToughestRival`), semantic responsive directory table, independent dossier filters, server-backed match-list filtering/sorting.
 - **History View** (`HistoryView`, `HistoricalMatchDetailModal`): Server-backed status/playlist/date-range/search/outcome/sort filters, consistent `You – Opponent` collapsed match score & roster orientation, friendly arena & playlist labels, playlist-aware positioning labels (`1ST/2ND MAN` in `2v2`, `1ST/3RD MAN` in `3v3`, hidden in `1v1`), native Unreal Units (`uu/s` speed & `uu` distance), Ballchasing backfill controls, retry & prune dialogs.
-- **Layout & Overlay** (`TopBar`, `ContextFilterBar`, `SettingsPanel`, `ReplayLimitBanner`, `OBSOverlayView`):
+- **Layout & Overlay** (`TopBar`, `AreaFilterBar`, `SettingsPanel`, `ReplayLimitBanner`, `OBSOverlayView`):
   - `?mode=overlay`: Chromakey/transparent minimal OBS scoreboard & active-playlist MMR/session strip responding instantaneously to SSE events (with dev preview fallback when `isDemoMode()` is active).
 
 ### 3.3 Unified Multi-Signal Stamping & UI Configuration (`threatBadges.ts`, `StampingSettingsSection.tsx`)

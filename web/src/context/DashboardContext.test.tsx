@@ -224,4 +224,57 @@ describe('DashboardContext + ThemeContext composition', () => {
     expect(hookState.session?.total_losses).toBe(1);
     expect(Object.keys(hookState.session?.playlists ?? {})).toEqual(['11']);
   });
+
+  it('keeps area filters (live, session, history, players) completely independent and scopes syncLivePlaylist to live only', async () => {
+    const { useAreaFilters } = await import('./DashboardContext');
+    let live!: ReturnType<typeof useAreaFilters>;
+    let session!: ReturnType<typeof useAreaFilters>;
+    let history!: ReturnType<typeof useAreaFilters>;
+    let players!: ReturnType<typeof useAreaFilters>;
+    let syncLive!: (id: number | null) => void;
+
+    function MultiAreaHarness() {
+      const { syncLivePlaylist } = useDashboard();
+      syncLive = syncLivePlaylist;
+      live = useAreaFilters('live');
+      session = useAreaFilters('session');
+      history = useAreaFilters('history');
+      players = useAreaFilters('players');
+      return null;
+    }
+
+    await mount(
+      <DashboardProvider>
+        <MultiAreaHarness />
+      </DashboardProvider>,
+    );
+
+    act(() => {
+      history.setPlaylist('13');
+      history.setDateRange('7d');
+      session.setPlaylist('10');
+      session.setStatMode('total');
+      players.setPlaylist('27');
+      players.setDateRange('30d');
+    });
+
+    expect(live.playlist).toBe('11');
+    expect(live.dateRange).toBe('all');
+    expect(live.statMode).toBe('avg');
+    expect(session.playlist).toBe('10');
+    expect(session.statMode).toBe('total');
+    expect(history.playlist).toBe('13');
+    expect(history.dateRange).toBe('7d');
+    expect(players.playlist).toBe('27');
+    expect(players.dateRange).toBe('30d');
+
+    // Syncing a live Rumble match (28) updates ONLY live, never clobbering session/history/players
+    act(() => {
+      syncLive(28);
+    });
+    expect(live.playlist).toBe('28');
+    expect(session.playlist).toBe('10');
+    expect(history.playlist).toBe('13');
+    expect(players.playlist).toBe('27');
+  });
 });
