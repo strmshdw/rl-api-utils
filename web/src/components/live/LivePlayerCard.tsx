@@ -38,9 +38,12 @@ const HIST_GRID_COLS =
 
 const STAMP_PILL_BASE = 'inline-flex items-center leading-tight min-h-[22px] text-[11px] px-2 py-0.5';
 
-/** Lobby leader (value > 0) is white, other non-zero values ink-3, zeros faint. */
-export function statInk(value: number, leader: number): string {
+/** Colors non-zero stat values to match their attribute color (bolding lobby leaders); zeros stay faint. */
+export function statInk(value: number, leader: number, colorClass?: string): string {
   if (!value) return 'text-faint';
+  if (colorClass) {
+    return value === leader ? `${colorClass} font-black` : `${colorClass} font-bold`;
+  }
   return value === leader ? 'text-ink-strong' : 'text-ink-3';
 }
 
@@ -259,14 +262,14 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         <div className={`t-font-display font-bold text-xs uppercase tracking-wider whitespace-nowrap ${roleColor}`}>
           {roleLabel}
         </div>
-        <div className="text-right font-bold t-text-ink2 tabular-nums">{s.games}G</div>
-        <div className="text-right font-bold t-text-strong tabular-nums">{pts}</div>
-        <div className="text-right font-bold t-text-win tabular-nums">{g}</div>
-        <div className="text-right t-text-ink tabular-nums">{a}</div>
-        <div className="text-right t-text-ink tabular-nums">{sv}</div>
-        <div className="text-right t-text-ink2 tabular-nums">{shPct}</div>
-        <div className="text-right t-text-orange tabular-nums">{dem}</div>
-        <div className="text-right t-text-muted tabular-nums">{bst}</div>
+        <div className={`text-right font-bold tabular-nums ${STAT_LABEL_CLASS.games}`}>{s.games}G</div>
+        <div className={`text-right font-bold tabular-nums ${STAT_LABEL_CLASS.score}`}>{pts}</div>
+        <div className={`text-right font-bold tabular-nums ${STAT_LABEL_CLASS.goals}`}>{g}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.assists}`}>{a}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.saves}`}>{sv}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.shotpct}`}>{shPct}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.demos}`}>{dem}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.boost}`}>{bst}</div>
       </div>
     );
   };
@@ -442,9 +445,10 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
                 {label}
               </span>
               <span
-                className={`font-extrabold text-xl xl:text-2xl leading-none t-font-mono tabular-nums truncate ${statInk(
+                className={`text-xl xl:text-2xl leading-none t-font-mono tabular-nums truncate ${statInk(
                   stats[key] || 0,
                   leaders[key],
+                  colorClass,
                 )}`}
               >
                 {stats[key] || 0}

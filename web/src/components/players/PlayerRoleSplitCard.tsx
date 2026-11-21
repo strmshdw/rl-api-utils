@@ -264,15 +264,15 @@ export const CompactRoleSplitCard: React.FC<CompactRoleSplitCardProps> = ({
               <span className={STAT_LABEL_CLASS.speed}>SUP%</span>
             </div>
             <div className="grid grid-cols-9 items-center py-2 px-2 text-right text-base font-extrabold t-font-mono">
-              <span className="t-text-strong text-ink-strong">{pts.toLocaleString()}</span>
-              <span className="t-text-strong text-ink-strong">{g}</span>
-              <span className="t-text-strong text-ink-strong">{a}</span>
-              <span className="t-text-strong text-ink-strong">{sv}</span>
-              <span className="t-text-win text-win">{shPct}%</span>
-              <span className="t-text-orange text-orange-ink">{dem}</span>
-              <span className="t-text-blue text-blue-ink">{bpm}</span>
-              <span className="t-text-ink2 text-ink-2">{bst}</span>
-              <span className="t-text-ink2 text-ink-2">{sup}%</span>
+              <span className={STAT_LABEL_CLASS.score}>{pts.toLocaleString()}</span>
+              <span className={STAT_LABEL_CLASS.goals}>{g}</span>
+              <span className={STAT_LABEL_CLASS.assists}>{a}</span>
+              <span className={STAT_LABEL_CLASS.saves}>{sv}</span>
+              <span className={STAT_LABEL_CLASS.shotpct}>{shPct}%</span>
+              <span className={STAT_LABEL_CLASS.demos}>{dem}</span>
+              <span className={STAT_LABEL_CLASS.bpm}>{bpm}</span>
+              <span className={STAT_LABEL_CLASS.boost}>{bst}</span>
+              <span className={STAT_LABEL_CLASS.speed}>{sup}%</span>
             </div>
           </div>
         </div>

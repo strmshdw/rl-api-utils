@@ -460,6 +460,74 @@ describe('App shell', () => {
       container.querySelector('[data-testid="app-header"] a[href="/?mode=overlay&demo=true"]')?.textContent,
     ).toBe('OVERLAY ↗');
   });
+
+  it('shows a SYNC NOW button inside the header session pill and adds a bright red border and warning label when pending replays reach the warning count', async () => {
+    const fetchCalls: string[] = [];
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      fetchCalls.push(`${init?.method ?? 'GET'} ${url}`);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ running: false, synced_matches: 0, total_matches: 0, matches: [], total: 0, players: [] }),
+      });
+    }) as unknown as typeof fetch;
+
+    // Below threshold (pending 5 < trigger 15): SYNC NOW is visible, no warning border or label
+    vi.mocked(useLiveMatch).mockReturnValue({ match: null, status: 'connected', lastUpdated: null, error: null });
+    vi.mocked(useSession).mockReturnValue({
+      session: { ...SAMPLE_SESSION_RESPONSE, pending_count: 5, trigger_threshold: 15, max_hosted_replays: 20 },
+      pastSessions: [],
+      isLoading: false,
+      error: null,
+      refreshSession: vi.fn(),
+      refreshPastSessions: vi.fn(),
+      resetSession: vi.fn(),
+      continueSession: vi.fn(),
+      dismissContinueSession: vi.fn(),
+      selectedMatch: null,
+      setSelectedMatch: vi.fn(),
+    });
+
+    const first = await mount(<App />);
+    const okPill = first.container.querySelector('[data-testid="header-session-pill"]')!;
+    expect(okPill).not.toBeNull();
+    expect(okPill.getAttribute('data-sync-warning')).toBe('false');
+    expect(okPill.className).not.toContain('border-[#ff3b4e]');
+    expect(okPill.querySelector('[data-testid="header-sync-warning"]')).toBeNull();
+    expect(okPill.querySelector('[data-testid="header-sync-now-btn"]')?.textContent).toContain('SYNC NOW');
+    first.unmount();
+
+    // At/over warning threshold (pending 16 >= trigger 15): bright red border + warning label + SYNC NOW triggers replay sync
+    const onRefresh = vi.fn();
+    vi.mocked(useSession).mockReturnValue({
+      session: { ...SAMPLE_SESSION_RESPONSE, pending_count: 16, trigger_threshold: 15, max_hosted_replays: 20 },
+      pastSessions: [],
+      isLoading: false,
+      error: null,
+      refreshSession: onRefresh,
+      refreshPastSessions: vi.fn(),
+      resetSession: vi.fn(),
+      continueSession: vi.fn(),
+      dismissContinueSession: vi.fn(),
+      selectedMatch: null,
+      setSelectedMatch: vi.fn(),
+    });
+
+    const warned = await mount(<App />);
+    const warnPill = warned.container.querySelector('[data-testid="header-session-pill"]')!;
+    expect(warnPill.getAttribute('data-sync-warning')).toBe('true');
+    expect(warnPill.className).toContain('border-[#ff3b4e]');
+    expect(warnPill.querySelector('[data-testid="header-sync-warning"]')?.textContent).toContain('SYNC WARN 16/20');
+
+    const syncBtn = warnPill.querySelector<HTMLButtonElement>('[data-testid="header-sync-now-btn"]')!;
+    await act(async () => {
+      syncBtn.click();
+    });
+    expect(fetchCalls).toContain('POST /api/sync/now');
+    expect(fetchCalls).toContain('POST /api/sync/ballchasing');
+    expect(warnPill.getAttribute('data-sync-warning')).toBe('false');
+    expect(warnPill.querySelector('[data-testid="header-sync-warning"]')).toBeNull();
+  });
 });
 
 

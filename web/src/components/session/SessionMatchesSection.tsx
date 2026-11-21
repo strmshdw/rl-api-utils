@@ -42,9 +42,9 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
   const local = match.players?.find((p) => p.is_local);
   const mvp = findMvp(match.players || [], match.winner_team, match.blue_score, match.orange_score);
   const isLocalMvp = !!local && mvp?.player_id === local.player_id;
-  const stat = (v: number | undefined) =>
+  const stat = (v: number | undefined, colorClass: string) =>
     local?.stats ? (
-      <span className={zeroInk(v || 0)}>{v || 0}</span>
+      <span className={zeroInk(v || 0, colorClass)}>{v || 0}</span>
     ) : (
       <span className="text-faint">—</span>
     );
@@ -85,17 +85,17 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
         </div>
       </div>
       <span className="text-right font-bold text-[26px] t-font-mono">
-        {stat(local?.stats?.goals)}
+        {stat(local?.stats?.goals, STAT_LABEL_CLASS.goals)}
       </span>
       <span className="text-right font-bold text-[26px] t-font-mono">
-        {stat(local?.stats?.assists)}
+        {stat(local?.stats?.assists, STAT_LABEL_CLASS.assists)}
       </span>
       <span className="text-right font-bold text-[26px] t-font-mono">
-        {stat(local?.stats?.saves)}
+        {stat(local?.stats?.saves, STAT_LABEL_CLASS.saves)}
       </span>
       <span className="text-right font-bold text-[26px] t-font-mono">
         {local?.stats ? (
-          <span className="text-ink">{local.stats.score}</span>
+          <span className={STAT_LABEL_CLASS.score}>{local.stats.score}</span>
         ) : (
           <span className="text-faint">—</span>
         )}

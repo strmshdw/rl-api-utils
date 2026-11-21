@@ -83,15 +83,15 @@ export const MatchBoostTab: React.FC<TeamTelemetryTabProps> = ({
               >
                 {displayPlayerName(p)}
               </button>
-              <span className="text-right t-text-strong text-ink-strong">{bpm}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{bcpm}</span>
-              <span className="text-right t-text-blue text-blue-ink">{avgAmt}</span>
-              <span className="text-right t-text-orange text-orange-ink">{stolen}</span>
-              <span className="text-right t-text-strong text-ink-strong">{bigPads}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{smallPads}</span>
-              <span className="text-right t-text-muted text-muted">{overfill}</span>
-              <span className="text-right t-text-loss text-loss">{zeroPct}</span>
-              <span className="text-right t-text-win text-win">{fullPct}</span>
+              <span className={`text-right ${bpm !== '—' ? STAT_LABEL_CLASS.bpm : 'text-faint'}`}>{bpm}</span>
+              <span className={`text-right ${bcpm !== '—' ? STAT_LABEL_CLASS.score : 'text-faint'}`}>{bcpm}</span>
+              <span className={`text-right ${avgAmt !== '—' ? STAT_LABEL_CLASS.boost : 'text-faint'}`}>{avgAmt}</span>
+              <span className={`text-right ${stolen !== '—' ? STAT_LABEL_CLASS.demos : 'text-faint'}`}>{stolen}</span>
+              <span className={`text-right ${bigPads !== '—' ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>{bigPads}</span>
+              <span className={`text-right ${smallPads !== '—' ? STAT_LABEL_CLASS.shotpct : 'text-faint'}`}>{smallPads}</span>
+              <span className={`text-right ${overfill !== '—' ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>{overfill}</span>
+              <span className={`text-right ${zeroPct !== '—' ? STAT_LABEL_CLASS.demod : 'text-faint'}`}>{zeroPct}</span>
+              <span className={`text-right ${fullPct !== '—' ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>{fullPct}</span>
             </div>
           );
         })}
@@ -101,15 +101,15 @@ export const MatchBoostTab: React.FC<TeamTelemetryTabProps> = ({
           <span className={`font-sans ${isBlue ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'}`}>
             {teamLabel} TOTALS / AVG
           </span>
-          <span title="Team average" className="text-right t-text-strong text-ink-strong">{avgBpm}</span>
-          <span title="Team average" className="text-right t-text-ink2 text-ink-2">{avgBcpm}</span>
-          <span title="Team average" className="text-right t-text-blue text-blue-ink">{avgBst}</span>
-          <span title="Team total" className="text-right t-text-orange text-orange-ink">{sumStolen}</span>
-          <span title="Team total" className="text-right t-text-strong text-ink-strong">{sumBig}</span>
-          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{sumSmall}</span>
-          <span title="Team total" className="text-right t-text-muted text-muted">{sumOverfill}</span>
-          <span title="Team average" className="text-right t-text-loss text-loss">{avgZero}</span>
-          <span title="Team average" className="text-right t-text-win text-win">{avgFull}</span>
+          <span title="Team average" className={`text-right ${avgBpm !== '—' ? STAT_LABEL_CLASS.bpm : 'text-faint'}`}>{avgBpm}</span>
+          <span title="Team average" className={`text-right ${avgBcpm !== '—' ? STAT_LABEL_CLASS.score : 'text-faint'}`}>{avgBcpm}</span>
+          <span title="Team average" className={`text-right ${avgBst !== '—' ? STAT_LABEL_CLASS.boost : 'text-faint'}`}>{avgBst}</span>
+          <span title="Team total" className={`text-right ${sumStolen !== '—' ? STAT_LABEL_CLASS.demos : 'text-faint'}`}>{sumStolen}</span>
+          <span title="Team total" className={`text-right ${sumBig !== '—' ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>{sumBig}</span>
+          <span title="Team total" className={`text-right ${sumSmall !== '—' ? STAT_LABEL_CLASS.shotpct : 'text-faint'}`}>{sumSmall}</span>
+          <span title="Team total" className={`text-right ${sumOverfill !== '—' ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>{sumOverfill}</span>
+          <span title="Team average" className={`text-right ${avgZero !== '—' ? STAT_LABEL_CLASS.demod : 'text-faint'}`}>{avgZero}</span>
+          <span title="Team average" className={`text-right ${avgFull !== '—' ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>{avgFull}</span>
         </div>
       </div>
     );
@@ -181,16 +181,16 @@ export const MatchMovementTab: React.FC<TeamTelemetryTabProps> = ({
               >
                 {displayPlayerName(p)}
               </button>
-              <span className="text-right t-text-strong text-ink-strong">
+              <span className={`text-right ${mv?.avg_speed != null ? STAT_LABEL_CLASS.score : 'text-faint'}`}>
                 {mv?.avg_speed != null ? `${Math.round(mv.avg_speed)} uu/s` : '—'}
               </span>
-              <span className="text-right t-text-win text-win">{mv?.percent_supersonic_speed != null ? `${mv.percent_supersonic_speed.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{mv?.percent_boost_speed != null ? `${mv.percent_boost_speed.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-muted text-muted">{mv?.percent_slow_speed != null ? `${mv.percent_slow_speed.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{mv?.percent_ground != null ? `${mv.percent_ground.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{mv?.percent_low_air != null ? `${mv.percent_low_air.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-blue text-blue-ink">{mv?.percent_high_air != null ? `${mv.percent_high_air.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-strong text-ink-strong">{pslides}</span>
+              <span className={`text-right ${mv?.percent_supersonic_speed != null ? STAT_LABEL_CLASS.speed : 'text-faint'}`}>{mv?.percent_supersonic_speed != null ? `${mv.percent_supersonic_speed.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${mv?.percent_boost_speed != null ? STAT_LABEL_CLASS.bpm : 'text-faint'}`}>{mv?.percent_boost_speed != null ? `${mv.percent_boost_speed.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${mv?.percent_slow_speed != null ? STAT_LABEL_CLASS.rank : 'text-faint'}`}>{mv?.percent_slow_speed != null ? `${mv.percent_slow_speed.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${mv?.percent_ground != null ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>{mv?.percent_ground != null ? `${mv.percent_ground.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${mv?.percent_low_air != null ? STAT_LABEL_CLASS.assists : 'text-faint'}`}>{mv?.percent_low_air != null ? `${mv.percent_low_air.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${mv?.percent_high_air != null ? STAT_LABEL_CLASS.saves : 'text-faint'}`}>{mv?.percent_high_air != null ? `${mv.percent_high_air.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${pslides !== '—' ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>{pslides}</span>
             </div>
           );
         })}
@@ -200,16 +200,16 @@ export const MatchMovementTab: React.FC<TeamTelemetryTabProps> = ({
           <span className={`font-sans ${isBlue ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'}`}>
             {teamLabel} TOTALS / AVG
           </span>
-          <span title="Team average" className="text-right t-text-strong text-ink-strong">
+          <span title="Team average" className={`text-right ${teamAvgSpeedUu != null ? STAT_LABEL_CLASS.score : 'text-faint'}`}>
             {teamAvgSpeedUu != null ? `${Math.round(teamAvgSpeedUu)} uu/s` : '—'}
           </span>
-          <span className="text-right t-text-win text-win">{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_supersonic_speed ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-ink2 text-ink-2">{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_boost_speed ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-muted text-muted">{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_slow_speed ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-ink2 text-ink-2">{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_ground ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-ink2 text-ink-2">{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_low_air ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-blue text-blue-ink">{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_high_air ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-strong text-ink-strong">{hasTeamMove ? `${sumBy(teamRows, (p) => p.movement?.count_powerslide ?? 0)} TOT` : '—'}</span>
+          <span className={`text-right ${hasTeamMove ? STAT_LABEL_CLASS.speed : 'text-faint'}`}>{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_supersonic_speed ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamMove ? STAT_LABEL_CLASS.bpm : 'text-faint'}`}>{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_boost_speed ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamMove ? STAT_LABEL_CLASS.rank : 'text-faint'}`}>{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_slow_speed ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamMove ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_ground ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamMove ? STAT_LABEL_CLASS.assists : 'text-faint'}`}>{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_low_air ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamMove ? STAT_LABEL_CLASS.saves : 'text-faint'}`}>{hasTeamMove ? `${avgBy(teamRows, (p) => p.movement?.percent_high_air ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamMove ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>{hasTeamMove ? `${sumBy(teamRows, (p) => p.movement?.count_powerslide ?? 0)} TOT` : '—'}</span>
         </div>
       </div>
     );
@@ -283,18 +283,18 @@ export const MatchPositioningTab: React.FC<MatchPositioningTabProps> = ({
               >
                 {displayPlayerName(p)}
               </button>
-              <span className="text-right t-text-ink2 text-ink-2">{pos?.percent_defensive_third != null ? `${pos.percent_defensive_third.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{pos?.percent_neutral_third != null ? `${pos.percent_neutral_third.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-win text-win">{pos?.percent_offensive_third != null ? `${pos.percent_offensive_third.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-blue text-blue-ink">{pos?.percent_behind_ball != null ? `${pos.percent_behind_ball.toFixed(1)}%` : '—'}</span>
-              <span className="text-right t-text-muted text-muted">{pos?.percent_infront_ball != null ? `${pos.percent_infront_ball.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${pos?.percent_defensive_third != null ? STAT_LABEL_CLASS.saves : 'text-faint'}`}>{pos?.percent_defensive_third != null ? `${pos.percent_defensive_third.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${pos?.percent_neutral_third != null ? STAT_LABEL_CLASS.assists : 'text-faint'}`}>{pos?.percent_neutral_third != null ? `${pos.percent_neutral_third.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${pos?.percent_offensive_third != null ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>{pos?.percent_offensive_third != null ? `${pos.percent_offensive_third.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${pos?.percent_behind_ball != null ? STAT_LABEL_CLASS.shotpct : 'text-faint'}`}>{pos?.percent_behind_ball != null ? `${pos.percent_behind_ball.toFixed(1)}%` : '—'}</span>
+              <span className={`text-right ${pos?.percent_infront_ball != null ? STAT_LABEL_CLASS.demos : 'text-faint'}`}>{pos?.percent_infront_ball != null ? `${pos.percent_infront_ball.toFixed(1)}%` : '—'}</span>
               {showRotation && (
                 <>
-                  <span className="text-right t-text-ink2 text-ink-2">{pos?.percent_most_forward != null ? `${pos.percent_most_forward.toFixed(1)}%` : '—'}</span>
-                  <span className="text-right t-text-ink2 text-ink-2">{pos?.percent_most_back != null ? `${pos.percent_most_back.toFixed(1)}%` : '—'}</span>
+                  <span className={`text-right ${pos?.percent_most_forward != null ? STAT_LABEL_CLASS.score : 'text-faint'}`}>{pos?.percent_most_forward != null ? `${pos.percent_most_forward.toFixed(1)}%` : '—'}</span>
+                  <span className={`text-right ${pos?.percent_most_back != null ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>{pos?.percent_most_back != null ? `${pos.percent_most_back.toFixed(1)}%` : '—'}</span>
                 </>
               )}
-              <span className="text-right t-text-muted text-muted">
+              <span className={`text-right ${pos?.avg_distance_to_ball != null ? STAT_LABEL_CLASS.demod : 'text-faint'}`}>
                 {pos?.avg_distance_to_ball != null ? `${Math.round(pos.avg_distance_to_ball)} uu` : '—'}
               </span>
             </div>
@@ -304,18 +304,18 @@ export const MatchPositioningTab: React.FC<MatchPositioningTabProps> = ({
           <span className={`font-sans ${isBlue ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'}`}>
             {teamLabel} TOTALS / AVG
           </span>
-          <span className="text-right t-text-ink2 text-ink-2">{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_defensive_third ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-ink2 text-ink-2">{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_neutral_third ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-win text-win">{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_offensive_third ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-blue text-blue-ink">{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_behind_ball ?? 0)}%` : '—'}</span>
-          <span className="text-right t-text-muted text-muted">{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_infront_ball ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamPos ? STAT_LABEL_CLASS.saves : 'text-faint'}`}>{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_defensive_third ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamPos ? STAT_LABEL_CLASS.assists : 'text-faint'}`}>{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_neutral_third ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamPos ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_offensive_third ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamPos ? STAT_LABEL_CLASS.shotpct : 'text-faint'}`}>{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_behind_ball ?? 0)}%` : '—'}</span>
+          <span className={`text-right ${hasTeamPos ? STAT_LABEL_CLASS.demos : 'text-faint'}`}>{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_infront_ball ?? 0)}%` : '—'}</span>
           {showRotation && (
             <>
-              <span className="text-right t-text-ink2 text-ink-2">{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_most_forward ?? 0)}%` : '—'}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_most_back ?? 0)}%` : '—'}</span>
+              <span className={`text-right ${hasTeamPos ? STAT_LABEL_CLASS.score : 'text-faint'}`}>{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_most_forward ?? 0)}%` : '—'}</span>
+              <span className={`text-right ${hasTeamPos ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>{hasTeamPos ? `${avgBy(teamRows, (p) => p.positioning?.percent_most_back ?? 0)}%` : '—'}</span>
             </>
           )}
-          <span title="Team average" className="text-right t-text-muted text-muted">
+          <span title="Team average" className={`text-right ${teamAvgDistUu != null ? STAT_LABEL_CLASS.demod : 'text-faint'}`}>
             {teamAvgDistUu != null ? `${Math.round(teamAvgDistUu)} uu` : '—'}
           </span>
         </div>
