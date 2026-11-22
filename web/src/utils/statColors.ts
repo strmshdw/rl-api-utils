@@ -34,44 +34,45 @@ export interface StatColorPalette {
 }
 
 /**
- * Distinct, high-contrast semantic colors for box-score and telemetry stat labels.
- * Every token is calibrated to exceed WCAG 2.1 AA (>= 4.5:1) across all 14 dark
- * and light theme surfaces (page, panel, plaque, and panelHover).
+ * Hypercolor, ultra-high-contrast semantic colors for box-score and telemetry stat labels & values.
+ * Every token is calibrated for electric saturation, strong perceptual separation (CIELAB ΔE),
+ * and >= 4.7:1 WCAG 2.1 contrast across all 14 dark and light theme surfaces
+ * (page, panel, plaque, and panelHover — reaching 7:1–18:1 on core dark themes).
  */
 export const STAT_COLOR_PALETTES: Record<'dark' | 'light', StatColorPalette> = {
   dark: {
-    score: '#ffd166',   // Gold — SCORE / PTS
-    goals: '#5ce69a',   // Emerald — GOALS / G
-    assists: '#52daf5', // Electric Cyan — ASSISTS / A
-    saves: '#9abaff',   // Periwinkle Blue — SAVES / SV
-    shots: '#d6a6ff',   // Lavender Violet — SHOTS / SH
-    shotpct: '#4de8cc', // Aquamarine Mint — SHOT % / SH%
-    demos: '#ff9966',   // Bright Tangerine — DEMOS / D / DEM
-    demod: '#ff85a1',   // Crimson Rose — DEMO'D
-    mmr: '#7cc7ff',     // Ice Blue — MMR
-    rank: '#e3cfa6',    // Champagne Sand — RANK · DIV
-    bpm: '#c5ed6b',     // Chartreuse Lime — BPM
-    boost: '#c9a6ff',   // Soft Violet — BOOST / BST
-    speed: '#ff8cd9',   // Magenta Orchid — SUPER % / SPEED
-    games: '#dde6f2',   // Crisp Platinum — GAMES / GMS
-    h2h: '#b7f06e',     // Bright Lime — H2H
+    score: '#fff500',   // Hyper Laser Yellow — SCORE / PTS
+    goals: '#00ff59',   // Hyper Neon Green — GOALS / G
+    assists: '#00f7ff', // Hyper Electric Cyan — ASSISTS / A
+    saves: '#78a6ff',   // Hyper Electric Cobalt — SAVES / SV
+    shots: '#ff66ff',   // Hyper Electric Magenta — SHOTS / SH
+    shotpct: '#b8ff00', // Hyper Volt Lime — SHOT % / SH%
+    demos: '#ff8519',   // Hyper Blaze Orange — DEMOS / D / DEM
+    demod: '#ff7084',   // Hyper Laser Crimson — DEMO'D
+    mmr: '#00ccff',     // Hyper Neon Azure — MMR
+    rank: '#ffc400',    // Hyper Solar Gold — RANK · DIV
+    bpm: '#c785ff',     // Hyper Ultraviolet — BPM
+    boost: '#00ffb7',   // Hyper Neon Mint — BOOST / BST
+    speed: '#ff6ec4',   // Hyper Hot Pink — SUPER % / SPEED
+    games: '#ffffff',   // Pure Hyper White — GAMES / GMS
+    h2h: '#ffb07c',     // Hyper Neon Coral — H2H
   },
   light: {
-    score: '#784800',   // Deep Amber — SCORE / PTS
-    goals: '#0a5e32',   // Deep Emerald — GOALS / G
-    assists: '#065970', // Deep Cyan — ASSISTS / A
-    saves: '#1d3da0',   // Royal Cobalt — SAVES / SV
-    shots: '#5c229c',   // Deep Violet — SHOTS / SH
-    shotpct: '#065e50', // Deep Teal — SHOT % / SH%
-    demos: '#942e04',   // Burnt Tangerine — DEMOS / D / DEM
-    demod: '#991230',   // Deep Crimson — DEMO'D
-    mmr: '#0c4a85',     // Deep Navy Blue — MMR
-    rank: '#594524',    // Warm Bronze — RANK · DIV
-    bpm: '#3e5900',     // Deep Olive Lime — BPM
-    boost: '#582499',   // Deep Plum — BOOST / BST
-    speed: '#8f125d',   // Deep Magenta — SUPER % / SPEED
-    games: '#2f3d52',   // Deep Slate — GAMES / GMS
-    h2h: '#395700',     // Deep Moss Lime — H2H
+    score: '#755600',   // Hyper Vivid Gold — SCORE / PTS
+    goals: '#006b22',   // Hyper Vivid Emerald — GOALS / G
+    assists: '#006175', // Hyper Electric Cyan — ASSISTS / A
+    saves: '#0035c7',   // Hyper Electric Cobalt — SAVES / SV
+    shots: '#a600a0',   // Hyper Electric Magenta — SHOTS / SH
+    shotpct: '#446b00', // Hyper Volt Lime — SHOT % / SH%
+    demos: '#b03200',   // Hyper Blaze Orange — DEMOS / D / DEM
+    demod: '#c4002a',   // Hyper Laser Crimson — DEMO'D
+    mmr: '#004ea8',     // Hyper Electric Azure — MMR
+    rank: '#8c2b56',    // Hyper Royal Ruby — RANK · DIV
+    bpm: '#7300db',     // Hyper Ultraviolet — BPM
+    boost: '#006b50',   // Hyper Electric Teal-Mint — BOOST / BST
+    speed: '#bd0068',   // Hyper Hot Pink — SUPER % / SPEED
+    games: '#1e293b',   // Crisp Ink Slate — GAMES / GMS
+    h2h: '#43209c',     // Hyper Electric Indigo — H2H
   },
 };
 

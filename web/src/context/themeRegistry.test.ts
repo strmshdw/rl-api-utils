@@ -76,6 +76,27 @@ function contrastRatio(fgRaw: string, bgRaw: string, pageRaw?: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+function rgbToLab(c: RGB): [number, number, number] {
+  const toLin = (v: number) => {
+    const n = v / 255;
+    return n <= 0.04045 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4);
+  };
+  const r = toLin(c.r);
+  const g = toLin(c.g);
+  const b = toLin(c.b);
+  const f = (v: number) => (v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116);
+  const x = f((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047);
+  const y = f((r * 0.2126 + g * 0.7152 + b * 0.0722) / 1.0);
+  const z = f((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+
+function deltaE(hexA: string, hexB: string): number {
+  const a = rgbToLab(parseColor(hexA));
+  const b = rgbToLab(parseColor(hexB));
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
 const ALL_STYLES = Object.keys(THEME_STYLES) as ThemeStyleKey[];
 const ALL_MODES: ColorMode[] = ['dark', 'light'];
 
@@ -165,7 +186,7 @@ describe('Theme Registry WCAG 2.1 Contrast & Stat Label Color Audit', () => {
     expect(failures).toEqual([]);
   });
 
-  it('enforces >= 4.5:1 AA contrast for every distinct stat attribute label color on every theme surface', () => {
+  it('enforces >= 4.7:1 high contrast and strong CIELAB perceptual separation for every hypercolor stat metric across all theme surfaces', () => {
     const failures: string[] = [];
 
     for (const styleKey of ALL_STYLES) {
@@ -183,12 +204,39 @@ describe('Theme Registry WCAG 2.1 Contrast & Stat Label Color Audit', () => {
         for (const [statKey, fg] of Object.entries(statPalette) as Array<[StatColorKey, string]>) {
           for (const [surfName, bg] of surfaces) {
             const ratio = contrastRatio(fg, bg, p.page);
-            if (ratio < 4.5) {
+            if (ratio < 4.7) {
               failures.push(
-                `${styleKey}.${mode} stat.${statKey}(${fg}) on ${surfName}(${bg}) = ${ratio.toFixed(2)}:1 (< 4.5:1)`,
+                `${styleKey}.${mode} stat.${statKey}(${fg}) on ${surfName}(${bg}) = ${ratio.toFixed(2)}:1 (< 4.7:1)`,
               );
             }
           }
+        }
+      }
+    }
+
+    const keys = Object.keys(STAT_COLOR_PALETTES.dark) as StatColorKey[];
+    const boxKeys: StatColorKey[] = ['score', 'goals', 'assists', 'saves', 'shots', 'shotpct', 'demos', 'demod'];
+    for (let i = 0; i < keys.length; i++) {
+      for (let j = i + 1; j < keys.length; j++) {
+        const a = keys[i];
+        const b = keys[j];
+        const darkDE = deltaE(STAT_COLOR_PALETTES.dark[a], STAT_COLOR_PALETTES.dark[b]);
+        if (darkDE < 25) {
+          failures.push(`dark hypercolor separation too low: ${a} vs ${b} dE=${darkDE.toFixed(1)} (< 25)`);
+        }
+        const lightDE = deltaE(STAT_COLOR_PALETTES.light[a], STAT_COLOR_PALETTES.light[b]);
+        if (lightDE < 17) {
+          failures.push(`light hypercolor separation too low: ${a} vs ${b} dE=${lightDE.toFixed(1)} (< 17)`);
+        }
+      }
+    }
+    for (let i = 0; i < boxKeys.length; i++) {
+      for (let j = i + 1; j < boxKeys.length; j++) {
+        const a = boxKeys[i];
+        const b = boxKeys[j];
+        const boxDE = deltaE(STAT_COLOR_PALETTES.dark[a], STAT_COLOR_PALETTES.dark[b]);
+        if (boxDE < 30) {
+          failures.push(`dark box-score hypercolor separation too low: ${a} vs ${b} dE=${boxDE.toFixed(1)} (< 30)`);
         }
       }
     }
