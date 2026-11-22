@@ -194,7 +194,9 @@ func (s *SQLiteStore) ListPlayerMatches(ctx context.Context, playerID string, fi
 	       m.download_status, m.local_file_path, m.downloaded_at, m.upload_status,
 	       m.ballchasing_id, m.ballchasing_url, m.uploaded_at, m.retry_count,
 	       m.last_error, m.blue_score, m.orange_score, m.winner_team, m.replay_stats_json,
-	       m.synced_at, m.stats_sync_status, m.stats_retry_count, m.created_at, m.updated_at,
+	       m.synced_at, m.stats_sync_status, m.stats_retry_count,
+	       m.replay_name, m.replay_date_key, m.daily_game_num, m.game_mode, m.session_id, m.ballchasing_group_id,
+	       m.created_at, m.updated_at,
 	       mp.player_id, mp.team_num, mp.is_local, mp.won, mp.score, mp.goals, mp.assists,
 	       mp.saves, mp.shots, mp.demos, mp.car_name, mp.stats_json,
 	       COALESCE((SELECT lp.team_num FROM match_players lp WHERE lp.match_guid = m.match_guid AND lp.is_local = 1 LIMIT 1), -1) AS local_team
@@ -233,21 +235,29 @@ func (s *SQLiteStore) ListPlayerMatches(ctx context.Context, playerID string, fi
 			syncedAt     sql.NullInt64
 			blueScore    sql.NullInt64
 			orangeScore  sql.NullInt64
-			replayStats  sql.NullString
-			statsSync    sql.NullString
-			statsRetry   sql.NullInt64
-			createdAt    int64
-			updatedAt    int64
-			isLocal      int
-			wonVal       sql.NullInt64
-			localTeam    int
+			replayStats   sql.NullString
+			statsSync     sql.NullString
+			statsRetry    sql.NullInt64
+			replayName    sql.NullString
+			replayDateKey sql.NullString
+			dailyGameNum  sql.NullInt64
+			gameMode      sql.NullString
+			sessionID     sql.NullString
+			bcGroupID     sql.NullString
+			createdAt     int64
+			updatedAt     int64
+			isLocal       int
+			wonVal        sql.NullInt64
+			localTeam     int
 		)
 		if err := rows.Scan(
 			&mr.MatchGUID, &mr.RecordStartTimestamp, &mr.MapName, &mr.Playlist, &mr.ReplayURL,
 			&mr.DownloadStatus, &mr.LocalFilePath, &downloadedAt, &mr.UploadStatus,
 			&mr.BallchasingID, &mr.BallchasingURL, &uploadedAt, &mr.RetryCount,
 			&mr.LastError, &blueScore, &orangeScore, &winnerTeam, &replayStats,
-			&syncedAt, &statsSync, &statsRetry, &createdAt, &updatedAt,
+			&syncedAt, &statsSync, &statsRetry,
+			&replayName, &replayDateKey, &dailyGameNum, &gameMode, &sessionID, &bcGroupID,
+			&createdAt, &updatedAt,
 			&mp.PlayerID, &mp.TeamNum, &isLocal, &wonVal, &mp.Score, &mp.Goals, &mp.Assists,
 			&mp.Saves, &mp.Shots, &mp.Demos, &mp.CarName, &mp.StatsJSON,
 			&localTeam,
@@ -255,6 +265,7 @@ func (s *SQLiteStore) ListPlayerMatches(ctx context.Context, playerID string, fi
 			return nil, 0, fmt.Errorf("failed to scan player match detail: %w", err)
 		}
 		hydrateScannedMatchRecord(&mr, downloadedAt, uploadedAt, winnerTeam, syncedAt, blueScore, orangeScore, replayStats, statsSync, statsRetry, createdAt, updatedAt)
+		hydrateMatchOrgFields(&mr, replayName, replayDateKey, dailyGameNum, gameMode, sessionID, bcGroupID)
 		mp.MatchGUID = mr.MatchGUID
 		mp.IsLocal = isLocal == 1
 		if wonVal.Valid {

@@ -305,3 +305,63 @@ func (s *JSONStore) EnrichMatchStatsWithPlayers(ctx context.Context, matchGUID s
 	}
 	return s.inner.EnrichMatchStatsWithPlayers(ctx, matchGUID, playlist, mr, st)
 }
+
+func (s *JSONStore) GetDailyCounter(ctx context.Context, counterType, dateKey string) (int, error) {
+	return withRead(s, func() (int, error) { return s.inner.GetDailyCounter(ctx, counterType, dateKey) })
+}
+
+func (s *JSONStore) AllocateMatchReplayNaming(ctx context.Context, matchGUID, dateKey, gameMode, result string, minNextNum int) (*ReplayNamingAssignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+	res, err := s.inner.AllocateMatchReplayNaming(ctx, matchGUID, dateKey, gameMode, result, minNextNum)
+	if err != nil {
+		return nil, err
+	}
+	if saveErr := s.saveLocked(); saveErr != nil {
+		return nil, saveErr
+	}
+	return res, nil
+}
+
+func (s *JSONStore) UpdateMatchReplayFile(ctx context.Context, matchGUID, localPath, replayName, gameMode string) error {
+	return s.withWrite(func() error { return s.inner.UpdateMatchReplayFile(ctx, matchGUID, localPath, replayName, gameMode) })
+}
+
+func (s *JSONStore) UpdateMatchGrouping(ctx context.Context, matchGUID, sessionID, gameMode, ballchasingGroupID string) error {
+	return s.withWrite(func() error { return s.inner.UpdateMatchGrouping(ctx, matchGUID, sessionID, gameMode, ballchasingGroupID) })
+}
+
+func (s *JSONStore) GetOrAllocateSessionSequence(ctx context.Context, sessionID, dateKey string) (*SessionSequenceRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+	rec, err := s.inner.GetOrAllocateSessionSequence(ctx, sessionID, dateKey)
+	if err != nil {
+		return nil, err
+	}
+	if saveErr := s.saveLocked(); saveErr != nil {
+		return nil, saveErr
+	}
+	return rec, nil
+}
+
+func (s *JSONStore) GetBallchasingGroup(ctx context.Context, sessionID, gameMode string) (*BallchasingGroupRecord, error) {
+	return withRead(s, func() (*BallchasingGroupRecord, error) { return s.inner.GetBallchasingGroup(ctx, sessionID, gameMode) })
+}
+
+func (s *JSONStore) SaveBallchasingGroup(ctx context.Context, rec *BallchasingGroupRecord) error {
+	return s.withWrite(func() error { return s.inner.SaveBallchasingGroup(ctx, rec) })
+}
+
+func (s *JSONStore) ListBallchasingGroups(ctx context.Context) ([]*BallchasingGroupRecord, error) {
+	return withRead(s, func() ([]*BallchasingGroupRecord, error) { return s.inner.ListBallchasingGroups(ctx) })
+}
+
+func (s *JSONStore) FindSessionForMatch(ctx context.Context, matchGUID string, matchTime time.Time) (*ResolvedMatchSession, error) {
+	return withRead(s, func() (*ResolvedMatchSession, error) { return s.inner.FindSessionForMatch(ctx, matchGUID, matchTime) })
+}

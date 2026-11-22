@@ -59,8 +59,12 @@ func TestSQLiteStore_FactoryPragmasAndResilience(t *testing.T) {
 		t.Fatalf("foreign_keys = %d, err=%v; want 1", fk, err)
 	}
 
-	// Verify all 8 tables and 21 indexes exist.
-	tables := []string{"matches", "auth_state", "players", "player_matchups", "processed_match_outcomes", "match_players", "mmr_history", "sessions"}
+	// Verify all 11 tables and 24 indexes exist.
+	tables := []string{
+		"matches", "auth_state", "players", "player_matchups",
+		"processed_match_outcomes", "match_players", "mmr_history", "sessions",
+		"daily_counters", "session_sequences", "ballchasing_groups",
+	}
 	for _, tbl := range tables {
 		var cnt int
 		if err := sqlStore.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?;", tbl).Scan(&cnt); err != nil || cnt != 1 {
@@ -68,8 +72,8 @@ func TestSQLiteStore_FactoryPragmasAndResilience(t *testing.T) {
 		}
 	}
 	var idxCount int
-	if err := sqlStore.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';").Scan(&idxCount); err != nil || idxCount != 21 {
-		t.Fatalf("index count = %d, err=%v; want 21", idxCount, err)
+	if err := sqlStore.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';").Scan(&idxCount); err != nil || idxCount != 24 {
+		t.Fatalf("index count = %d, err=%v; want 24", idxCount, err)
 	}
 
 	// 0-byte database file should initialize cleanly.

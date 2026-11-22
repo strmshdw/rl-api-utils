@@ -20,8 +20,11 @@ type jsonStatePayload struct {
 	PlayerMatchups   map[string]map[int]*PlayerMatchup `json:"player_matchups,omitempty"`
 	ProcessedMatches map[string]int64                  `json:"processed_matches,omitempty"`
 	MatchPlayers     map[string][]*MatchPlayerRecord   `json:"match_players,omitempty"`
-	MMRHistory       []*MMRHistoryRecord               `json:"mmr_history,omitempty"`
-	Sessions         map[string]*SessionRecord         `json:"sessions,omitempty"`
+	MMRHistory        []*MMRHistoryRecord               `json:"mmr_history,omitempty"`
+	Sessions          map[string]*SessionRecord         `json:"sessions,omitempty"`
+	DailyCounters     []*DailyCounterRecord             `json:"daily_counters,omitempty"`
+	SessionSequences  []*SessionSequenceRecord          `json:"session_sequences,omitempty"`
+	BallchasingGroups []*BallchasingGroupRecord         `json:"ballchasing_groups,omitempty"`
 }
 
 func writePayloadAtomically(filePath string, payload *jsonStatePayload) error {
@@ -122,13 +125,17 @@ func hydrateSQLiteFromPayload(ctx context.Context, s *SQLiteStore, p *jsonStateP
 				download_status, local_file_path, downloaded_at, upload_status,
 				ballchasing_id, ballchasing_url, uploaded_at, retry_count, last_error,
 				blue_score, orange_score, winner_team, replay_stats_json, synced_at,
-				stats_sync_status, stats_retry_count, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+				stats_sync_status, stats_retry_count,
+				replay_name, replay_date_key, daily_game_num, game_mode, session_id, ballchasing_group_id,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 			guid, m.RecordStartTimestamp, m.MapName, m.Playlist, m.ReplayURL,
 			string(dlSt), m.LocalFilePath, nullableTimeUnix(m.DownloadedAt), string(ulSt),
 			m.BallchasingID, m.BallchasingURL, nullableTimeUnix(m.UploadedAt), m.RetryCount, m.LastError,
 			m.BlueScore, m.OrangeScore, nullableIntPtr(m.WinnerTeam), m.ReplayStatsJSON, nullableTimeUnix(m.SyncedAt),
-			string(syncSt), m.StatsRetryCount, m.CreatedAt.Unix(), m.UpdatedAt.Unix(),
+			string(syncSt), m.StatsRetryCount,
+			m.ReplayName, m.ReplayDateKey, m.DailyGameNum, m.GameMode, m.SessionID, m.BallchasingGroupID,
+			m.CreatedAt.Unix(), m.UpdatedAt.Unix(),
 		); err != nil {
 			return fmt.Errorf("hydrate match %s: %w", guid, err)
 		}
@@ -315,6 +322,48 @@ func hydrateSQLiteFromPayload(ctx context.Context, s *SQLiteStore, p *jsonStateP
 			return fmt.Errorf("hydrate session %s: %w", sid, err)
 		}
 	}
+
+	for _, dc := range p.DailyCounters {
+		if dc == nil || strings.TrimSpace(dc.CounterType) == "" || strings.TrimSpace(dc.DateKey) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR REPLACE INTO daily_counters (counter_type, date_key, last_value, updated_at)
+			VALUES (?, ?, ?, ?);`,
+			dc.CounterType, dc.DateKey, dc.LastValue, dc.UpdatedAt.UTC().Unix(),
+		); err != nil {
+			return fmt.Errorf("hydrate daily counter %s/%s: %w", dc.CounterType, dc.DateKey, err)
+		}
+	}
+
+	for _, ss := range p.SessionSequences {
+		if ss == nil || strings.TrimSpace(ss.SessionID) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR REPLACE INTO session_sequences (session_id, date_key, session_num, created_at)
+			VALUES (?, ?, ?, ?);`,
+			ss.SessionID, ss.DateKey, ss.SessionNum, ss.CreatedAt.UTC().Unix(),
+		); err != nil {
+			return fmt.Errorf("hydrate session sequence %s: %w", ss.SessionID, err)
+		}
+	}
+
+	for _, g := range p.BallchasingGroups {
+		if g == nil || strings.TrimSpace(g.SessionID) == "" || strings.TrimSpace(g.GameMode) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR REPLACE INTO ballchasing_groups (
+				session_id, game_mode, date_key, session_num, group_name,
+				ballchasing_group_id, ballchasing_group_url, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+			g.SessionID, g.GameMode, g.DateKey, g.SessionNum, g.GroupName,
+			g.BallchasingGroupID, g.BallchasingGroupURL, g.CreatedAt.UTC().Unix(),
+		); err != nil {
+			return fmt.Errorf("hydrate ballchasing group %s/%s: %w", g.SessionID, g.GameMode, err)
+		}
+	}
 	return tx.Commit()
 }
 
@@ -474,6 +523,52 @@ func dumpSQLiteToPayload(ctx context.Context, s *SQLiteStore) (*jsonStatePayload
 		if len(sessions) > 0 {
 			payload.Sessions = sessions
 		}
+	}
+
+	if rows, err := s.db.QueryContext(ctx, `SELECT counter_type, date_key, last_value, updated_at FROM daily_counters ORDER BY counter_type ASC, date_key ASC;`); err != nil {
+		return nil, err
+	} else {
+		var counters []*DailyCounterRecord
+		for rows.Next() {
+			var dc DailyCounterRecord
+			var upd int64
+			if err := rows.Scan(&dc.CounterType, &dc.DateKey, &dc.LastValue, &upd); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			dc.UpdatedAt = time.Unix(upd, 0).UTC()
+			counters = append(counters, &dc)
+		}
+		_ = rows.Close()
+		if len(counters) > 0 {
+			payload.DailyCounters = counters
+		}
+	}
+
+	if rows, err := s.db.QueryContext(ctx, `SELECT session_id, date_key, session_num, created_at FROM session_sequences ORDER BY date_key ASC, session_num ASC;`); err != nil {
+		return nil, err
+	} else {
+		var seqs []*SessionSequenceRecord
+		for rows.Next() {
+			var ss SessionSequenceRecord
+			var created int64
+			if err := rows.Scan(&ss.SessionID, &ss.DateKey, &ss.SessionNum, &created); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			ss.CreatedAt = time.Unix(created, 0).UTC()
+			seqs = append(seqs, &ss)
+		}
+		_ = rows.Close()
+		if len(seqs) > 0 {
+			payload.SessionSequences = seqs
+		}
+	}
+
+	if groups, err := s.ListBallchasingGroups(ctx); err != nil {
+		return nil, err
+	} else if len(groups) > 0 {
+		payload.BallchasingGroups = groups
 	}
 	return payload, nil
 }

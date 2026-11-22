@@ -307,9 +307,14 @@ func recordOutcomesIfNonEmpty(
 // SyncDownloadedReplayStats parses the downloaded replay file and merges replay statistics
 // into the local store keyed by matchGUID, sets up match players, and records matchup results.
 func (s *Syncer) SyncDownloadedReplayStats(ctx context.Context, matchGUID, localPath string) error {
+	_, err := s.syncDownloadedReplayStatsWithMeta(ctx, matchGUID, localPath)
+	return err
+}
+
+func (s *Syncer) syncDownloadedReplayStatsWithMeta(ctx context.Context, matchGUID, localPath string) (*parsedLocalReplayInfo, error) {
 	meta, err := replay.ParseReplayFile(localPath)
 	if err != nil {
-		return fmt.Errorf("parsing replay file: %w", err)
+		return nil, fmt.Errorf("parsing replay file: %w", err)
 	}
 
 	matchTime, hasDate := storage.ParseReplayDate(meta.Date)
@@ -351,6 +356,18 @@ func (s *Syncer) SyncDownloadedReplayStats(ctx context.Context, matchGUID, local
 
 	identity := s.gatherLocalPlayerIdentity(ctx, meta.PlayerName, meta.LocalTeam, nil)
 	localIdx, localTeam, found := ResolveLocalPlayer(candidates, identity)
+	if !found || localTeam == nil {
+		if reader, ok := s.store.(localPlayerIDsReader); ok {
+			if storedIDs, idErr := reader.GetLocalPlayerIDs(ctx); idErr == nil {
+				for _, knownID := range storedIDs {
+					if idx, team, matched := findCandidateByID(candidates, "", knownID); matched {
+						localIdx, localTeam, found = idx, team, true
+						break
+					}
+				}
+			}
+		}
+	}
 
 	var matchPlayers []*storage.MatchPlayerRecord
 	for i, p := range meta.Players {
@@ -400,12 +417,12 @@ func (s *Syncer) SyncDownloadedReplayStats(ctx context.Context, matchGUID, local
 	}
 
 	if err := s.store.SyncReplayStats(ctx, st); err != nil {
-		return fmt.Errorf("storing synced replay stats: %w", err)
+		return nil, fmt.Errorf("storing synced replay stats: %w", err)
 	}
 
 	if len(matchPlayers) > 0 {
 		if err := s.store.SaveMatchPlayers(ctx, matchGUID, matchPlayers); err != nil {
-			return fmt.Errorf("saving match players: %w", err)
+			return nil, fmt.Errorf("saving match players: %w", err)
 		}
 	}
 
@@ -419,5 +436,19 @@ func (s *Syncer) SyncDownloadedReplayStats(ctx context.Context, matchGUID, local
 		slog.Int("orange_score", meta.Team1Score),
 	)
 
-	return nil
+	var resultStr string
+	if meta.WinnerTeam != nil && localTeam != nil {
+		if *meta.WinnerTeam == *localTeam {
+			resultStr = "WIN"
+		} else {
+			resultStr = "LOSS"
+		}
+	}
+
+	return &parsedLocalReplayInfo{
+		TeamSize:  meta.TeamSize,
+		Result:    resultStr,
+		MatchTime: matchTime,
+		HasDate:   hasDate,
+	}, nil
 }
