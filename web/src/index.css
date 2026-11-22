@@ -8,6 +8,7 @@
   --t-page: #0a0908;
   --t-panel: #181614;
   --t-plaque: #0f0d0b;
+  --t-card-header: #24201c;
   --t-panel-hover: #221f1c;
   --t-modal: #181614;
   --t-line: #453f38;
@@ -129,6 +130,7 @@
 .t-bg-loss { background-color: var(--t-loss); color: #ffffff; }
 .t-bg-ink { background-color: var(--t-ink-strong); color: var(--t-ink-on-accent); }
 .surface-plaque { background-color: var(--t-plaque, var(--t-page)); }
+.surface-card-header { background-color: var(--t-card-header, var(--t-panel-hover)); }
 .f-serif-jp { font-family: 'Noto Serif JP', serif; }
 
 /* Arashikage Monolith Architectural Primitives */

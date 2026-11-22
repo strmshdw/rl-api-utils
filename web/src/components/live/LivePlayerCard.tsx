@@ -316,17 +316,18 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         onInspectPlayer && !isBotPlayer ? 'cursor-pointer t-hover-panel' : ''
       }`}
     >
-      {/* Band 1: Compact Single-Row Team Monolith Header Slab */}
+      {/* Band 1: Compact Single-Row Player Header */}
       <div
         data-testid="live-player-header"
-        className={`px-3.5 py-2 flex items-center justify-between gap-3 border-b border-line min-w-0 ${
-          isBlueTeam ? 't-bg-blue-slab bg-blue-slab t-on-slab' : 't-bg-orange-slab bg-orange-slab text-white'
-        }`}
+        className="surface-card-header t-text-strong px-3.5 py-2 flex items-center justify-between gap-3 border-b border-line min-w-0"
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <div
+            data-testid="live-player-name"
             title={player.name}
-            className="font-bold text-xl sm:text-[22px] tracking-wider leading-none uppercase max-w-full min-w-0 truncate"
+            className={`font-bold text-xl sm:text-[22px] tracking-wider leading-none uppercase max-w-full min-w-0 truncate ${
+              isBlueTeam ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'
+            }`}
           >
             {isLocal ? 'You' : player.name}
           </div>

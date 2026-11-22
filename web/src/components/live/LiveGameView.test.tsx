@@ -213,6 +213,22 @@ describe('LiveGameView — in match', () => {
     expect(youCard.textContent).toContain('IN RANGE 3W–1L');
     expect(youCard.textContent).toContain('NET MMR +29');
 
+    // Header uses unique surface-card-header + strong text (no team slab background), with team color on player name
+    const youHeader = youCard.querySelector<HTMLElement>('[data-testid="live-player-header"]')!;
+    const youName = youCard.querySelector<HTMLElement>('[data-testid="live-player-name"]')!;
+    expect(youHeader.className).toContain('surface-card-header');
+    expect(youHeader.className).toContain('t-text-strong');
+    expect(youHeader.className).not.toContain('bg-blue-slab');
+    expect(youHeader.className).not.toContain('bg-orange-slab');
+    expect(youName.className).toContain('text-blue-ink');
+
+    const oppCard = cards(container).find((c) => c.dataset.playerId === 'Steam|76561198000000020|0')!;
+    const oppHeader = oppCard.querySelector<HTMLElement>('[data-testid="live-player-header"]')!;
+    const oppName = oppCard.querySelector<HTMLElement>('[data-testid="live-player-name"]')!;
+    expect(oppHeader.className).toContain('surface-card-header');
+    expect(oppHeader.className).not.toContain('bg-orange-slab');
+    expect(oppName.className).toContain('text-orange-ink');
+
     // Header places rank in front of MMR value, MMR label matches rank size, no space before MMR
     const rankMmr = youCard.querySelector<HTMLElement>('[data-testid="live-player-rank-mmr"]')!;
     const rankEl = rankMmr.querySelector<HTMLElement>('[data-testid="live-player-rank"]')!;

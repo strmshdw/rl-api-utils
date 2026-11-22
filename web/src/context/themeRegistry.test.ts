@@ -101,17 +101,19 @@ const ALL_STYLES = Object.keys(THEME_STYLES) as ThemeStyleKey[];
 const ALL_MODES: ColorMode[] = ['dark', 'light'];
 
 describe('Theme Registry WCAG 2.1 Contrast & Stat Label Color Audit', () => {
-  it('enforces >= 4.5:1 AA contrast for all readable text tokens across all 14 themes (dark + light)', () => {
+  it('enforces >= 4.5:1 AA contrast for all readable text tokens and distinct live card headers across all 15 themes (dark + light)', () => {
     const failures: string[] = [];
 
     for (const styleKey of ALL_STYLES) {
       for (const mode of ALL_MODES) {
         const p = THEME_STYLES[styleKey][mode];
         const effectiveMode: ColorMode = styleKey === 'arashi' ? 'light' : mode;
+        const plaqueColor = p.plaque || p.page;
+        const cardHeaderColor = p.cardHeader || p.panelHover;
         const surfaces: Array<[string, string]> = [
           ['page', p.page],
           ['panel', p.panel],
-          ['plaque', p.plaque || p.page],
+          ['plaque', plaqueColor],
           ['panelHover', p.panelHover],
         ];
         const textTokens: Array<[string, string]> = [
@@ -137,6 +139,36 @@ describe('Theme Registry WCAG 2.1 Contrast & Stat Label Color Audit', () => {
                 `${styleKey}.${mode} ${tokenName}(${fg}) on ${surfName}(${bg}) = ${ratio.toFixed(2)}:1 (< 4.5:1)`,
               );
             }
+          }
+        }
+
+        // Live player card header: visually unique from plaque body below & >= 4.5:1 contrast for name (team color) and header text
+        const basePageRgb = parseColor(p.page);
+        const headerRgb = compositeOver(parseColor(cardHeaderColor), basePageRgb);
+        const plaqueRgb = compositeOver(parseColor(plaqueColor), basePageRgb);
+        const headerLab = rgbToLab(headerRgb);
+        const plaqueLab = rgbToLab(plaqueRgb);
+        const headerSeparation = Math.hypot(
+          headerLab[0] - plaqueLab[0],
+          headerLab[1] - plaqueLab[1],
+          headerLab[2] - plaqueLab[2],
+        );
+        if (headerSeparation < 4.0) {
+          failures.push(
+            `${styleKey}.${mode} cardHeader(${cardHeaderColor}) too close to plaque(${plaqueColor}) dE=${headerSeparation.toFixed(2)} (< 4.0)`,
+          );
+        }
+        for (const [tokenName, fg] of [
+          ['strong', p.strong],
+          ['ink', p.ink],
+          ['blueInk', p.blueInk],
+          ['orangeInk', p.orangeInk],
+        ] as Array<[string, string]>) {
+          const ratio = contrastRatio(fg, cardHeaderColor, p.page);
+          if (ratio < 4.5) {
+            failures.push(
+              `${styleKey}.${mode} ${tokenName}(${fg}) on cardHeader(${cardHeaderColor}) = ${ratio.toFixed(2)}:1 (< 4.5:1)`,
+            );
           }
         }
 
@@ -285,5 +317,13 @@ describe('Theme Registry WCAG 2.1 Contrast & Stat Label Color Audit', () => {
       STAT_COLOR_PALETTES.light.score,
     );
     expect(document.documentElement.style.colorScheme).toBe('light');
+
+    // Classic Broadcast OLED applies pure inky black page/plaque with elevated card header & Classic accents
+    applyThemeToDOM('classicOled', 'dark');
+    expect(document.documentElement.style.getPropertyValue('--t-page')).toBe('#000000');
+    expect(document.documentElement.style.getPropertyValue('--t-plaque')).toBe('#000000');
+    expect(document.documentElement.style.getPropertyValue('--t-card-header')).toBe('#12151c');
+    expect(document.documentElement.style.getPropertyValue('--t-blue-ink')).toBe('#30aff8');
+    expect(document.documentElement.style.getPropertyValue('--t-orange-ink')).toBe('#f67f2f');
   });
 });

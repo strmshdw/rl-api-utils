@@ -153,6 +153,17 @@ describe('App shell', () => {
     expect(document.documentElement.style.getPropertyValue('--t-blue-ink')).toBe('#30aff8');
     expect(document.documentElement.style.getPropertyValue('--t-orange-ink')).toBe('#f67f2f');
 
+    themeSelect.value = 'classicOled';
+    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.documentElement.getAttribute('data-style')).toBe('classicOled');
+    expect(document.documentElement.getAttribute('data-mode')).toBe('dark');
+    expect(document.documentElement.style.getPropertyValue('--t-page')).toBe('#000000');
+    expect(document.documentElement.style.getPropertyValue('--t-plaque')).toBe('#000000');
+    expect(document.documentElement.style.getPropertyValue('--t-card-header')).toBe('#12151c');
+    expect(document.documentElement.style.getPropertyValue('--t-blue-ink')).toBe('#30aff8');
+    expect(document.documentElement.style.getPropertyValue('--t-orange-ink')).toBe('#f67f2f');
+
     themeSelect.value = 'arena';
     themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 10));
@@ -327,8 +338,9 @@ describe('App shell', () => {
     // Click VIEW MY PROFILE -> pushes /players/<local-id> and renders PlayerProfilePage
     const ownProfileBtn = container.querySelector<HTMLButtonElement>('[data-testid="view-own-profile-btn"]')!;
     expect(ownProfileBtn).not.toBeNull();
-    ownProfileBtn.click();
-    await new Promise((r) => setTimeout(r, 20));
+    await act(async () => {
+      ownProfileBtn.click();
+    });
     expect(window.location.pathname).toContain('/players/');
     expect(container.querySelector('[data-testid="player-profile-page"]')).not.toBeNull();
 
@@ -340,9 +352,10 @@ describe('App shell', () => {
       player: null,
       modalPlayer: null,
     };
-    window.history.replaceState(playersNavState, '', '/players');
-    window.dispatchEvent(new PopStateEvent('popstate', { state: playersNavState }));
-    await new Promise((r) => setTimeout(r, 20));
+    await act(async () => {
+      window.history.replaceState(playersNavState, '', '/players');
+      window.dispatchEvent(new PopStateEvent('popstate', { state: playersNavState }));
+    });
     expect(container.querySelector('[data-testid="player-profile-page"]')).toBeNull();
     expect(container.querySelector('[data-testid="players-view"]')).not.toBeNull();
 
@@ -354,9 +367,10 @@ describe('App shell', () => {
       player: null,
       modalPlayer: null,
     };
-    window.history.replaceState(sessionNavState, '', '/session');
-    window.dispatchEvent(new PopStateEvent('popstate', { state: sessionNavState }));
-    await new Promise((r) => setTimeout(r, 20));
+    await act(async () => {
+      window.history.replaceState(sessionNavState, '', '/session');
+      window.dispatchEvent(new PopStateEvent('popstate', { state: sessionNavState }));
+    });
     expect(container.querySelector('[data-testid="session-view"]')).not.toBeNull();
   });
 
