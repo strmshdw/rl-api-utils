@@ -231,6 +231,14 @@ func (c *Client) RateLimiter() *RateLimiter {
 	return c.rateLimiter
 }
 
+// DefaultGroup returns the default Ballchasing group ID configured on the client, if any.
+func (c *Client) DefaultGroup() string {
+	if c == nil {
+		return ""
+	}
+	return c.group
+}
+
 func (c *Client) waitRateLimit(ctx context.Context) error {
 	if c.rateLimiter == nil {
 		return ctx.Err()

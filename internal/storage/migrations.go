@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS matches (
     synced_at INTEGER,
     stats_sync_status TEXT NOT NULL DEFAULT 'PENDING',
     stats_retry_count INTEGER NOT NULL DEFAULT 0,
+    replay_name TEXT NOT NULL DEFAULT '',
+    replay_date_key TEXT NOT NULL DEFAULT '',
+    daily_game_num INTEGER NOT NULL DEFAULT 0,
+    game_mode TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT '',
+    ballchasing_group_id TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -146,6 +152,39 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_last_match_at ON sessions(last_match_at DESC);
+
+CREATE TABLE IF NOT EXISTS daily_counters (
+    counter_type TEXT NOT NULL,
+    date_key TEXT NOT NULL,
+    last_value INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (counter_type, date_key)
+);
+
+CREATE TABLE IF NOT EXISTS session_sequences (
+    session_id TEXT PRIMARY KEY,
+    date_key TEXT NOT NULL,
+    session_num INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(date_key, session_num)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_sequences_date ON session_sequences(date_key, session_num);
+
+CREATE TABLE IF NOT EXISTS ballchasing_groups (
+    session_id TEXT NOT NULL,
+    game_mode TEXT NOT NULL,
+    date_key TEXT NOT NULL,
+    session_num INTEGER NOT NULL,
+    group_name TEXT NOT NULL,
+    ballchasing_group_id TEXT NOT NULL,
+    ballchasing_group_url TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (session_id, game_mode)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ballchasing_groups_name ON ballchasing_groups(group_name);
+CREATE INDEX IF NOT EXISTS idx_ballchasing_groups_date ON ballchasing_groups(date_key, session_num);
 `
 
 func runSchemaMigrations(ctx context.Context, db *sql.DB) error {
@@ -285,6 +324,12 @@ func migrateMatchesTable(ctx context.Context, db *sql.DB) error {
 		{"synced_at", "ALTER TABLE matches ADD COLUMN synced_at INTEGER;"},
 		{"stats_sync_status", "ALTER TABLE matches ADD COLUMN stats_sync_status TEXT NOT NULL DEFAULT 'PENDING';"},
 		{"stats_retry_count", "ALTER TABLE matches ADD COLUMN stats_retry_count INTEGER NOT NULL DEFAULT 0;"},
+		{"replay_name", "ALTER TABLE matches ADD COLUMN replay_name TEXT NOT NULL DEFAULT '';"},
+		{"replay_date_key", "ALTER TABLE matches ADD COLUMN replay_date_key TEXT NOT NULL DEFAULT '';"},
+		{"daily_game_num", "ALTER TABLE matches ADD COLUMN daily_game_num INTEGER NOT NULL DEFAULT 0;"},
+		{"game_mode", "ALTER TABLE matches ADD COLUMN game_mode TEXT NOT NULL DEFAULT '';"},
+		{"session_id", "ALTER TABLE matches ADD COLUMN session_id TEXT NOT NULL DEFAULT '';"},
+		{"ballchasing_group_id", "ALTER TABLE matches ADD COLUMN ballchasing_group_id TEXT NOT NULL DEFAULT '';"},
 	}
 	for _, stmt := range alterStmts {
 		if !cols[stmt.col] {

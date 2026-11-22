@@ -26,6 +26,12 @@ type rawUploadResponse struct {
 // UploadReplay uploads a Rocket League .replay file to Ballchasing.com.
 // Satisfies ReplayUploader contract. Handles 201, 409 (duplicate), 429 (backoff), 401, 400.
 func (c *Client) UploadReplay(ctx context.Context, matchGUID, filePath string) (*UploadResult, error) {
+	return c.UploadReplayWithOptions(ctx, matchGUID, filePath, UploadOptions{})
+}
+
+// UploadReplayWithOptions uploads a Rocket League .replay file to Ballchasing.com with optional
+// per-upload multipart filename and Ballchasing group ID overrides.
+func (c *Client) UploadReplayWithOptions(ctx context.Context, matchGUID, filePath string, opts UploadOptions) (*UploadResult, error) {
 	trimmedGUID := strings.TrimSpace(matchGUID)
 	if trimmedGUID == "" {
 		return nil, ErrEmptyMatchGUID
@@ -50,14 +56,15 @@ func (c *Client) UploadReplay(ctx context.Context, matchGUID, filePath string) (
 		return nil, fmt.Errorf("%w: %w", ErrBadRequest, ErrEmptyFile)
 	}
 
-	endpoint := c.buildUploadURL()
+	endpoint := c.buildUploadURL(opts.GroupID)
+	filenameOverride := strings.TrimSpace(opts.Filename)
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if err := c.waitRateLimit(ctx); err != nil {
 			return nil, err
 		}
 
-		result, waitDuration, retryable, err := c.doUploadAttempt(ctx, endpoint, trimmedGUID, trimmedPath, attempt)
+		result, waitDuration, retryable, err := c.doUploadAttempt(ctx, endpoint, trimmedGUID, trimmedPath, filenameOverride, attempt)
 		if !retryable {
 			return result, err
 		}
@@ -78,7 +85,7 @@ func (c *Client) UploadReplay(ctx context.Context, matchGUID, filePath string) (
 	return nil, fmt.Errorf("%w: max retries reached", ErrRateLimitExhausted)
 }
 
-func (c *Client) buildUploadURL() string {
+func (c *Client) buildUploadURL(groupOverride string) string {
 	baseURL := strings.TrimRight(c.baseURL, "/")
 	endpoint := fmt.Sprintf("%s/v2/upload", baseURL)
 
@@ -86,8 +93,12 @@ func (c *Client) buildUploadURL() string {
 	if c.visibility != "" {
 		params.Set("visibility", c.visibility)
 	}
-	if c.group != "" {
-		params.Set("group", c.group)
+	effGroup := strings.TrimSpace(groupOverride)
+	if effGroup == "" {
+		effGroup = c.group
+	}
+	if effGroup != "" {
+		params.Set("group", effGroup)
 	}
 
 	if q := params.Encode(); q != "" {
@@ -96,8 +107,8 @@ func (c *Client) buildUploadURL() string {
 	return endpoint
 }
 
-func (c *Client) doUploadAttempt(ctx context.Context, endpoint, matchGUID, filePath string, attempt int) (*UploadResult, time.Duration, bool, error) {
-	req, closer, err := c.createMultipartRequest(ctx, endpoint, matchGUID, filePath)
+func (c *Client) doUploadAttempt(ctx context.Context, endpoint, matchGUID, filePath, filenameOverride string, attempt int) (*UploadResult, time.Duration, bool, error) {
+	req, closer, err := c.createMultipartRequest(ctx, endpoint, matchGUID, filePath, filenameOverride)
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -177,7 +188,7 @@ func parseUploadSuccess(headerLoc string, respBytes []byte, isDup bool, errCtx s
 	}, 0, false, nil
 }
 
-func (c *Client) createMultipartRequest(ctx context.Context, endpoint, matchGUID, filePath string) (*http.Request, io.Closer, error) {
+func (c *Client) createMultipartRequest(ctx context.Context, endpoint, matchGUID, filePath, filenameOverride string) (*http.Request, io.Closer, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ballchasing: open replay file: %w", err)
@@ -189,8 +200,14 @@ func (c *Client) createMultipartRequest(ctx context.Context, endpoint, matchGUID
 		return nil, nil, fmt.Errorf("ballchasing: stat replay file: %w", err)
 	}
 
-	baseGUID := filepath.Base(matchGUID)
-	filename := fmt.Sprintf("%s.replay", strings.TrimSuffix(baseGUID, ".replay"))
+	var filename string
+	if filenameOverride != "" {
+		baseName := filepath.Base(filenameOverride)
+		filename = fmt.Sprintf("%s.replay", strings.TrimSuffix(baseName, ".replay"))
+	} else {
+		baseGUID := filepath.Base(matchGUID)
+		filename = fmt.Sprintf("%s.replay", strings.TrimSuffix(baseGUID, ".replay"))
+	}
 
 	if c.streamUpload {
 		var headerBuf bytes.Buffer

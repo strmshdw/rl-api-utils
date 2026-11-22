@@ -208,3 +208,21 @@ func WithMaxConcurrentDownloads(n int) Option {
 		}
 	}
 }
+
+// WithLocation configures the timezone used for daily YYYY_MM_DD replay/session date buckets (defaults to time.Local).
+func WithLocation(loc *time.Location) Option {
+	return func(s *Syncer) {
+		if loc != nil {
+			s.timeLoc = loc
+		}
+	}
+}
+
+// WithClock configures the time source used as fallback when a match has no timestamp (defaults to time.Now).
+func WithClock(nowFn func() time.Time) Option {
+	return func(s *Syncer) {
+		if nowFn != nil {
+			s.nowFunc = nowFn
+		}
+	}
+}

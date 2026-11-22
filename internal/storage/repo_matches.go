@@ -14,7 +14,9 @@ const matchSelectCols = `match_guid, record_start_timestamp, map_name, playlist,
        download_status, local_file_path, downloaded_at, upload_status,
        ballchasing_id, ballchasing_url, uploaded_at, retry_count,
        last_error, blue_score, orange_score, winner_team, replay_stats_json,
-       synced_at, stats_sync_status, stats_retry_count, created_at, updated_at`
+       synced_at, stats_sync_status, stats_retry_count,
+       replay_name, replay_date_key, daily_game_num, game_mode, session_id, ballchasing_group_id,
+       created_at, updated_at`
 
 type scannable interface {
 	Scan(dest ...interface{}) error
@@ -438,6 +440,12 @@ func scanMatchRecord(s scannable) (*MatchRecord, error) {
 		replayStatsJSON sql.NullString
 		statsSyncStatus sql.NullString
 		statsRetryCount sql.NullInt64
+		replayName      sql.NullString
+		replayDateKey   sql.NullString
+		dailyGameNum    sql.NullInt64
+		gameMode        sql.NullString
+		sessionID       sql.NullString
+		bcGroupID       sql.NullString
 		createdAt       int64
 		updatedAt       int64
 	)
@@ -446,13 +454,42 @@ func scanMatchRecord(s scannable) (*MatchRecord, error) {
 		&r.DownloadStatus, &r.LocalFilePath, &downloadedAt, &r.UploadStatus,
 		&r.BallchasingID, &r.BallchasingURL, &uploadedAt, &r.RetryCount,
 		&r.LastError, &blueScore, &orangeScore, &winnerTeam, &replayStatsJSON,
-		&syncedAt, &statsSyncStatus, &statsRetryCount, &createdAt, &updatedAt,
+		&syncedAt, &statsSyncStatus, &statsRetryCount,
+		&replayName, &replayDateKey, &dailyGameNum, &gameMode, &sessionID, &bcGroupID,
+		&createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	hydrateScannedMatchRecord(&r, downloadedAt, uploadedAt, winnerTeam, syncedAt, blueScore, orangeScore, replayStatsJSON, statsSyncStatus, statsRetryCount, createdAt, updatedAt)
+	hydrateMatchOrgFields(&r, replayName, replayDateKey, dailyGameNum, gameMode, sessionID, bcGroupID)
 	return &r, nil
+}
+
+func hydrateMatchOrgFields(
+	r *MatchRecord,
+	replayName, replayDateKey sql.NullString,
+	dailyGameNum sql.NullInt64,
+	gameMode, sessionID, bcGroupID sql.NullString,
+) {
+	if replayName.Valid {
+		r.ReplayName = replayName.String
+	}
+	if replayDateKey.Valid {
+		r.ReplayDateKey = replayDateKey.String
+	}
+	if dailyGameNum.Valid {
+		r.DailyGameNum = int(dailyGameNum.Int64)
+	}
+	if gameMode.Valid {
+		r.GameMode = gameMode.String
+	}
+	if sessionID.Valid {
+		r.SessionID = sessionID.String
+	}
+	if bcGroupID.Valid {
+		r.BallchasingGroupID = bcGroupID.String
+	}
 }
 
 func hydrateScannedMatchRecord(
