@@ -2,9 +2,11 @@ import React from 'react';
 import {
   ColorMode,
   FontScale,
+  PlatformDisplayMode,
   THEME_STYLES,
   ThemeStyleKey,
 } from '../../context/DashboardContext';
+import { PlatformIcon } from '../common/PlatformBadge';
 import { SectionLabel } from '../common/ui';
 
 export const THEME_OPTIONS: ReadonlyArray<{
@@ -33,16 +35,20 @@ interface ThemeAppearanceSectionProps {
   themeStyle: ThemeStyleKey;
   colorMode: ColorMode;
   fontScale: FontScale;
+  platformDisplay: PlatformDisplayMode;
   onSetTheme: (style: ThemeStyleKey, mode: ColorMode) => void;
   onSetFontScale: (scale: FontScale) => void;
+  onSetPlatformDisplay: (mode: PlatformDisplayMode) => void;
 }
 
 export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
   themeStyle,
   colorMode,
   fontScale,
+  platformDisplay,
   onSetTheme,
   onSetFontScale,
+  onSetPlatformDisplay,
 }) => {
   const applyThemeSelection = (next: ThemeStyleKey) => {
     if (!THEME_STYLES[next]) return;
@@ -95,7 +101,7 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
         })}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
         <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
           <label
             htmlFor="theme-select"
@@ -179,6 +185,57 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
               title="Extra-Large Scale (+15% for 1440p/4K monitors)"
             >
               TEXT: XL (+15%)
+            </button>
+          </div>
+        </div>
+
+        <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
+          <div className="flex items-center justify-between gap-2">
+            <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
+              PLAYER PLATFORM DISPLAY
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-muted" aria-hidden="true">
+              <PlatformIcon code="steam" className="w-3.5 h-3.5" />
+              <PlatformIcon code="epic" className="w-3.5 h-3.5" />
+              <PlatformIcon code="psn" className="w-3.5 h-3.5" />
+              <PlatformIcon code="xbox" className="w-3.5 h-3.5" />
+              <PlatformIcon code="switch" className="w-3.5 h-3.5" />
+            </span>
+          </div>
+          <div
+            className="grid grid-cols-2 t-border t-radius overflow-hidden"
+            role="group"
+            aria-label="Player platform display"
+          >
+            <button
+              type="button"
+              id="btn-platform-icon"
+              data-testid="platform-display-icon"
+              aria-pressed={platformDisplay === 'icon'}
+              onClick={() => onSetPlatformDisplay('icon')}
+              className={`py-1.5 t-font-display font-bold text-xs uppercase tracking-wider cursor-pointer ${
+                platformDisplay === 'icon'
+                  ? 't-bg-blue-ink t-text-on-accent'
+                  : 't-bg-page t-text-muted hover:opacity-80'
+              }`}
+              title="Show compact platform icons (Steam, Epic, PlayStation, Xbox, Switch)"
+            >
+              ICONS
+            </button>
+            <button
+              type="button"
+              id="btn-platform-name"
+              data-testid="platform-display-name"
+              aria-pressed={platformDisplay === 'name'}
+              onClick={() => onSetPlatformDisplay('name')}
+              className={`py-1.5 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border cursor-pointer ${
+                platformDisplay === 'name'
+                  ? 't-bg-blue-ink t-text-on-accent'
+                  : 't-bg-page t-text-muted hover:opacity-80'
+              }`}
+              title="Show platform text names (STEAM, EPIC, PLAYSTATION, XBOX, SWITCH)"
+            >
+              NAME
             </button>
           </div>
         </div>

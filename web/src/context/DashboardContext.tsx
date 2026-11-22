@@ -28,10 +28,10 @@ import {
   safeStorageGet,
   safeStorageSet,
 } from './storage';
-import { ColorMode, FontScale, THEME_STYLES, ThemeStyleKey } from './themeRegistry';
+import { ColorMode, FontScale, PlatformDisplayMode, THEME_STYLES, ThemeStyleKey } from './themeRegistry';
 
 export { THEME_STYLES, buildDateRangeQueryParams, getDateRangeLabel };
-export type { ThemeStyleKey, ColorMode, FontScale, DateRangePreset };
+export type { ThemeStyleKey, ColorMode, FontScale, PlatformDisplayMode, DateRangePreset };
 
 export type StatMode = 'avg' | 'total';
 export type FilterArea = 'live' | 'session' | 'history' | 'players';
@@ -98,6 +98,8 @@ export interface DashboardContextValue {
   setTheme: (style: ThemeStyleKey, mode: ColorMode) => void;
   fontScale: FontScale;
   setFontScale: (scale: FontScale) => void;
+  platformDisplay: PlatformDisplayMode;
+  setPlatformDisplay: (mode: PlatformDisplayMode) => void;
   areaFilters: Record<FilterArea, AreaFilterState>;
   setAreaPlaylist: (area: FilterArea, playlist: string) => void;
   setAreaDateRange: (area: FilterArea, range: DateRangePreset) => void;
@@ -157,6 +159,8 @@ const DEFAULT_CONTEXT: DashboardContextValue = {
   setTheme: () => {},
   fontScale: 'normal',
   setFontScale: () => {},
+  platformDisplay: 'icon',
+  setPlatformDisplay: () => {},
   areaFilters: DEFAULT_AREA_MAP,
   setAreaPlaylist: () => {},
   setAreaDateRange: () => {},
@@ -205,7 +209,15 @@ const DEFAULT_CONTEXT: DashboardContextValue = {
 const DashboardContext = createContext<DashboardContextValue>(DEFAULT_CONTEXT);
 
 const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { themeStyle, colorMode, setTheme, fontScale, setFontScale } = useTheme();
+  const {
+    themeStyle,
+    colorMode,
+    setTheme,
+    fontScale,
+    setFontScale,
+    platformDisplay,
+    setPlatformDisplay,
+  } = useTheme();
   const isDevBuild = useMemo(() => isPreviewBuildAllowed(), []);
   const appVersion = useMemo(() => getAppVersion(), []);
 
@@ -512,6 +524,8 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setTheme,
       fontScale,
       setFontScale,
+      platformDisplay,
+      setPlatformDisplay,
       areaFilters,
       setAreaPlaylist,
       setAreaDateRange,
@@ -562,6 +576,8 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setTheme,
       fontScale,
       setFontScale,
+      platformDisplay,
+      setPlatformDisplay,
       areaFilters,
       setAreaPlaylist,
       setAreaDateRange,

@@ -213,20 +213,9 @@ export function playlistLabels(id: number | null | undefined, fallbackName?: str
   return { name: cleaned, short: cleaned, mode: cleaned };
 }
 
-/** "STEAM", "EPIC", "PLAYSTATION", "XBOX", "SWITCH", "BOT" */
+/** "STEAM", "EPIC", "PLAYSTATION", "XBOX", "SWITCH", "PSYNET", "BOT" */
 export function platformLabel(platformOrId: string | null | undefined, isBot = false): string {
-  if (isBot) return 'BOT';
-  const raw = (platformOrId || '').toLowerCase();
-  if (raw.startsWith('ps4') || raw.startsWith('ps5')) return 'PLAYSTATION';
-  if (raw.startsWith('switch') || raw.startsWith('nintendo')) return 'SWITCH';
-  switch (parsePlatform(platformOrId || '').code) {
-    case 'steam': return 'STEAM';
-    case 'epic': return 'EPIC';
-    case 'psn': return 'PLAYSTATION';
-    case 'xbox': return 'XBOX';
-    case 'bot': return 'BOT';
-    default: return raw ? raw.split('|')[0].toUpperCase() : '—';
-  }
+  return parsePlatform(platformOrId, isBot).shortLabel;
 }
 
 /** rocketleague.tracker.network profile URL; Steam uses the Steam64 ID. */
@@ -318,17 +307,59 @@ export function formatMatchClock(timeRemaining: number | undefined | null, isOve
   return isOvertime ? `+${padded}` : padded;
 }
 
-const ROMAN_DIV = ['', 'I', 'II', 'III', 'IV'];
-const EMBEDDED_DIV_RE = /\s+(?:DIVISION|DIV\.?)\s*(IV|III|II|I|[1-4])\s*$/i;
-const HINT_DIV_RE = /(?:·\s*)?(?:DIVISION|DIV\.?|D)\s*(IV|III|II|I|[1-4])\s*$/i;
+const EMBEDDED_DIV_RE = /(?:\s*[-·]\s*|\s+)(?:DIVISION|DIV\.?|D)\s*(IV|III|II|I|[1-4])\s*$/i;
+const HINT_DIV_RE = /(?:\s*[-·]\s*|\s+|^)(?:DIVISION|DIV\.?|D)\s*(IV|III|II|I|[1-4])\s*$/i;
+const ALREADY_COMPACT_RE = /^(GC|[BSGPDC])([1-3])(?:-D([1-4]))?$/i;
 
-function normalizeDivisionToken(token: string): string {
-  const upper = token.toUpperCase();
-  const numeric = Number(upper);
-  return numeric >= 1 && numeric <= 4 ? ROMAN_DIV[numeric] : upper;
+function divisionToDigit(token: string): string {
+  const upper = token.trim().toUpperCase();
+  if (upper === 'I' || upper === '1') return '1';
+  if (upper === 'II' || upper === '2') return '2';
+  if (upper === 'III' || upper === '3') return '3';
+  if (upper === 'IV' || upper === '4') return '4';
+  return '';
 }
 
-/** Formats a rank name + division into compact broadcast format (e.g. "GC I · DIV II"). */
+function romanTierToDigit(token: string): string {
+  const upper = token.trim().toUpperCase();
+  if (upper === 'III' || upper === '3') return '3';
+  if (upper === 'II' || upper === '2') return '2';
+  if (upper === 'I' || upper === '1') return '1';
+  return upper;
+}
+
+const RANK_TIER_PREFIX_RE =
+  /^(?:(GRAND\s+CHAMPION|GC)|(CHAMPION|CHAMP|C)|(DIAMOND|DIA|D)|(PLATINUM|PLAT|P)|(GOLD|GLD|G)|(SILVER|SILV|SLV|S)|(BRONZE|BRNZ|BRZ|B))\s*(III|II|I|[1-3])?$/i;
+
+function formatCompactTierCode(baseRank: string): string {
+  const cleaned = baseRank.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  const upper = cleaned.toUpperCase();
+  if (upper === 'UNRANKED') return 'UNRANKED';
+  if (upper === 'SSL' || upper.startsWith('SUPERSONIC LEGEND')) return 'SSL';
+
+  const m = cleaned.match(RANK_TIER_PREFIX_RE);
+  if (m) {
+    const prefix = m[1]
+      ? 'GC'
+      : m[2]
+      ? 'C'
+      : m[3]
+      ? 'D'
+      : m[4]
+      ? 'P'
+      : m[5]
+      ? 'G'
+      : m[6]
+      ? 'S'
+      : 'B';
+    const tierNum = m[8] ? romanTierToDigit(m[8]) : '';
+    return `${prefix}${tierNum}`;
+  }
+  return upper;
+}
+
+/** Formats a rank name + division into ultra-compact code format (e.g. "P2-D2", "GC1-D3", "SSL"). */
 export function shortRank(
   rankName?: string | null,
   division?: number | null,
@@ -337,61 +368,56 @@ export function shortRank(
 ): string {
   const clean = (rankName || shortRankHint || '').trim();
   if (!clean || clean.toUpperCase() === 'UNRANKED') return 'UNRANKED';
-  if (clean.includes('·')) return clean.toUpperCase();
+
+  const compactMatch = clean.match(ALREADY_COMPACT_RE);
+  if (compactMatch) {
+    const code = `${compactMatch[1].toUpperCase()}${compactMatch[2]}`;
+    const existingDiv = compactMatch[3] || '';
+    if (existingDiv) return `${code}-D${existingDiv}`;
+    const resolvedNumericDiv =
+      division != null && division >= 1 && division <= 4
+        ? String(division)
+        : division === 0 && tier != null && tier > 0 && tier < 22
+        ? '1'
+        : '';
+    return resolvedNumericDiv ? `${code}-D${resolvedNumericDiv}` : code;
+  }
 
   let embeddedDiv = '';
   let baseRank = clean;
   const divMatch = clean.match(EMBEDDED_DIV_RE);
   if (divMatch && divMatch.index !== undefined) {
-    embeddedDiv = normalizeDivisionToken(divMatch[1]);
+    embeddedDiv = divisionToDigit(divMatch[1]);
     baseRank = clean.slice(0, divMatch.index).trim();
   } else if (shortRankHint) {
     const hintMatch = shortRankHint.trim().match(HINT_DIV_RE);
     if (hintMatch) {
-      embeddedDiv = normalizeDivisionToken(hintMatch[1]);
+      embeddedDiv = divisionToDigit(hintMatch[1]);
     }
   }
 
-  const r = baseRank
-    .replace(/Supersonic Legend/i, 'SSL')
-    .replace(/Grand Champion/i, 'GC')
-    .replace(/Champion/i, 'CHAMP')
-    .replace(/Diamond/i, 'DIA')
-    .replace(/Platinum/i, 'PLAT')
-    .replace(/Gold/i, 'GOLD')
-    .replace(/Silver/i, 'SILV')
-    .replace(/Bronze/i, 'BRNZ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
-
+  const r = formatCompactTierCode(baseRank);
   if (!r || r === 'UNRANKED') return 'UNRANKED';
   if (r.startsWith('SSL')) return 'SSL';
 
   const resolvedNumericDiv =
     division != null && division >= 1 && division <= 4
-      ? ROMAN_DIV[division]
+      ? String(division)
       : division === 0 && tier != null && tier > 0 && tier < 22
-      ? 'I'
+      ? '1'
       : '';
   const d = embeddedDiv || resolvedNumericDiv;
-  return d ? `${r} · DIV ${d}` : r;
+  return d ? `${r}-D${d}` : r;
 }
 
-/** Ultra-concise rank badge for tight grid cells (e.g. "GC I · D2", "PLAT II · D2", "SSL"). */
+/** Ultra-concise rank badge for tight grid cells (e.g. "GC1-D2", "P2-D2", "SSL"). */
 export function compactRank(
   rankName?: string | null,
   division?: number | null,
   shortRankHint?: string | null,
   tier?: number | null,
 ): string {
-  const full = shortRank(rankName, division, shortRankHint, tier);
-  if (full === 'UNRANKED' || full === 'SSL') return full;
-  return full
-    .replace(/\s*·\s*DIV\s+IV$/, ' · D4')
-    .replace(/\s*·\s*DIV\s+III$/, ' · D3')
-    .replace(/\s*·\s*DIV\s+II$/, ' · D2')
-    .replace(/\s*·\s*DIV\s+I$/, ' · D1');
+  return shortRank(rankName, division, shortRankHint, tier);
 }
 
 export interface RelationshipTagInfo {

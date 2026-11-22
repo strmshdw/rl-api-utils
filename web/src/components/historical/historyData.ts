@@ -129,6 +129,8 @@ export function teamRows(
     return {
       key: `${p.online_id || p.name}-${i}`,
       playerId: p.online_id && p.online_id !== '0' ? p.online_id : p.name,
+      platform: p.platform,
+      isBot: p.is_bot,
       name: you ? 'You' : p.name,
       you,
       inspected: isInspected,

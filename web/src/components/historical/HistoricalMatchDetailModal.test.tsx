@@ -165,7 +165,7 @@ describe('HistoricalMatchDetailModal', () => {
     // Tab 1: 1. CORE & MECHANICS (default)
     expect(container.textContent).toContain('BLUE TEAM TOTALS / AVG');
     expect(container.textContent).toContain('ORANGE TEAM TOTALS / AVG');
-    expect(container.textContent).toContain('PLAT II · DIV II');
+    expect(container.textContent).toContain('P2-D2');
     expect(container.querySelector('[role="region"][aria-label="Core match scoreboard"]')).not.toBeNull();
 
     // Tab 2: 2. BOOST ECONOMY & PADS (BCPM header, no fabricated bpm * 0.96 = 528)

@@ -139,20 +139,25 @@ describe('labels', () => {
     expect(playlistLabels(77).name).toBe('PLAYLIST 77');
   });
 
-  it('formats ranks cleanly without duplicating embedded divisions or shifting 0-based PsyNet divisions', () => {
-    expect(shortRank('Platinum II Division II', 1)).toBe('PLAT II · DIV II');
-    expect(shortRank('Platinum II Division I', 0)).toBe('PLAT II · DIV I');
-    expect(shortRank('Grand Champion I', 3)).toBe('GC I · DIV III');
-    expect(shortRank('Grand Champion I', undefined, 'GC I · DIV II')).toBe('GC I · DIV II');
-    expect(shortRank('Diamond III', 0, undefined, 15)).toBe('DIA III · DIV I');
+  it('formats ranks in ultra-compact first-character code format without duplicating embedded divisions or shifting 0-based PsyNet divisions', () => {
+    expect(shortRank('Platinum II Division II', 1)).toBe('P2-D2');
+    expect(shortRank('Platinum II Division I', 0)).toBe('P2-D1');
+    expect(shortRank('Bronze I Division II', 2)).toBe('B1-D2');
+    expect(shortRank('Silver III', 1)).toBe('S3-D1');
+    expect(shortRank('Gold II', 4)).toBe('G2-D4');
+    expect(shortRank('Champion III Division IV', 4)).toBe('C3-D4');
+    expect(shortRank('Grand Champion I', 3)).toBe('GC1-D3');
+    expect(shortRank('Grand Champion I', undefined, 'GC I · DIV II')).toBe('GC1-D2');
+    expect(shortRank('Diamond III', 0, undefined, 15)).toBe('D3-D1');
     expect(shortRank('Supersonic Legend', 2)).toBe('SSL');
     expect(shortRank('Supersonic Legend Division I', 0)).toBe('SSL');
     expect(shortRank('Unranked', 2)).toBe('UNRANKED');
     expect(shortRank(null, 1)).toBe('UNRANKED');
-    expect(shortRank('GC I · DIV II', 1)).toBe('GC I · DIV II');
-    expect(compactRank('Grand Champion I', 2)).toBe('GC I · D2');
-    expect(compactRank('Platinum II Division II', 1)).toBe('PLAT II · D2');
-    expect(compactRank('Diamond III', 0, undefined, 15)).toBe('DIA III · D1');
+    expect(shortRank('GC I · DIV II', 1)).toBe('GC1-D2');
+    expect(shortRank('P2-D2', 1)).toBe('P2-D2');
+    expect(compactRank('Grand Champion I', 2)).toBe('GC1-D2');
+    expect(compactRank('Platinum II Division II', 1)).toBe('P2-D2');
+    expect(compactRank('Diamond III', 0, undefined, 15)).toBe('D3-D1');
     expect(compactRank('Supersonic Legend', 1)).toBe('SSL');
     expect(compactRank(undefined, 1)).toBe('UNRANKED');
   });

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CurrentMatchResponse } from '../../types/api';
-import { platformLabel } from '../../utils/broadcast';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { PlayerDossierView } from './PlayerDossierView';
 import { PlayerProfileDialog } from './PlayerProfileDialog';
 import { usePlayerDossierData } from './usePlayerDossierData';
@@ -63,8 +63,8 @@ export const PlayerProfilePage: React.FC<PlayerProfilePageProps> = ({
           </button>
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
-              <span className="text-sm font-extrabold tracking-wider text-muted uppercase">
-                PLAYER PROFILE · {platformLabel(dossier.platform)} ·{' '}
+              <span className="inline-flex items-center gap-1.5 text-sm font-extrabold tracking-wider text-muted uppercase">
+                PLAYER PROFILE · <PlatformBadge platform={dossier.platform} size="sm" /> ·{' '}
                 <span className="t-font-mono normal-case">{dossier.id}</span>
               </span>
               <span

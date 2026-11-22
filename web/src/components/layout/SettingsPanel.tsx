@@ -32,6 +32,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setTheme,
     fontScale,
     setFontScale,
+    platformDisplay,
+    setPlatformDisplay,
     replayLimitPreview,
     setReplayLimitPreview,
     replayBannerDismissed,
@@ -80,8 +82,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           themeStyle={themeStyle}
           colorMode={colorMode}
           fontScale={fontScale}
+          platformDisplay={platformDisplay}
           onSetTheme={setTheme}
           onSetFontScale={setFontScale}
+          onSetPlatformDisplay={setPlatformDisplay}
         />
 
         <StampingSettingsSection />

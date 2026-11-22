@@ -8,6 +8,7 @@ export const STORAGE_KEYS = {
   themeStyle: 'rlsync_theme_style',
   colorMode: 'rlsync_color_mode',
   fontScale: 'rlsync_font_scale',
+  platformDisplay: 'rlsync_platform_display',
   replayBannerDismissed: 'rlsync_replay_banner_dismissed',
   pinnedPlayers: 'rlsync_pinned_players',
   stampingConfig: 'rlsync_stamping_config',

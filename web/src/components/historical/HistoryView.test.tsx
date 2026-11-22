@@ -220,9 +220,9 @@ describe('HistoryView', () => {
     await clickText(container, 'LOSSES');
     expect(rows(container).map((r) => r.dataset.guid)).toEqual(['local-dl']);
 
-    // Expanding row preserves short_rank division ("GC I · DIV II") when rank_name is tier-only
+    // Expanding row preserves short_rank division ("GC1-D2") when rank_name is tier-only
     await act(async () => (rows(container)[0].firstElementChild as HTMLElement).click());
-    expect(container.querySelector('[data-testid="history-box-score"]')!.textContent).toContain('GC I · DIV II');
+    expect(container.querySelector('[data-testid="history-box-score"]')!.textContent).toContain('GC1-D2');
   });
 
   it('expands one row at a time, and only rows with parsed stats', async () => {

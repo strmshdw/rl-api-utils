@@ -30,7 +30,7 @@ const OUTCOME_OPTIONS = [
   ['defeat', 'LOSSES'],
 ] as const;
 
-const ROW_GRID = '72px 120px minmax(0,1fr) repeat(4,64px) 90px 90px';
+const ROW_GRID = '72px 120px minmax(0,1fr) 58px 58px 58px 94px 92px 92px';
 
 const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void }> = ({
   match,
@@ -61,7 +61,7 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
           onOpen();
         }
       }}
-      className="grid items-center h-[72px] bg-panel hover:bg-panel-hover cursor-pointer transition-colors duration-120 outline-none focus-visible:bg-panel-hover t-border border border-line"
+      className="grid gap-x-2 items-center h-[72px] bg-panel hover:bg-panel-hover cursor-pointer transition-colors duration-120 outline-none focus-visible:bg-panel-hover t-border border border-line"
       style={{ gridTemplateColumns: ROW_GRID }}
     >
       <ResultSlab outcome={outcomeOf(match.result)} className="text-[22px]" />
@@ -165,9 +165,9 @@ export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
         tabIndex={0}
         className="overflow-x-auto"
       >
-        <div className="min-w-[780px]">
+        <div className="min-w-[820px]">
           <div
-            className={`grid pb-2 ${COLUMN_HEADER}`}
+            className={`grid gap-x-2 pb-2 ${COLUMN_HEADER}`}
             style={{ gridTemplateColumns: ROW_GRID }}
           >
             <span />

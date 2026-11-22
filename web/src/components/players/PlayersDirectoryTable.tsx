@@ -9,11 +9,11 @@ import {
   formatPct,
   formatRecord,
   hasSyncedRoleTelemetry,
-  platformLabel,
   recordInk,
   shortRank,
 } from '../../utils/broadcast';
 import { useDashboard } from '../../context/DashboardContext';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { COLUMN_HEADER, RecordCells } from '../common/ui';
 import { rankForPlaylist } from './playerData';
 import { STAT_LABEL_CLASS } from '../../utils/statColors';
@@ -104,8 +104,8 @@ const DirectoryRow: React.FC<DirectoryRowProps> = ({
         </div>
       </th>
 
-      <td className="px-3 py-2.5 align-middle font-extrabold text-sm tracking-t10 text-muted whitespace-nowrap">
-        {platformLabel(player.platform || player.player_id)}
+      <td className="px-3 py-2.5 align-middle font-extrabold text-sm tracking-t10 text-ink-2 whitespace-nowrap">
+        <PlatformBadge platform={player.platform || player.player_id} size="md" />
       </td>
 
       <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${rank?.mmr ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>
