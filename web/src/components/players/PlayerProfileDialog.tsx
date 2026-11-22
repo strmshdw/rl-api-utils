@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CurrentMatchResponse } from '../../types/api';
 import { Modal } from '../common/Modal';
-import { platformLabel } from '../../utils/broadcast';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { PlayerDossierView } from './PlayerDossierView';
 import { usePlayerDossierData } from './usePlayerDossierData';
 
@@ -140,7 +140,9 @@ export const PlayerProfileDialog: React.FC<PlayerProfileDialogProps> = ({
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <span>PLAYER PROFILE · {platformLabel(dossier.platform)}</span>
+            <span className="inline-flex items-center gap-1.5">
+              PLAYER PROFILE · <PlatformBadge platform={dossier.platform} size="sm" />
+            </span>
             {kickerBadges}
           </div>
         )

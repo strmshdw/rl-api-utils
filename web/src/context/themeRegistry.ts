@@ -18,6 +18,7 @@ export type ThemeStyleKey =
 
 export type ColorMode = 'dark' | 'light';
 export type FontScale = 'normal' | 'xl';
+export type PlatformDisplayMode = 'icon' | 'name';
 
 export interface ThemePalette {
   page: string;

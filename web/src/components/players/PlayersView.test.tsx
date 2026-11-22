@@ -528,10 +528,10 @@ describe('PlayersView', () => {
     expect(withCard.textContent).toContain('51');
     expect(withCard.textContent).not.toContain('51%');
 
-    // UI-05: Extra Modes includes TOURNAMENTS (3V3) with compactRank ("GC I · D2")
+    // UI-05: Extra Modes includes TOURNAMENTS (3V3) with compactRank ("GC1-D2")
     await clickText(page, 'VIEW FULL PLAYLIST STATS & EXTRA MODES');
     expect(page.textContent).toContain('TOURNAMENTS (3V3)');
-    expect(page.textContent).toContain('GC I · D2');
+    expect(page.textContent).toContain('GC1-D2');
 
     // STAT-09: Paginated match count header reflects server total (510 MATCHES, not 1 MATCH)
     expect(page.textContent).toContain('510 MATCHES');

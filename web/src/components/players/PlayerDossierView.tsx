@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CurrentMatchResponse, HistoricalMatchRecord } from '../../types/api';
 import { COLUMN_HEADER, PANEL_LABEL, SectionLabel } from '../common/ui';
 import { AreaFilterBar } from '../common/AreaFilterBar';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { Sparkline } from '../common/Sparkline';
 import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
 import { PlayerNotesModal } from './PlayerNotesModal';
@@ -11,7 +12,6 @@ import {
   formatAgo,
   formatMmr,
   formatShortDate,
-  platformLabel,
   playlistLabels,
   shortRank,
 } from '../../utils/broadcast';
@@ -471,8 +471,8 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
               } border-t border-line font-semibold text-sm tracking-t12 text-muted-2 mt-2`}
             >
               <span>FIRST SEEN {formatShortDate(d.profile.first_seen_at)}</span>
-              <span>
-                {platformLabel(d.platform)} · LAST SEEN {formatAgo(d.profile.last_seen_at)}
+              <span className="inline-flex items-center gap-1.5">
+                <PlatformBadge platform={d.platform} size="sm" /> · LAST SEEN {formatAgo(d.profile.last_seen_at)}
               </span>
             </div>
           )}

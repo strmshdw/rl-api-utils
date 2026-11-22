@@ -241,6 +241,10 @@ describe('Theme Registry WCAG 2.1 Contrast & Stat Label Color Audit', () => {
       }
     }
 
+    // Adjacent Saves vs Shots columns must remain wildly distinct in both dark and light modes.
+    expect(deltaE(STAT_COLOR_PALETTES.dark.saves, STAT_COLOR_PALETTES.dark.shots)).toBeGreaterThanOrEqual(150);
+    expect(deltaE(STAT_COLOR_PALETTES.light.saves, STAT_COLOR_PALETTES.light.shots)).toBeGreaterThanOrEqual(80);
+
     expect(failures).toEqual([]);
   });
 

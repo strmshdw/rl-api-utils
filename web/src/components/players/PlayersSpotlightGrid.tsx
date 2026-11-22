@@ -5,10 +5,10 @@ import {
   emptyRoleStats,
   formatMmr,
   hasSyncedRoleTelemetry,
-  platformLabel,
   shortRank,
 } from '../../utils/broadcast';
 import { useDashboard } from '../../context/DashboardContext';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { isSoloDuelPlaylist, rankForPlaylist, Spotlight } from './playerData';
 import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
@@ -125,15 +125,18 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
           >
             {player.player_name}
           </div>
-          <div className="text-sm font-extrabold text-muted">
+          <div className="flex flex-wrap items-center gap-1.5 text-sm font-extrabold text-muted">
             <span className="t-text-blue text-blue-ink t-font-mono">
               {formatMmr(rank?.mmr)} MMR
-            </span>{' '}
-            ·{' '}
-            {rank?.rank_name
-              ? shortRank(rank.rank_name, rank.division, rank.short_rank, rank.tier)
-              : 'UNRANKED'}{' '}
-            · {platformLabel(player.platform || player.player_id)}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {rank?.rank_name
+                ? shortRank(rank.rank_name, rank.division, rank.short_rank, rank.tier)
+                : 'UNRANKED'}
+            </span>
+            <span aria-hidden="true">·</span>
+            <PlatformBadge platform={player.platform || player.player_id} size="sm" />
           </div>
         </div>
         <div className="text-right text-sm font-extrabold t-font-mono shrink-0">

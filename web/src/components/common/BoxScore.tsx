@@ -1,4 +1,6 @@
 import React from 'react';
+import { useDashboard } from '../../context/DashboardContext';
+import { PlatformBadge } from './PlatformBadge';
 import { MvpChip, COLUMN_HEADER } from './ui';
 import { SessionMatchDetail } from '../../types/api';
 import {
@@ -17,6 +19,8 @@ export interface BoxScoreRow {
   key: string;
   name: string;
   playerId?: string;
+  platform?: string;
+  isBot?: boolean;
   you?: boolean;
   inspected?: boolean;
   mvp?: boolean;
@@ -83,6 +87,8 @@ export function sessionMatchRows(match: SessionMatchDetail, team: number, mvpId?
     return {
       key: p.player_id,
       playerId: p.player_id,
+      platform: p.platform,
+      isBot: p.is_bot,
       name: p.is_local ? 'You' : p.name,
       you: p.is_local,
       mvp: p.player_id === mvpId,
@@ -104,8 +110,8 @@ export function sessionMatchRows(match: SessionMatchDetail, team: number, mvpId?
 }
 
 const WITH_RANKS =
-  'minmax(112px,1.45fr) minmax(44px,0.52fr) minmax(112px,1.18fr) minmax(42px,0.52fr) repeat(5,minmax(26px,0.36fr))';
-const STATS_ONLY = 'minmax(110px,1fr) minmax(44px,0.55fr) repeat(5,minmax(28px,0.42fr))';
+  'minmax(112px,1.45fr) minmax(48px,0.52fr) minmax(66px,0.72fr) minmax(66px,0.82fr) repeat(5,minmax(26px,0.36fr))';
+const STATS_ONLY = 'minmax(110px,1fr) minmax(66px,0.82fr) repeat(5,minmax(28px,0.42fr))';
 
 /** One team's box score panel with a 3px rule in the team slab colour. */
 export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
@@ -116,10 +122,11 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
   withH2H = false,
   onPlayerClick,
 }) => {
+  const { platformDisplay } = useDashboard();
   const gridTemplateColumns = `${withRanks ? WITH_RANKS : STATS_ONLY}${
     withH2H ? ' minmax(54px,0.65fr)' : ''
   }`;
-  const minGridWidth = withRanks ? (withH2H ? 'min-w-[490px]' : 'min-w-[432px]') : 'min-w-[320px]';
+  const minGridWidth = withRanks ? (withH2H ? 'min-w-[548px]' : 'min-w-[488px]') : 'min-w-[356px]';
   return (
     <div
       data-testid={`box-score-${team === 0 ? 'blue' : 'orange'}`}
@@ -128,7 +135,7 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
       tabIndex={0}
       className={`surface-plaque border border-outline px-4 sm:px-5 pt-3.5 pb-4 border-t-[3px] ${TEAM_SLAB_BORDER[team]} flex flex-col min-w-0 overflow-x-auto font-display t-radius`}
     >
-      <div className={`grid gap-x-2 pb-1.5 ${minGridWidth} ${COLUMN_HEADER}`} style={{ gridTemplateColumns }}>
+      <div className={`grid gap-x-2.5 pb-1.5 ${minGridWidth} ${COLUMN_HEADER}`} style={{ gridTemplateColumns }}>
         <span className={team === 0 ? 't-text-blue' : 't-text-orange'}>
           {label}
         </span>
@@ -147,12 +154,20 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
         return (
           <div
             key={p.key}
-            className={`grid gap-x-2 ${minGridWidth} border-t border-line font-bold text-base sm:text-[18px] items-center py-2 t-hover-panel ${
+            className={`grid gap-x-2.5 ${minGridWidth} border-t border-line font-bold text-base sm:text-[18px] items-center py-2 t-hover-panel ${
               p.disconnected ? 'opacity-60' : ''
             }`}
             style={{ gridTemplateColumns }}
           >
-            <span className="flex items-center gap-2 min-w-0">
+            <span className="flex items-center gap-1.5 min-w-0">
+              {platformDisplay === 'icon' && (p.platform || p.isBot) && (
+                <PlatformBadge
+                  platform={p.platform}
+                  isBot={p.isBot}
+                  size="xs"
+                  className="text-muted shrink-0"
+                />
+              )}
               {onPlayerClick && (p.playerId || p.key) ? (
                 <button
                   type="button"
@@ -180,6 +195,14 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
                 >
                   {p.name}
                 </span>
+              )}
+              {platformDisplay === 'name' && (p.platform || p.isBot) && (
+                <PlatformBadge
+                  platform={p.platform}
+                  isBot={p.isBot}
+                  size="xs"
+                  className="text-muted text-[10px] t-font-mono tracking-wider shrink-0"
+                />
               )}
               {p.inspected && (
                 <span className="font-display font-bold text-xs tracking-wider bg-amber-500/20 text-amber-300 px-1.5 py-0.5 border border-amber-500/30">

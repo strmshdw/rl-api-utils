@@ -1,5 +1,7 @@
 import React from 'react';
+import { useDashboard } from '../../context/DashboardContext';
 import { ReplayPlayerStats } from '../../types/api';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { MvpChip } from '../common/ui';
 import { formatMmr, shortRank } from '../../utils/broadcast';
 import { STAT_LABEL_CLASS } from '../../utils/statColors';
@@ -21,7 +23,7 @@ export const TelemetryPendingBanner: React.FC = () => (
 );
 
 const CORE_GRID_COLS =
-  'grid-cols-[minmax(170px,1.6fr)_68px_minmax(124px,1.15fr)_repeat(8,minmax(62px,1fr))]';
+  'grid-cols-[minmax(170px,1.6fr)_68px_minmax(88px,0.85fr)_minmax(84px,1.25fr)_repeat(7,minmax(62px,1fr))] gap-x-2.5';
 
 export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
   players,
@@ -32,6 +34,7 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
   displayPlayerName,
   onPlayerClick,
 }) => {
+  const { platformDisplay } = useDashboard();
   const isInspected = (p: ReplayPlayerStats) => {
     if (!inspectedPlayerId) return false;
     const lower = inspectedPlayerId.toLowerCase();
@@ -84,6 +87,14 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
               }`}
             >
               <div className="flex items-center gap-2 min-w-0 font-sans font-extrabold">
+                {platformDisplay === 'icon' && (p.platform || p.is_bot) && (
+                  <PlatformBadge
+                    platform={p.platform}
+                    isBot={p.is_bot}
+                    size="sm"
+                    className="text-muted shrink-0"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => onPlayerClick?.(pKey, p.name)}
@@ -93,6 +104,14 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
                 >
                   {displayPlayerName(p)}
                 </button>
+                {platformDisplay === 'name' && (p.platform || p.is_bot) && (
+                  <PlatformBadge
+                    platform={p.platform}
+                    isBot={p.is_bot}
+                    size="sm"
+                    className="text-muted text-[11px] t-font-mono tracking-wider shrink-0"
+                  />
+                )}
                 {isMvp && <MvpChip />}
               </div>
               <span className={`text-right ${p.mmr ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>{formatMmr(p.mmr)}</span>

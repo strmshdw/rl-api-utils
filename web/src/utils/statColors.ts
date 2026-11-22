@@ -44,9 +44,9 @@ export const STAT_COLOR_PALETTES: Record<'dark' | 'light', StatColorPalette> = {
     score: '#fff500',   // Hyper Laser Yellow — SCORE / PTS
     goals: '#00ff59',   // Hyper Neon Green — GOALS / G
     assists: '#00f7ff', // Hyper Electric Cyan — ASSISTS / A
-    saves: '#78a6ff',   // Hyper Electric Cobalt — SAVES / SV
+    saves: '#b8ff00',   // Hyper Volt Lime — SAVES / SV
     shots: '#ff66ff',   // Hyper Electric Magenta — SHOTS / SH
-    shotpct: '#b8ff00', // Hyper Volt Lime — SHOT % / SH%
+    shotpct: '#78a6ff', // Hyper Electric Cobalt — SHOT % / SH%
     demos: '#ff8519',   // Hyper Blaze Orange — DEMOS / D / DEM
     demod: '#ff7084',   // Hyper Laser Crimson — DEMO'D
     mmr: '#00ccff',     // Hyper Neon Azure — MMR
@@ -61,9 +61,9 @@ export const STAT_COLOR_PALETTES: Record<'dark' | 'light', StatColorPalette> = {
     score: '#755600',   // Hyper Vivid Gold — SCORE / PTS
     goals: '#006b22',   // Hyper Vivid Emerald — GOALS / G
     assists: '#006175', // Hyper Electric Cyan — ASSISTS / A
-    saves: '#0035c7',   // Hyper Electric Cobalt — SAVES / SV
+    saves: '#446b00',   // Hyper Volt Lime — SAVES / SV
     shots: '#a600a0',   // Hyper Electric Magenta — SHOTS / SH
-    shotpct: '#446b00', // Hyper Volt Lime — SHOT % / SH%
+    shotpct: '#0035c7', // Hyper Electric Cobalt — SHOT % / SH%
     demos: '#b03200',   // Hyper Blaze Orange — DEMOS / D / DEM
     demod: '#c4002a',   // Hyper Laser Crimson — DEMO'D
     mmr: '#004ea8',     // Hyper Electric Azure — MMR

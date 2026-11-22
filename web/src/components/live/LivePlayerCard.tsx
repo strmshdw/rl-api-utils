@@ -9,11 +9,11 @@ import {
   formatSigned,
   hasSyncedRoleTelemetry,
   matchesPlaylistFilter,
-  platformLabel,
   playlistFilterToParam,
   recordInk,
   shortRank,
 } from '../../utils/broadcast';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { RecordCells } from '../common/ui';
 import { StatMode, useDashboard } from '../../context/DashboardContext';
 import type { ScopedLivePlayerHistory } from '../../hooks/useLiveLobbyHistories';
@@ -34,7 +34,7 @@ export const STRIP_STATS: ReadonlyArray<{ key: StatKey; label: string; colorClas
 const EMPTY_STATS: PlayerStatsSummary = { score: 0, goals: 0, assists: 0, saves: 0, shots: 0, demos: 0 };
 
 const HIST_GRID_COLS =
-  'grid grid-cols-[minmax(96px,1.95fr)_minmax(34px,0.9fr)_minmax(44px,1.2fr)_repeat(3,minmax(26px,0.82fr))_minmax(38px,1fr)_repeat(2,minmax(26px,0.82fr))] gap-x-1.5 min-w-[420px] px-3 py-1 items-center min-h-[28px]';
+  'grid grid-cols-[minmax(96px,1.95fr)_minmax(34px,0.9fr)_minmax(54px,1.35fr)_repeat(3,minmax(26px,0.82fr))_minmax(38px,1fr)_repeat(2,minmax(26px,0.82fr))] gap-x-1.5 min-w-[430px] px-3 py-1 items-center min-h-[28px]';
 
 const STAMP_PILL_BASE = 'inline-flex items-center leading-tight min-h-[22px] text-[11px] px-2 py-0.5';
 
@@ -151,7 +151,14 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
 
   const meta: React.ReactNode[] = [];
   if (columns.platform) {
-    meta.push(<span key="platform">{platformLabel(player.platform, player.is_bot)}</span>);
+    meta.push(
+      <PlatformBadge
+        key="platform"
+        platform={player.platform}
+        isBot={player.is_bot}
+        size="sm"
+      />,
+    );
   } else {
     if (columns.rank) meta.push(<span key="rank">{rank?.rank_name || 'UNRANKED'}</span>);
     if (columns.mmr) meta.push(<span key="mmr">{formatMmr(rank?.mmr)}</span>);
@@ -309,7 +316,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
           <span className="t-font-mono text-[10px] font-bold tracking-widest uppercase opacity-80">
             {isBlueTeam ? 'BLUE TEAM // PLAYER' : 'ORANGE TEAM // PLAYER'}
           </span>
-          <div className="flex items-baseline gap-2.5 flex-wrap min-w-0">
+          <div className="flex items-center gap-2.5 flex-wrap min-w-0">
             <div
               title={player.name}
               className="font-bold text-2xl sm:text-[26px] tracking-wider leading-none uppercase max-w-full min-w-0 truncate"
@@ -319,11 +326,11 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
             {meta.length > 0 && (
               <div
                 data-testid="player-meta"
-                className="t-font-mono font-bold text-[11px] tracking-wider uppercase opacity-85 max-w-full min-w-0 truncate"
+                className="inline-flex items-center gap-1.5 t-font-mono font-bold text-[11px] tracking-wider uppercase opacity-90 max-w-full min-w-0 truncate"
               >
                 {meta.map((m, i) => (
                   <React.Fragment key={i}>
-                    {i > 0 && ' · '}
+                    {i > 0 && <span aria-hidden="true">·</span>}
                     {m}
                   </React.Fragment>
                 ))}

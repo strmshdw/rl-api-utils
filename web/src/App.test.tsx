@@ -150,6 +150,28 @@ describe('App shell', () => {
     themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 10));
     expect(document.documentElement.style.getPropertyValue('--t-blur')).toBe('blur(12px)');
+
+    // Player Platform Display preference toggles between Icons (default) and Name
+    const platIconBtn = container.querySelector<HTMLButtonElement>('[data-testid="platform-display-icon"]')!;
+    const platNameBtn = container.querySelector<HTMLButtonElement>('[data-testid="platform-display-name"]')!;
+    expect(platIconBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(platNameBtn.getAttribute('aria-pressed')).toBe('false');
+    expect(container.querySelectorAll('[data-testid="platform-badge"][data-platform-display="icon"] svg').length).toBeGreaterThan(0);
+
+    await act(async () => {
+      platNameBtn.click();
+    });
+    expect(platIconBtn.getAttribute('aria-pressed')).toBe('false');
+    expect(platNameBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('rlsync_platform_display')).toBe('name');
+    expect(container.querySelectorAll('[data-testid="platform-badge"][data-platform-display="name"]').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[data-testid="platform-badge"][data-platform-display="icon"]').length).toBe(0);
+
+    await act(async () => {
+      platIconBtn.click();
+    });
+    expect(localStorage.getItem('rlsync_platform_display')).toBe('icon');
+    expect(container.querySelectorAll('[data-testid="platform-badge"][data-platform-display="icon"] svg').length).toBeGreaterThan(0);
   });
 
   it('prevents accidental modal light-dismiss when pointerdown starts inside the modal panel and releases on backdrop', async () => {
