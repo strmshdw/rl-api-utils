@@ -20,15 +20,16 @@ export const THEME_OPTIONS: ReadonlyArray<{
   { id: 'swiss', label: '03 · Deco Monolith: Carved Inkstone', shortName: '03 · INKSTONE', core: true },
   { id: 'arashi', label: '04 · Deco Monolith: Warm Parchment (Light)', shortName: '04 · PARCHMENT', core: true },
   { id: 'classic', label: '05 · Classic Broadcast (Original RL/SYNC)', shortName: '05 · CLASSIC', core: true },
-  { id: 'arena', label: '06 · Glassmorphic Arena (Frosted HUD)', shortName: '06 · ARENA' },
-  { id: 'carbon', label: '07 · Carbon Paddock (Motorsport Telemetry)', shortName: '07 · CARBON' },
-  { id: 'synthwave', label: '08 · Mannfield Night (Neon Violet)', shortName: '08 · MANNFIELD' },
-  { id: 'editorial', label: '09 · Editorial Gazette (Fraunces Serif)', shortName: '09 · GAZETTE' },
-  { id: 'nordic', label: '10 · Nordic Frost (Arctic Slate & Ice)', shortName: '10 · NORDIC' },
-  { id: 'terminal', label: '11 · Retro CRT Phosphor (Monospace)', shortName: '11 · RETRO CRT' },
-  { id: 'solar', label: '12 · Utopia Daylight (Warm Sand & Blue)', shortName: '12 · UTOPIA' },
-  { id: 'industrial', label: '13 · Cobalt Blueprint (CAD Grid)', shortName: '13 · BLUEPRINT' },
-  { id: 'oled', label: '14 · Pure OLED Pitch (True Zero Black)', shortName: '14 · PURE OLED' },
+  { id: 'classicOled', label: '06 · Classic Broadcast OLED (Pure Black)', shortName: '06 · CLASSIC OLED', core: true },
+  { id: 'arena', label: '07 · Glassmorphic Arena (Frosted HUD)', shortName: '07 · ARENA' },
+  { id: 'carbon', label: '08 · Carbon Paddock (Motorsport Telemetry)', shortName: '08 · CARBON' },
+  { id: 'synthwave', label: '09 · Mannfield Night (Neon Violet)', shortName: '09 · MANNFIELD' },
+  { id: 'editorial', label: '10 · Editorial Gazette (Fraunces Serif)', shortName: '10 · GAZETTE' },
+  { id: 'nordic', label: '11 · Nordic Frost (Arctic Slate & Ice)', shortName: '11 · NORDIC' },
+  { id: 'terminal', label: '12 · Retro CRT Phosphor (Monospace)', shortName: '12 · RETRO CRT' },
+  { id: 'solar', label: '13 · Utopia Daylight (Warm Sand & Blue)', shortName: '13 · UTOPIA' },
+  { id: 'industrial', label: '14 · Cobalt Blueprint (CAD Grid)', shortName: '14 · BLUEPRINT' },
+  { id: 'oled', label: '15 · Pure OLED Pitch (True Zero Black)', shortName: '15 · PURE OLED' },
 ];
 
 interface ThemeAppearanceSectionProps {
@@ -54,7 +55,12 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
     if (!THEME_STYLES[next]) return;
     if (next === 'arashi') {
       onSetTheme(next, 'light');
-    } else if (next === 'broadcast' || next === 'tactical' || next === 'swiss') {
+    } else if (
+      next === 'broadcast' ||
+      next === 'tactical' ||
+      next === 'swiss' ||
+      next === 'classicOled'
+    ) {
       onSetTheme(next, 'dark');
     } else {
       onSetTheme(next, colorMode);
@@ -67,7 +73,7 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
     <section className="flex flex-col gap-3.5">
       <SectionLabel>01 · DESIGN SYSTEM &amp; APPEARANCE</SectionLabel>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {coreThemes.map((opt) => {
           const def = THEME_STYLES[opt.id];
           const pal = opt.id === 'arashi' ? def.light : def.dark;
@@ -107,7 +113,7 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
             htmlFor="theme-select"
             className="t-font-display font-bold text-xs uppercase tracking-wider text-muted"
           >
-            ALL DESIGN EXPRESSIONS (14)
+            ALL DESIGN EXPRESSIONS ({THEME_OPTIONS.length})
           </label>
           <select
             id="theme-select"

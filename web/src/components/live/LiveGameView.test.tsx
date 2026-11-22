@@ -148,6 +148,8 @@ describe('LiveGameView — in match', () => {
     expect(statLabel(you, 'shots').textContent).toBe('SHOTS');
     expect(statLabel(you, 'demos').className).toContain('stat-lbl-demos');
     expect(statLabel(you, 'demos').textContent).toBe('DEMOS');
+    expect(you.querySelector('[data-stat="score"]')?.className).toContain('items-baseline justify-between');
+    expect(you.querySelector('[data-stat="score"]')?.className).not.toContain('flex-col');
 
     expect(statEl(you, 'score').className).toContain('stat-lbl-score'); // 480 is the lobby high
     expect(statEl(you, 'score').className).toContain('font-black');
@@ -211,6 +213,22 @@ describe('LiveGameView — in match', () => {
     expect(youCard.textContent).toContain('IN RANGE 3W–1L');
     expect(youCard.textContent).toContain('NET MMR +29');
 
+    // Header uses unique surface-card-header + strong text (no team slab background), with team color on player name
+    const youHeader = youCard.querySelector<HTMLElement>('[data-testid="live-player-header"]')!;
+    const youName = youCard.querySelector<HTMLElement>('[data-testid="live-player-name"]')!;
+    expect(youHeader.className).toContain('surface-card-header');
+    expect(youHeader.className).toContain('t-text-strong');
+    expect(youHeader.className).not.toContain('bg-blue-slab');
+    expect(youHeader.className).not.toContain('bg-orange-slab');
+    expect(youName.className).toContain('text-blue-ink');
+
+    const oppCard = cards(container).find((c) => c.dataset.playerId === 'Steam|76561198000000020|0')!;
+    const oppHeader = oppCard.querySelector<HTMLElement>('[data-testid="live-player-header"]')!;
+    const oppName = oppCard.querySelector<HTMLElement>('[data-testid="live-player-name"]')!;
+    expect(oppHeader.className).toContain('surface-card-header');
+    expect(oppHeader.className).not.toContain('bg-orange-slab');
+    expect(oppName.className).toContain('text-orange-ink');
+
     // Header places rank in front of MMR value, MMR label matches rank size, no space before MMR
     const rankMmr = youCard.querySelector<HTMLElement>('[data-testid="live-player-rank-mmr"]')!;
     const rankEl = rankMmr.querySelector<HTMLElement>('[data-testid="live-player-rank"]')!;
@@ -221,20 +239,16 @@ describe('LiveGameView — in match', () => {
     expect(rankEl.className).toContain('text-xs');
     expect(mmrLabelEl.className).toContain('text-xs');
 
-    // Spacer separates current match stat strip from historical split table
+    // Spacer separates current match stat strip from historical split table, and no live filter bar is rendered
     expect(youCard.querySelector('[data-testid="live-hist-spacer"]')).not.toBeNull();
-
-    const toggleBtn = container.querySelector<HTMLButtonElement>('#btn-toggle-live-hist')!;
-    expect(toggleBtn).not.toBeNull();
-    expect(toggleBtn.textContent).toContain('HISTORICAL DATA: SHOWN');
+    expect(container.querySelector('[data-testid="live-filter-bar"]')).toBeNull();
     expect(container.querySelectorAll('.live-hist-section').length).toBeGreaterThan(0);
 
-    await act(async () => {
-      toggleBtn.click();
-    });
-    expect(toggleBtn.textContent).toContain('HISTORICAL DATA: HIDDEN');
-    expect(container.querySelectorAll('.live-hist-section').length).toBe(0);
-    expect(localStorage.getItem('rlsync_show_live_hist_data')).toBe('false');
+    // Persisted Settings preference hides historical stats cleanly
+    cleanup();
+    localStorage.setItem('rlsync_show_live_hist_data', 'false');
+    const hidden = await renderLive(liveMatch());
+    expect(hidden.container.querySelectorAll('.live-hist-section').length).toBe(0);
   });
 
   it('renders an AI/BOT stamp for bot players and omits it for human players', async () => {
@@ -256,43 +270,33 @@ describe('LiveGameView — in match', () => {
     expect(humanCard.querySelector('[data-testid="badge-bot"]')).toBeNull();
   });
 
-  it('scopes player card Rank/MMR, matchups_by_playlist H2H, and THIS SESSION W–L when PLAYLIST SCOPE (3V3 / 1V1) is toggled', async () => {
-    const { container } = await renderLive(liveMatch());
-    const aeroCard = () => cards(container).find((c) => c.dataset.playerId === 'Steam|76561198000000010|0')!;
-    const youCard = () => cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
+  it('renders no live filter bar and automatically scopes player Rank/MMR, matchups_by_playlist H2H, and THIS SESSION W–L to the active match playlist', async () => {
+    // Active 2v2 match -> shows 2v2 rank (1502), 2v2 H2H (4–1), and 2v2 session record (3–1) with zero filter bar
+    const view2v2 = await renderLive(liveMatch({ playlist_id: 11, playlist_name: 'Ranked Doubles' }));
+    expect(view2v2.container.querySelector('[data-testid="live-filter-bar"]')).toBeNull();
+    expect(view2v2.container.querySelectorAll('.live-pl-btn')).toHaveLength(0);
+    const aero2v2 = cards(view2v2.container).find((c) => c.dataset.playerId === 'Steam|76561198000000010|0')!;
+    const you2v2 = cards(view2v2.container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
+    expect(aero2v2.textContent).toContain('1502');
+    expect(aero2v2.querySelector('[data-testid="player-h2h"]')?.textContent).toBe('WITH YOU4–1');
+    expect(you2v2.querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION3–1');
+    view2v2.unmount();
 
-    // Concrete single-mode pills only (no ALL cross-mode pill); default (2V2) shows 2v2 rank (1502), 2v2 H2H (4–1), and 2v2 session record (3–1)
-    const scopeLabels = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).map((b) =>
-      b.textContent?.trim(),
-    );
-    expect(scopeLabels).not.toContain('ALL');
-    expect(aeroCard().textContent).toContain('1502');
-    expect(aeroCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('WITH YOU4–1');
-    expect(youCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION3–1');
+    // Active 3v3 match -> automatically scopes to 3v3 rank (1795), matchups_by_playlist['13'] (2–0), and 3v3 session record (1–0, +11)
+    const view3v3 = await renderLive(liveMatch({ playlist_id: 13, playlist_name: 'Ranked Standard' }));
+    const aero3v3 = cards(view3v3.container).find((c) => c.dataset.playerId === 'Steam|76561198000000010|0')!;
+    const you3v3 = cards(view3v3.container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
+    expect(aero3v3.textContent).toContain('1795');
+    expect(aero3v3.querySelector('[data-testid="player-h2h"]')?.textContent).toBe('WITH YOU2–0');
+    expect(you3v3.querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION1–0');
+    expect(you3v3.textContent).toContain('NET MMR +11');
+    view3v3.unmount();
 
-    // Switch to 3V3 -> AeroPulse's 3v3 rank is Grand Champion III (1795), H2H uses matchups_by_playlist['13'] (2–0),
-    // 2v2 mechanical averages (446) are NOT misattributed to 3v3, and You's session record scopes to 3v3 (1–0, +11)
-    const btn3v3 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
-      (b) => b.textContent?.trim() === '3V3',
-    )!;
-    await act(async () => {
-      btn3v3.click();
-    });
-    expect(aeroCard().textContent).toContain('1795');
-    expect(aeroCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('WITH YOU2–0');
-    expect(aeroCard().textContent).not.toContain('446');
-    expect(youCard().querySelector('[data-testid="player-h2h"]')?.textContent).toBe('THIS SESSION1–0');
-    expect(youCard().textContent).toContain('NET MMR +11');
-
-    // Switch to 1V1 -> AeroPulse has no 1v1 rank or matches -> UNRANKED and 0G dimmed rows
-    const btn1v1 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
-      (b) => b.textContent?.trim() === '1V1',
-    )!;
-    await act(async () => {
-      btn1v1.click();
-    });
-    expect(aeroCard().textContent).toContain('UNRANKED');
-    expect(aeroCard().textContent).toContain('— NO MATCHES IN SELECTED RANGE —');
+    // Active 1v1 match -> AeroPulse has no 1v1 rank or matches -> UNRANKED and 0G dimmed rows
+    const view1v1 = await renderLive(liveMatch({ playlist_id: 10, playlist_name: 'Ranked Duel' }));
+    const aero1v1 = cards(view1v1.container).find((c) => c.dataset.playerId === 'Steam|76561198000000010|0')!;
+    expect(aero1v1.textContent).toContain('UNRANKED');
+    expect(aero1v1.textContent).toContain('— NO MATCHES IN SELECTED RANGE —');
   });
 
   it('locks paired Blue/Orange card bands via CSS subgrid coordinates even under heavy multi-stamp asymmetry and updates Scorebug AVG by scope', async () => {
@@ -404,14 +408,15 @@ describe('LiveGameView — in match', () => {
     expect(orangeCards[0].querySelector('[data-testid="badge-threat-streak"]')).not.toBeNull();
     expect(orangeCards[0].querySelector('[data-testid="badge-player-note"]')).not.toBeNull();
 
-    // Switch scope to 3V3 -> Scorebug AVG updates to 3v3 MMRs ((1460+1795)/2 = 1628 vs (1910+1450)/2 = 1680 -> +52 ORANGE)
-    const btn3v3 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
-      (b) => b.textContent?.trim() === '3V3',
-    )!;
-    await act(async () => {
-      btn3v3.click();
-    });
-    const bug = container.querySelector('[data-testid="scorebug"]')!;
+    // Active 3v3 match automatically scopes Scorebug AVG to 3v3 MMRs ((1460+1795)/2 = 1628 vs (1910+1450)/2 = 1680 -> +53 ORANGE)
+    const view3v3 = await renderLive(
+      liveMatch({
+        playlist_id: 13,
+        playlist_name: 'Ranked Standard',
+        opponents: [heavyStampOpponent, lowMateOpponent],
+      }),
+    );
+    const bug = view3v3.container.querySelector('[data-testid="scorebug"]')!;
     expect(bug.textContent).toContain('AVG 1628');
     expect(bug.textContent).toContain('AVG 1680');
     expect(bug.textContent).toContain('+53 ORANGE');
@@ -531,26 +536,29 @@ describe('LiveGameView — in match', () => {
         spectators: [],
       };
 
-      const { container } = await renderLive(realMatch);
+      const view2v2 = await renderLive(realMatch);
       await act(async () => {
         await new Promise((r) => setTimeout(r, 25));
       });
 
       expect(requestedUrls.some((u) => u.includes('/api/players/me?playlist=11'))).toBe(true);
-      expect(container.textContent).toContain('562');
-      expect(container.textContent).toContain('604');
+      expect(view2v2.container.textContent).toContain('562');
+      expect(view2v2.container.textContent).toContain('604');
+      view2v2.unmount();
 
-      // Switch to 3V3 -> 2v2 telemetry (562 / 604) must clear and re-query playlist=13
-      const btn3v3 = Array.from(container.querySelectorAll<HTMLButtonElement>('.live-pl-btn')).find(
-        (b) => b.textContent?.trim() === '3V3',
-      )!;
+      // Active 3v3 match automatically queries playlist=13 and never leaks 2v2 telemetry (562 / 604)
+      const view3v3 = await renderLive({
+        ...realMatch,
+        match_guid: 'real-live-guid-3v3',
+        playlist_id: 13,
+        playlist_name: 'Ranked Standard',
+      });
       await act(async () => {
-        btn3v3.click();
         await new Promise((r) => setTimeout(r, 25));
       });
       expect(requestedUrls.some((u) => u.includes('playlist=13'))).toBe(true);
-      expect(container.textContent).not.toContain('562');
-      expect(container.textContent).not.toContain('604');
+      expect(view3v3.container.textContent).not.toContain('562');
+      expect(view3v3.container.textContent).not.toContain('604');
     } finally {
       globalThis.fetch = origFetch;
     }

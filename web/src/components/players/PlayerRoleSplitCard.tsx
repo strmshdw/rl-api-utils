@@ -47,9 +47,9 @@ export const CORE_PLAYLIST_SCOPE_BUTTONS: ReadonlyArray<{
   scope: ProfilePlaylistScope;
   label: string;
 }> = [
+  { scope: '1v1', label: '1V1' },
   { scope: '2v2', label: '2V2' },
   { scope: '3v3', label: '3V3' },
-  { scope: '1v1', label: '1V1' },
 ];
 
 export const EXTRA_PLAYLIST_SCOPE_OPTIONS: ReadonlyArray<{

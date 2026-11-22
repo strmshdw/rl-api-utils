@@ -156,7 +156,11 @@ describe('PlayerProfileDialog', () => {
     const plBtnLabels = Array.from(container.querySelectorAll('.prof-pl-btn')).map((b) => b.textContent?.trim());
     expect(plBtnLabels).not.toContain('ALL');
     expect(plBtnLabels).not.toContain('EXTRA');
-    expect(plBtnLabels).toEqual(['2V2', '3V3', '1V1', 'CASUAL']);
+    expect(plBtnLabels).toEqual(['1V1', '2V2', '3V3', 'CASUAL']);
+    const modeOrder = Array.from(container.querySelectorAll('[data-mode-btn]')).map((b) =>
+      b.getAttribute('data-mode-btn'),
+    );
+    expect(modeOrder).toEqual(['10', '11', '13', 'extra', 'casual']);
   });
 
   it('toggles interactive filter cards (WITH YOU / VS YOU)', async () => {

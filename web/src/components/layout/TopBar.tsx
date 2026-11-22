@@ -30,6 +30,7 @@ interface TopBarProps {
   /** Playlist whose MMR is shown on the right (current match, active mode, else most played). */
   playlistId?: number;
   onRefreshSession?: () => Promise<void> | void;
+  onOpenColumns?: () => void;
 }
 
 const TABS: ReadonlyArray<{ id: DashboardTab; label: string }> = [
@@ -51,13 +52,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   statusMode,
   playlistId,
   onRefreshSession,
+  onOpenColumns,
 }) => {
   const {
     areaFilters,
     replayLimitPreview,
     setReplayLimitPreview,
     isDevBuild,
-    appVersion,
     previewMode,
   } = useDashboard();
 
@@ -179,10 +180,6 @@ export const TopBar: React.FC<TopBarProps> = ({
               </span>
               <span className="t-font-display font-bold text-xl tracking-widest t-text-strong whitespace-nowrap">
                 RL<span className="t-text-orange text-orange-ink">/</span>SYNC
-              </span>
-              <span className="text-[11px] t-font-mono cartouche-mono px-1.5 py-0.5 hidden xl:inline whitespace-nowrap">
-                v{appVersion}
-                {isDevBuild ? '-dev' : ''}
               </span>
             </div>
 
@@ -346,6 +343,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         onSwitchToLive={() => {
           if (activeTab !== 'live') onTabChange('live');
         }}
+        onOpenColumns={onOpenColumns}
       />
     </>
   );

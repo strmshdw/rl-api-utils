@@ -244,10 +244,19 @@ export const AreaFilterBar: React.FC<AreaFilterBarProps> = ({
               >
                 <button
                   type="button"
+                  data-mode-btn="10"
+                  aria-pressed={normalizedMode === '10'}
+                  onClick={() => selectMode('10')}
+                  className={`live-pl-btn prof-pl-btn ${TOOLBAR_TOGGLE_BTN}`}
+                >
+                  1V1
+                </button>
+                <button
+                  type="button"
                   data-mode-btn="11"
                   aria-pressed={normalizedMode === '11'}
                   onClick={() => selectMode('11')}
-                  className={`live-pl-btn prof-pl-btn ${TOOLBAR_TOGGLE_BTN}`}
+                  className={`live-pl-btn prof-pl-btn ${TOOLBAR_TOGGLE_BTN} border-l t-border`}
                 >
                   2V2
                 </button>
@@ -259,15 +268,6 @@ export const AreaFilterBar: React.FC<AreaFilterBarProps> = ({
                   className={`live-pl-btn prof-pl-btn ${TOOLBAR_TOGGLE_BTN} border-l t-border`}
                 >
                   3V3
-                </button>
-                <button
-                  type="button"
-                  data-mode-btn="10"
-                  aria-pressed={normalizedMode === '10'}
-                  onClick={() => selectMode('10')}
-                  className={`live-pl-btn prof-pl-btn ${TOOLBAR_TOGGLE_BTN} border-l t-border`}
-                >
-                  1V1
                 </button>
 
                 {/* EXTRA ▾ Viewport-Safe Mode Menu */}

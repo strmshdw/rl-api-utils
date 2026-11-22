@@ -41,18 +41,22 @@ describe('App shell', () => {
     vi.clearAllMocks();
   });
 
-  it('renders a single top bar with tabs, active-mode session count & record, playlist MMR and overlay link without cross-mode ALL pills', async () => {
+  it('renders a clean single top bar without version badge or telemetry desk banner, and removes the live filter bar', async () => {
     setHooks(null);
     const { container } = await mount(<App />);
     const header = container.querySelector('[data-testid="app-header"]')!;
     expect(nav(container).textContent).toBe('LIVESESSION4HISTORYPLAYERS');
     expect(header.textContent).not.toContain('SESSION 4–1');
     expect(header.textContent).not.toContain('ALL MODES');
+    expect(header.textContent).not.toContain('v2.0.0');
     expect(header.querySelector('#btn-mode-all')).toBeNull();
     expect(header.textContent).toContain('DOUBLES 1485 +29 · 3–1');
     expect(header.querySelector('a[href="/?mode=overlay"]')?.textContent).toBe('OVERLAY ↗');
     expect(container.querySelector('footer')).toBeNull();
     expect(header.textContent).not.toContain('COLUMNS');
+    expect(container.textContent).not.toContain('RL/SYNC TELEMETRY DESK');
+    expect(container.textContent).not.toContain('25S POST-WHISTLE MMR BURST POLLING');
+    expect(container.querySelector('[data-testid="live-filter-bar"]')).toBeNull();
   });
 
   it('marks the active tab and switches views', async () => {
@@ -79,24 +83,27 @@ describe('App shell', () => {
     expect(container.querySelector('[data-testid="session-view"]')).not.toBeNull();
   });
 
-  it('shows the live dot in red and a local COLUMNS button inside LiveGameView during a match (not in TopBar)', async () => {
+  it('shows the live dot in red with zero live filter bar and opens live card field columns from Settings', async () => {
     setHooks(SAMPLE_CURRENT_MATCH);
     const { container } = await mount(<App />);
     const live = nav(container).querySelector('button')!;
     expect(live.innerHTML).toContain('bg-loss');
     const liveMatchEl = container.querySelector('[data-testid="live-match"]')!;
     expect(liveMatchEl).not.toBeNull();
+    expect(container.querySelector('[data-testid="live-filter-bar"]')).toBeNull();
     expect(container.querySelector('[data-testid="app-header"]')!.textContent).not.toContain('COLUMNS');
 
-    await clickText(liveMatchEl, 'COLUMNS');
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('#btn-settings')!.click();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="settings-live-columns-btn"]')!.click();
+    });
     const dialog = container.querySelector('dialog')!;
     expect(dialog.textContent).toContain('COLUMNS');
     expect(dialog.querySelectorAll('input[type="checkbox"]')).toHaveLength(10);
     await clickText(dialog, 'DONE');
     expect(container.querySelector('dialog')).toBeNull();
-
-    await clickText(nav(container), 'HISTORY');
-    expect(container.querySelector('[data-testid="live-columns-btn"]')).toBeNull();
   });
 
   it('hides theme and configuration complexity behind the Settings gear button and supports all 14 design styles, dark/light mode, and text scale', async () => {
@@ -146,6 +153,17 @@ describe('App shell', () => {
     expect(document.documentElement.style.getPropertyValue('--t-blue-ink')).toBe('#30aff8');
     expect(document.documentElement.style.getPropertyValue('--t-orange-ink')).toBe('#f67f2f');
 
+    themeSelect.value = 'classicOled';
+    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.documentElement.getAttribute('data-style')).toBe('classicOled');
+    expect(document.documentElement.getAttribute('data-mode')).toBe('dark');
+    expect(document.documentElement.style.getPropertyValue('--t-page')).toBe('#000000');
+    expect(document.documentElement.style.getPropertyValue('--t-plaque')).toBe('#000000');
+    expect(document.documentElement.style.getPropertyValue('--t-card-header')).toBe('#12151c');
+    expect(document.documentElement.style.getPropertyValue('--t-blue-ink')).toBe('#30aff8');
+    expect(document.documentElement.style.getPropertyValue('--t-orange-ink')).toBe('#f67f2f');
+
     themeSelect.value = 'arena';
     themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 10));
@@ -177,7 +195,9 @@ describe('App shell', () => {
   it('prevents accidental modal light-dismiss when pointerdown starts inside the modal panel and releases on backdrop', async () => {
     setHooks(SAMPLE_CURRENT_MATCH);
     const { container } = await mount(<App />);
-    await clickText(container.querySelector('[data-testid="live-match"]')!, 'COLUMNS');
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('#btn-settings')!.click();
+    });
     const dialog = container.querySelector('dialog')!;
     expect(dialog).not.toBeNull();
     const backdropWrapper = dialog.firstElementChild as HTMLElement;
@@ -231,21 +251,22 @@ describe('App shell', () => {
     expect(localStorage.getItem('rlsync_show_live_hist_data')).toBe('true');
     expect(container.querySelectorAll('[data-testid="live-player-hist-split"]').length).toBeGreaterThan(0);
 
-    // Toggle back to IDLE VIEW
+    // Toggle back to IDLE VIEW (no live filter bar rendered)
     const idleBtn = container.querySelector<HTMLButtonElement>('#btn-mode-idle')!;
     idleBtn.click();
     await new Promise((r) => setTimeout(r, 10));
     expect(container.querySelector('[data-testid="live-idle"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="live-filter-bar"]')).toBeNull();
 
-    // Toggle AVG / G vs TOTALS locally on LIVE idle bar
-    const totalBtn = container.querySelector<HTMLButtonElement>('[data-testid="live-filter-bar"] [data-stat-mode="total"]')!;
+    // Switch to SESSION to toggle AVG / G vs TOTALS locally
+    await clickText(nav(container), 'SESSION');
+    const totalBtn = container.querySelector<HTMLButtonElement>('[data-testid="session-filter-bar"] [data-stat-mode="total"]')!;
     await act(async () => {
       totalBtn.click();
     });
     expect(container.textContent).toContain('SHOWING CUMULATIVE TOTALS');
 
-    // Switch to HISTORY to toggle local Custom Calendar Range bar (not shown on idle LIVE)
-    expect(container.querySelector('[data-testid="live-cal-toggle"]')).toBeNull();
+    // Switch to HISTORY to toggle local Custom Calendar Range bar
     await clickText(nav(container), 'HISTORY');
     const calBtn = container.querySelector<HTMLButtonElement>('[data-testid="history-cal-toggle"]')!;
     await act(async () => {
@@ -317,8 +338,9 @@ describe('App shell', () => {
     // Click VIEW MY PROFILE -> pushes /players/<local-id> and renders PlayerProfilePage
     const ownProfileBtn = container.querySelector<HTMLButtonElement>('[data-testid="view-own-profile-btn"]')!;
     expect(ownProfileBtn).not.toBeNull();
-    ownProfileBtn.click();
-    await new Promise((r) => setTimeout(r, 20));
+    await act(async () => {
+      ownProfileBtn.click();
+    });
     expect(window.location.pathname).toContain('/players/');
     expect(container.querySelector('[data-testid="player-profile-page"]')).not.toBeNull();
 
@@ -330,9 +352,10 @@ describe('App shell', () => {
       player: null,
       modalPlayer: null,
     };
-    window.history.replaceState(playersNavState, '', '/players');
-    window.dispatchEvent(new PopStateEvent('popstate', { state: playersNavState }));
-    await new Promise((r) => setTimeout(r, 20));
+    await act(async () => {
+      window.history.replaceState(playersNavState, '', '/players');
+      window.dispatchEvent(new PopStateEvent('popstate', { state: playersNavState }));
+    });
     expect(container.querySelector('[data-testid="player-profile-page"]')).toBeNull();
     expect(container.querySelector('[data-testid="players-view"]')).not.toBeNull();
 
@@ -344,43 +367,36 @@ describe('App shell', () => {
       player: null,
       modalPlayer: null,
     };
-    window.history.replaceState(sessionNavState, '', '/session');
-    window.dispatchEvent(new PopStateEvent('popstate', { state: sessionNavState }));
-    await new Promise((r) => setTimeout(r, 20));
+    await act(async () => {
+      window.history.replaceState(sessionNavState, '', '/session');
+      window.dispatchEvent(new PopStateEvent('popstate', { state: sessionNavState }));
+    });
     expect(container.querySelector('[data-testid="session-view"]')).not.toBeNull();
   });
 
-  it('removes universal filter banner from TopBar and keeps area filters distinct & independent across LIVE, SESSION, HISTORY, and PLAYERS', async () => {
+  it('removes universal filter banner from TopBar, renders zero filters on LIVE, orders mode filters 1V1/2V2/3V3/EXTRA/CASUAL, and keeps SESSION/HISTORY/PLAYERS independent', async () => {
     setHooks(null);
     const { container } = await mount(<App />);
 
-    // TopBar is single-tier with zero universal filter banner controls
+    // TopBar is single-tier with zero universal filter banner controls and LIVE has zero filter bar
     const header = container.querySelector('[data-testid="app-header"]')!;
     expect(header.querySelector('#context-filter-bar')).toBeNull();
     expect(header.querySelector('[role="toolbar"]')).toBeNull();
+    expect(container.querySelector('[data-testid="live-filter-bar"]')).toBeNull();
 
-    // LIVE idle area filter bar has Mode + AVG/TOTALS (no Timeframe clutter)
-    const liveBar = container.querySelector<HTMLElement>('[data-testid="live-filter-bar"]')!;
-    expect(liveBar).not.toBeNull();
-    expect(liveBar.querySelector('[data-stat-mode="avg"]')).not.toBeNull();
-    expect(liveBar.querySelector('[data-stat-mode="total"]')).not.toBeNull();
-    expect(liveBar.querySelector('[data-testid="live-date-range"]')).toBeNull();
-
-    // Switch LIVE mode from 2V2 to 3V3 -> updates LIVE header pill to STANDARD 1421 +11 · 1–0
-    await clickText(liveBar, '3V3');
-    expect(nav(container).textContent).toBe('LIVESESSION1HISTORYPLAYERS');
-    expect(header.textContent).not.toContain('SESSION 4–1');
-    expect(header.textContent).toContain('STANDARD 1421 +11 · 1–0');
-
-    // Switch to SESSION -> independent from LIVE! Still defaults to 2V2 (DOUBLES 1485 +29 · 3–1, badge 4)
+    // Switch to SESSION -> mode filters are ordered 1V1, 2V2, 3V3, EXTRA, CASUAL and default to 2V2
     await clickText(nav(container), 'SESSION');
     const sessionBar = container.querySelector<HTMLElement>('[data-testid="session-filter-bar"]')!;
     expect(sessionBar).not.toBeNull();
     expect(sessionBar.querySelector('[data-testid="session-date-range"]')).toBeNull();
+    const sessionModeOrder = Array.from(sessionBar.querySelectorAll<HTMLButtonElement>('[data-mode-btn]')).map(
+      (b) => b.getAttribute('data-mode-btn'),
+    );
+    expect(sessionModeOrder).toEqual(['10', '11', '13', 'extra', 'casual']);
     expect(sessionBar.querySelector('[data-mode-btn="11"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(header.textContent).toContain('DOUBLES 1485 +29 · 3–1');
 
-    // Switch SESSION mode to 1V1 -> header reflects SESSION 1V1 (0–0), without affecting LIVE (still 3V3)
+    // Switch SESSION mode to 1V1 -> header reflects SESSION 1V1 (0–0)
     await clickText(sessionBar, '1V1');
     expect(nav(container).textContent).toBe('LIVESESSIONHISTORYPLAYERS');
     expect(header.textContent).toContain('DUEL');
@@ -426,7 +442,7 @@ describe('App shell', () => {
     expect(historyBar.querySelector('[data-stat-mode="avg"]')).toBeNull();
     expect(historyBar.querySelector('[data-stat-mode="total"]')).toBeNull();
 
-    // Navigate to PLAYERS: has its own Mode + Timeframe + AVG/TOTALS bar (independent of HISTORY/SESSION/LIVE)
+    // Navigate to PLAYERS: has its own Mode + Timeframe + AVG/TOTALS bar (independent of HISTORY/SESSION)
     await clickText(nav(container), 'PLAYERS');
     const playersBar = container.querySelector<HTMLElement>('[data-testid="players-filter-bar"]')!;
     expect(playersBar).not.toBeNull();
@@ -434,20 +450,20 @@ describe('App shell', () => {
     expect(playersBar.querySelector('[data-testid="players-date-range"]')).not.toBeNull();
     expect(playersBar.querySelector('[data-stat-mode="avg"]')).not.toBeNull();
 
-    // Returning to LIVE preserves LIVE's 3V3 mode (unaffected by SESSION's Hoops or HISTORY/PLAYERS's 2V2)
+    // Returning to LIVE still renders no filter bar and derives the most recent session mode automatically
     await clickText(nav(container), 'LIVE');
-    expect(
-      container.querySelector('[data-testid="live-filter-bar"] [data-mode-btn="13"]')?.getAttribute('aria-pressed'),
-    ).toBe('true');
+    expect(container.querySelector('[data-testid="live-filter-bar"]')).toBeNull();
+    expect(header.textContent).toContain('DOUBLES 1485 +29 · 3–1');
 
-    // SettingsPanel no longer duplicates HISTORICAL STAT AGGREGATION or COLUMNS
+    // SettingsPanel exposes LIVE VIEW HISTORICAL STATS, CONFIGURE LIVE FIELDS, Sync Banner & OBS Overlay
     const settingsBtn = container.querySelector<HTMLButtonElement>('#btn-settings')!;
     await act(async () => {
       settingsBtn.click();
     });
     const settingsBody = container.querySelector('#settings-panel-body')!;
     expect(settingsBody.textContent).not.toContain('HISTORICAL STAT AGGREGATION');
-    expect(settingsBody.textContent).not.toContain('COLUMNS');
+    expect(settingsBody.querySelector('[data-testid="settings-live-hist-hide"]')).not.toBeNull();
+    expect(settingsBody.querySelector('[data-testid="settings-live-columns-btn"]')).not.toBeNull();
     expect(settingsBody.querySelector('#btn-restore-sync-banner')).not.toBeNull();
     expect(settingsBody.textContent).toContain('OBS OVERLAY ↗');
   });

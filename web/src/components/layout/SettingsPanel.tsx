@@ -25,6 +25,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onClose,
   inMatch,
   onSwitchToLive,
+  onOpenColumns,
 }) => {
   const {
     themeStyle,
@@ -96,7 +97,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <section className="flex flex-col gap-3.5 pt-2 border-t border-line">
           <SectionLabel>03 · TELEMETRY DISPLAY &amp; BROADCAST</SectionLabel>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
               <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
                 LIVE VIEW HISTORICAL STATS
@@ -138,6 +139,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </button>
               </div>
             </div>
+
+            {onOpenColumns && (
+              <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
+                <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
+                  LIVE PLAYER CARD FIELDS
+                </span>
+                <button
+                  type="button"
+                  id="btn-settings-columns"
+                  data-testid="settings-live-columns-btn"
+                  onClick={() => {
+                    onClose();
+                    onOpenColumns();
+                  }}
+                  className="w-full py-1.5 px-3 t-bg-page border border-outline t-font-display font-bold text-xs uppercase tracking-wider t-text-strong hover:border-ink t-radius cursor-pointer"
+                >
+                  CONFIGURE LIVE FIELDS →
+                </button>
+              </div>
+            )}
 
             <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
               <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
