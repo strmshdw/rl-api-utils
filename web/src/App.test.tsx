@@ -211,6 +211,25 @@ describe('App shell', () => {
     matchBtn.click();
     await new Promise((r) => setTimeout(r, 10));
     expect(container.querySelector('[data-testid="live-match"]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-testid="live-player-hist-split"]').length).toBeGreaterThan(0);
+
+    // Settings option hides and restores historical stats in live view and persists choice
+    const hideLiveHistBtn = container.querySelector<HTMLButtonElement>('[data-testid="settings-live-hist-hide"]')!;
+    const showLiveHistBtn = container.querySelector<HTMLButtonElement>('[data-testid="settings-live-hist-show"]')!;
+    expect(showLiveHistBtn.getAttribute('aria-pressed')).toBe('true');
+    await act(async () => {
+      hideLiveHistBtn.click();
+    });
+    expect(hideLiveHistBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('rlsync_show_live_hist_data')).toBe('false');
+    expect(container.querySelectorAll('[data-testid="live-player-hist-split"]').length).toBe(0);
+
+    await act(async () => {
+      showLiveHistBtn.click();
+    });
+    expect(showLiveHistBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('rlsync_show_live_hist_data')).toBe('true');
+    expect(container.querySelectorAll('[data-testid="live-player-hist-split"]').length).toBeGreaterThan(0);
 
     // Toggle back to IDLE VIEW
     const idleBtn = container.querySelector<HTMLButtonElement>('#btn-mode-idle')!;

@@ -137,11 +137,17 @@ describe('LiveGameView — in match', () => {
     const you = byId('Epic|demo_local_player|0');
     const statLabel = (card: HTMLElement, key: string) => card.querySelector<HTMLElement>(`[data-stat="${key}"] span:first-child`)!;
     expect(statLabel(you, 'score').className).toContain('stat-lbl-score');
+    expect(statLabel(you, 'score').textContent).toBe('SCORE');
     expect(statLabel(you, 'goals').className).toContain('stat-lbl-goals');
+    expect(statLabel(you, 'goals').textContent).toBe('GOALS');
     expect(statLabel(you, 'assists').className).toContain('stat-lbl-assists');
+    expect(statLabel(you, 'assists').textContent).toBe('ASSISTS');
     expect(statLabel(you, 'saves').className).toContain('stat-lbl-saves');
+    expect(statLabel(you, 'saves').textContent).toBe('SAVES');
     expect(statLabel(you, 'shots').className).toContain('stat-lbl-shots');
+    expect(statLabel(you, 'shots').textContent).toBe('SHOTS');
     expect(statLabel(you, 'demos').className).toContain('stat-lbl-demos');
+    expect(statLabel(you, 'demos').textContent).toBe('DEMOS');
 
     expect(statEl(you, 'score').className).toContain('stat-lbl-score'); // 480 is the lobby high
     expect(statEl(you, 'score').className).toContain('font-black');
@@ -199,9 +205,24 @@ describe('LiveGameView — in match', () => {
     expect(container.textContent).toContain('◆ HOT STREAK');
 
     const youCard = cards(container).find((c) => c.dataset.playerId === 'Epic|demo_local_player|0')!;
-    expect(youCard.textContent).toContain('YOU · ACTIVE SESSION');
+    expect(youCard.textContent).not.toContain('YOU · ACTIVE SESSION');
+    expect(youCard.textContent).not.toContain('BLUE TEAM // PLAYER');
+    expect(container.textContent).not.toContain('ORANGE TEAM // PLAYER');
     expect(youCard.textContent).toContain('IN RANGE 3W–1L');
     expect(youCard.textContent).toContain('NET MMR +29');
+
+    // Header places rank in front of MMR value, MMR label matches rank size, no space before MMR
+    const rankMmr = youCard.querySelector<HTMLElement>('[data-testid="live-player-rank-mmr"]')!;
+    const rankEl = rankMmr.querySelector<HTMLElement>('[data-testid="live-player-rank"]')!;
+    const mmrEl = rankMmr.querySelector<HTMLElement>('[data-testid="live-player-mmr"]')!;
+    const mmrLabelEl = rankMmr.querySelector<HTMLElement>('[data-testid="live-player-mmr-label"]')!;
+    expect(rankEl.compareDocumentPosition(mmrEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mmrEl.textContent).toBe('1485MMR');
+    expect(rankEl.className).toContain('text-xs');
+    expect(mmrLabelEl.className).toContain('text-xs');
+
+    // Spacer separates current match stat strip from historical split table
+    expect(youCard.querySelector('[data-testid="live-hist-spacer"]')).not.toBeNull();
 
     const toggleBtn = container.querySelector<HTMLButtonElement>('#btn-toggle-live-hist')!;
     expect(toggleBtn).not.toBeNull();
@@ -212,6 +233,27 @@ describe('LiveGameView — in match', () => {
       toggleBtn.click();
     });
     expect(toggleBtn.textContent).toContain('HISTORICAL DATA: HIDDEN');
+    expect(container.querySelectorAll('.live-hist-section').length).toBe(0);
+    expect(localStorage.getItem('rlsync_show_live_hist_data')).toBe('false');
+  });
+
+  it('renders an AI/BOT stamp for bot players and omits it for human players', async () => {
+    const bot = lobby({
+      player_id: 'Unknown|0|0',
+      platform: 'Unknown',
+      name: 'Maverick',
+      team_num: 1,
+      is_bot: true,
+      current_rank: undefined,
+    });
+    const human = lobby({ player_id: 'Steam|human_1|0', name: 'HumanOne', team_num: 1, is_bot: false });
+    const { container } = await renderLive(liveMatch({ opponents: [bot, human] }));
+
+    const botCard = cards(container).find((c) => c.dataset.playerId === 'Unknown|0|0')!;
+    const humanCard = cards(container).find((c) => c.dataset.playerId === 'Steam|human_1|0')!;
+    expect(botCard.querySelector('[data-testid="badge-bot"]')?.textContent).toContain('AI/BOT');
+    expect(botCard.textContent).not.toContain('◆ OPPONENT');
+    expect(humanCard.querySelector('[data-testid="badge-bot"]')).toBeNull();
   });
 
   it('scopes player card Rank/MMR, matchups_by_playlist H2H, and THIS SESSION W–L when PLAYLIST SCOPE (3V3 / 1V1) is toggled', async () => {
