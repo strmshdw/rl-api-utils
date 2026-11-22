@@ -43,6 +43,7 @@ describe('DashboardContext + ThemeContext composition', () => {
       latest.dash.setTheme('tactical', 'light');
       latest.dash.setFontScale('xl');
       latest.dash.setPlatformDisplay('name');
+      latest.dash.setShowLiveHistData(false);
       latest.dash.setReplayBannerDismissed(true);
       latest.dash.togglePinPlayer('Steam|111|0');
     });
@@ -53,11 +54,13 @@ describe('DashboardContext + ThemeContext composition', () => {
     expect(latest.dash.fontScale).toBe('xl');
     expect(latest.theme.platformDisplay).toBe('name');
     expect(latest.dash.platformDisplay).toBe('name');
+    expect(latest.dash.showLiveHistData).toBe(false);
     expect(latest.dash.pinnedPlayerIds).toEqual(['Steam|111|0']);
     expect(localStorage.getItem(STORAGE_KEYS.themeStyle)).toBe('tactical');
     expect(localStorage.getItem(STORAGE_KEYS.colorMode)).toBe('light');
     expect(localStorage.getItem(STORAGE_KEYS.fontScale)).toBe('xl');
     expect(localStorage.getItem(STORAGE_KEYS.platformDisplay)).toBe('name');
+    expect(localStorage.getItem(STORAGE_KEYS.showLiveHistData)).toBe('false');
     expect(localStorage.getItem(STORAGE_KEYS.replayBannerDismissed)).toBe('true');
     expect(localStorage.getItem(STORAGE_KEYS.pinnedPlayers)).toBe('["Steam|111|0"]');
     expect('dateRangeFactor' in latest.dash).toBe(false);

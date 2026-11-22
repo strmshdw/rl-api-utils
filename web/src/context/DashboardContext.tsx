@@ -233,7 +233,9 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
     () => safeStorageGet(STORAGE_KEYS.replayBannerDismissed) === 'true',
   );
   const [liveModeOverride, setLiveModeOverride] = useState<'auto' | 'match' | 'idle'>('auto');
-  const [showLiveHistData, setShowLiveHistData] = useState<boolean>(true);
+  const [showLiveHistData, setShowLiveHistDataState] = useState<boolean>(
+    () => safeStorageGet(STORAGE_KEYS.showLiveHistData) !== 'false',
+  );
   const [pinnedPlayerIds, setPinnedPlayerIds] = useState<string[]>(() => loadPinnedPlayerIds());
   const [stampingConfig, setStampingConfig] = useState<StampingConfig>(() => loadStampingConfig());
   const [stampingSyncState, setStampingSyncState] = useState<StampingSyncState>('idle');
@@ -467,6 +469,14 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
     safeStorageSet(STORAGE_KEYS.replayBannerDismissed, dismissed ? 'true' : 'false');
   }, []);
 
+  const setShowLiveHistData = useCallback((show: boolean | ((prev: boolean) => boolean)) => {
+    setShowLiveHistDataState((prev) => {
+      const next = typeof show === 'function' ? show(prev) : show;
+      safeStorageSet(STORAGE_KEYS.showLiveHistData, next ? 'true' : 'false');
+      return next;
+    });
+  }, []);
+
   const setReplayLimitPreview = useCallback(
     (state: ReplayLimitPreviewState) => {
       setReplayLimitPreviewState(state);
@@ -607,6 +617,7 @@ const DashboardInnerProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setReplayBannerDismissed,
       liveModeOverride,
       showLiveHistData,
+      setShowLiveHistData,
       pinnedPlayerIds,
       togglePinPlayer,
       isPlayerPinned,

@@ -40,6 +40,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setReplayBannerDismissed,
     liveModeOverride,
     setLiveModeOverride,
+    showLiveHistData,
+    setShowLiveHistData,
     isDevBuild,
     appVersion,
     previewMode,
@@ -94,7 +96,49 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <section className="flex flex-col gap-3.5 pt-2 border-t border-line">
           <SectionLabel>03 · TELEMETRY DISPLAY &amp; BROADCAST</SectionLabel>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
+              <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
+                LIVE VIEW HISTORICAL STATS
+              </span>
+              <div
+                className="grid grid-cols-2 t-border t-radius overflow-hidden"
+                role="group"
+                aria-label="Live view historical stats"
+              >
+                <button
+                  type="button"
+                  id="btn-live-hist-show"
+                  data-testid="settings-live-hist-show"
+                  aria-pressed={showLiveHistData}
+                  onClick={() => setShowLiveHistData(true)}
+                  className={`py-1.5 t-font-display font-bold text-xs uppercase tracking-wider cursor-pointer ${
+                    showLiveHistData
+                      ? 't-bg-blue-ink t-text-on-accent'
+                      : 't-bg-page t-text-muted hover:opacity-80'
+                  }`}
+                  title="Show historical WITH YOU / AGAINST stats on live player cards"
+                >
+                  SHOWN
+                </button>
+                <button
+                  type="button"
+                  id="btn-live-hist-hide"
+                  data-testid="settings-live-hist-hide"
+                  aria-pressed={!showLiveHistData}
+                  onClick={() => setShowLiveHistData(false)}
+                  className={`py-1.5 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border cursor-pointer ${
+                    !showLiveHistData
+                      ? 't-bg-blue-ink t-text-on-accent'
+                      : 't-bg-page t-text-muted hover:opacity-80'
+                  }`}
+                  title="Hide historical stats in live view for a cleaner match-only presentation"
+                >
+                  HIDDEN
+                </button>
+              </div>
+            </div>
+
             <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
               <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
                 REPLAY QUEUE SYNC BANNER
