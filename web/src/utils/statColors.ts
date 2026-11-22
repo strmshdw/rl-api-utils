@@ -41,17 +41,17 @@ export interface StatColorPalette {
  */
 export const STAT_COLOR_PALETTES: Record<'dark' | 'light', StatColorPalette> = {
   dark: {
-    score: '#fff500',   // Hyper Laser Yellow — SCORE / PTS
-    goals: '#00ff59',   // Hyper Neon Green — GOALS / G
+    score: '#fffa73',   // Hyper Laser Yellow — SCORE / PTS
+    goals: '#38ff7d',   // Hyper Neon Green — GOALS / G
     assists: '#00f7ff', // Hyper Electric Cyan — ASSISTS / A
-    saves: '#b8ff00',   // Hyper Volt Lime — SAVES / SV
+    saves: '#d5ff6b',   // Hyper Volt Lime — SAVES / SV
     shots: '#ff66ff',   // Hyper Electric Magenta — SHOTS / SH
     shotpct: '#78a6ff', // Hyper Electric Cobalt — SHOT % / SH%
     demos: '#ff8519',   // Hyper Blaze Orange — DEMOS / D / DEM
     demod: '#ff7084',   // Hyper Laser Crimson — DEMO'D
     mmr: '#00ccff',     // Hyper Neon Azure — MMR
     rank: '#ffc400',    // Hyper Solar Gold — RANK · DIV
-    bpm: '#c785ff',     // Hyper Ultraviolet — BPM
+    bpm: '#a238ff',     // Hyper Ultraviolet — BPM
     boost: '#00ffb7',   // Hyper Neon Mint — BOOST / BST
     speed: '#ff6ec4',   // Hyper Hot Pink — SUPER % / SPEED
     games: '#ffffff',   // Pure Hyper White — GAMES / GMS
