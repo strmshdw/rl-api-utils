@@ -11,6 +11,7 @@ import {
   formatMmr,
   formatSigned,
   localTeamOf,
+  modeKeyFromPlaylistId,
   normalizeActiveModeKey,
   outcomeOf,
   playlistLabels,
@@ -22,11 +23,10 @@ import {
 import { formatDuration } from '../../utils/formatters';
 import { TeamBoxScore, sessionMatchRows } from '../common/BoxScore';
 import { EmptyLine, GhostButton, SectionLabel, StatusDot } from '../common/ui';
-import { AreaFilterBar } from '../common/AreaFilterBar';
 import { PlaylistRows, SessionForAgainstTable, SessionKpiStrip } from '../session/SessionKpis';
 import { ContinueSessionBanner } from '../session/SessionView';
 import { useMMRHistory } from '../../hooks/useMMRHistory';
-import { useAreaFilters, useDashboard } from '../../context/DashboardContext';
+import { useDashboard } from '../../context/DashboardContext';
 
 interface IdleStateViewProps {
   session: SessionResponse | null;
@@ -137,7 +137,6 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
   session,
   scopedSession,
   activePlaylist,
-  onSelectPlaylist,
   connection,
   onShowSession,
   onContinueSession,
@@ -150,20 +149,21 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
     isDevBuild,
     previewMode,
   } = useDashboard();
-  const liveFilters = useAreaFilters('live');
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
   const [showAllModes, setShowAllModes] = useState(false);
 
-  const resolvedPlaylist = useMemo(
-    () => normalizeActiveModeKey(activePlaylist ?? liveFilters.playlist),
-    [activePlaylist, liveFilters.playlist],
-  );
-
-  const handleModeChange = (nextMode: string) => {
-    const normalized = normalizeActiveModeKey(nextMode);
-    liveFilters.setPlaylist(normalized);
-    onSelectPlaylist?.(normalized);
-  };
+  const resolvedPlaylist = useMemo(() => {
+    if (activePlaylist) return normalizeActiveModeKey(activePlaylist);
+    if (session?.active_match?.playlist_id) {
+      return modeKeyFromPlaylistId(session.active_match.playlist_id);
+    }
+    const latestMatch = chronological(session?.matches).pop();
+    if (latestMatch?.playlist_id) return modeKeyFromPlaylistId(latestMatch.playlist_id);
+    if (session?.most_played_playlist?.id) {
+      return modeKeyFromPlaylistId(session.most_played_playlist.id);
+    }
+    return '11';
+  }, [activePlaylist, session]);
 
   const effectiveScopedSession = useMemo(() => {
     if (!session) return null;
@@ -291,21 +291,6 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
         )}
       </div>
 
-      {/* Local Live/Idle Area Filters (Mode + Stat Aggregation Only) */}
-      <AreaFilterBar
-        area="live"
-        ariaLabel="Live view filters"
-        playlist={resolvedPlaylist}
-        onPlaylistChange={handleModeChange}
-        statMode={liveFilters.statMode}
-        onStatModeChange={liveFilters.setStatMode}
-        showReset={resolvedPlaylist !== '11' || liveFilters.statMode !== 'avg'}
-        onReset={() => {
-          liveFilters.resetFilters();
-          onSelectPlaylist?.('11');
-        }}
-      />
-
       {scopedContinuableSession && (
         <ContinueSessionBanner
           continuableSession={scopedContinuableSession}
@@ -336,7 +321,7 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
           </div>
           <SessionForAgainstTable
             session={effectiveScopedSession}
-            statMode={liveFilters.statMode}
+            statMode="avg"
             scopeLabel="CURRENT SESSION"
           />
 

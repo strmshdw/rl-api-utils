@@ -199,13 +199,16 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         Boolean(scopedMatchup) &&
         scopedMatchup?.playlist_id === activePlaylistId));
 
+  const inlineRoleStatsMatchPlaylist =
+    !player.matchup_record?.playlist_id || player.matchup_record.playlist_id === activePlaylistId;
+
   const withStats: PlayerRoleStatsSummary = scopedHistory?.withYouStats
     ? scopedHistory.withYouStats
     : isLocal
     ? canUseLocalRoleStats && player.in_wins_stats
       ? player.in_wins_stats
       : emptyRoleStats(Math.max(0, sessionRecord.wins), sessionRecord.wins, 0)
-    : canUsePlayerRoleStats && player.with_you_stats
+    : canUsePlayerRoleStats && inlineRoleStatsMatchPlaylist && tw + tl > 0 && player.with_you_stats
     ? player.with_you_stats
     : emptyRoleStats(tw + tl, tw, tl);
 
@@ -215,7 +218,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
     ? canUseLocalRoleStats && player.in_losses_stats
       ? player.in_losses_stats
       : emptyRoleStats(Math.max(0, sessionRecord.losses), 0, sessionRecord.losses)
-    : canUsePlayerRoleStats && player.against_you_stats
+    : canUsePlayerRoleStats && inlineRoleStatsMatchPlaylist && ow + ol > 0 && player.against_you_stats
     ? player.against_you_stats
     : emptyRoleStats(ow + ol, ow + ol > 0 ? ow : 0, ow + ol > 0 ? ol : 0);
 
@@ -476,7 +479,13 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
           className={`grid divide-x divide-line min-w-0 ${showLiveHistData ? 'border-b border-line' : ''}`}
           style={{
             gridTemplateColumns: strip
-              .map((s) => (s.key === 'score' ? 'minmax(0,1.25fr)' : 'minmax(0,1fr)'))
+              .map((s) =>
+                s.key === 'score'
+                  ? 'minmax(0,1.4fr)'
+                  : s.key === 'assists'
+                  ? 'minmax(0,1.15fr)'
+                  : 'minmax(0,1fr)',
+              )
               .join(' '),
           }}
         >
@@ -484,15 +493,15 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
             <div
               key={key}
               data-stat={key}
-              className="px-2 py-2 flex flex-col items-center justify-center gap-0.5 min-w-0"
+              className="px-2 sm:px-2.5 py-1.5 flex items-baseline justify-between gap-1 min-w-0"
             >
               <span
-                className={`font-extrabold text-[10px] sm:text-[11px] tracking-wider uppercase leading-none whitespace-nowrap ${colorClass}`}
+                className={`font-extrabold text-[10px] sm:text-[11px] tracking-wider uppercase shrink-0 ${colorClass}`}
               >
                 {label}
               </span>
               <span
-                className={`text-xl xl:text-2xl leading-tight t-font-mono tabular-nums ${statInk(
+                className={`text-xl xl:text-2xl leading-none t-font-mono tabular-nums truncate ${statInk(
                   stats[key] || 0,
                   leaders[key],
                   colorClass,
