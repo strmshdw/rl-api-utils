@@ -352,6 +352,7 @@ func TestTier5_PT_Adv5_BackwardCompatibility_CLIFlagsAndHTTPTrigger(t *testing.T
 
 	testSyncer := &testSyncerStub{}
 	cfg := &config.Config{
+		Web: config.WebConfig{Host: "127.0.0.1"},
 		Sync: config.SyncConfig{
 			Once:   true,
 			DryRun: true,

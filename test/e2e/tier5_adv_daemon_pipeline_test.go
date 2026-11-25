@@ -176,6 +176,7 @@ func TestTier5_Adv4_Daemon_TickSkipping_WhenCycleInFlight(t *testing.T) {
 	}
 
 	cfg := &config.Config{
+		Web: config.WebConfig{Host: "127.0.0.1"},
 		Sync: config.SyncConfig{
 			PollInterval: config.Duration(10 * time.Millisecond),
 			Once:         false,
@@ -249,6 +250,7 @@ func TestTier5_Adv4_Daemon_GracefulDrain_OnContextCancellation(t *testing.T) {
 	}
 
 	cfg := &config.Config{
+		Web: config.WebConfig{Host: "127.0.0.1"},
 		Sync: config.SyncConfig{
 			PollInterval: config.Duration(5 * time.Minute),
 			Once:         false,

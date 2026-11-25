@@ -16,6 +16,7 @@ import (
 // the first cycle immediately without waiting for PollInterval (even if set to 24h).
 func TestChallenge_ImmediateStartupRun_HighInterval(t *testing.T) {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(24 * time.Hour)
 	cfg.Sync.Once = false
 
@@ -66,6 +67,7 @@ func TestChallenge_ImmediateStartupRun_HighInterval(t *testing.T) {
 // the daemon does NOT crash or abort, but continues into the ticker loop and executes subsequent cycles.
 func TestChallenge_ImmediateStartupRun_InitialErrorContinuesInContinuousMode(t *testing.T) {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(20 * time.Millisecond)
 	cfg.Sync.Once = false
 
@@ -120,6 +122,7 @@ func TestChallenge_ImmediateStartupRun_InitialErrorContinuesInContinuousMode(t *
 // exactly 1 cycle executes and Start returns nil immediately without blocking on pollInterval.
 func TestChallenge_SingleRunOnce_ExitsZeroImmediately(t *testing.T) {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(10 * time.Hour) // huge interval
 	cfg.Sync.Once = true
 
@@ -155,6 +158,7 @@ func TestChallenge_SingleRunOnce_ExitsZeroImmediately(t *testing.T) {
 // if the cycle encounters an error, Start immediately returns that error.
 func TestChallenge_SingleRunOnce_ErrorReturnsDirectly(t *testing.T) {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(5 * time.Minute)
 	cfg.Sync.Once = true
 
@@ -187,6 +191,7 @@ func TestChallenge_SingleRunOnce_ErrorReturnsDirectly(t *testing.T) {
 func TestChallenge_OverlappingCycleProtection_StressHighFrequencyTicks(t *testing.T) {
 	// Rapid tick interval: 5ms
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(5 * time.Millisecond)
 	cfg.Sync.Once = false
 
@@ -275,6 +280,7 @@ func TestChallenge_OverlappingCycleProtection_StressHighFrequencyTicks(t *testin
 // Start() does NOT return prematurely, but awaits completion of the in-flight cycle.
 func TestChallenge_GracefulDrain_ActiveCycleFinishesDuringCancel(t *testing.T) {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(1 * time.Hour)
 	cfg.Sync.Once = false
 
@@ -348,6 +354,7 @@ func TestChallenge_GracefulDrain_ActiveCycleFinishesDuringCancel(t *testing.T) {
 // if context cancellation occurs during the initial sync cycle, Start returns nil cleanly.
 func TestChallenge_GracefulDrain_ContextCancelDuringInitialCycle(t *testing.T) {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(1 * time.Hour)
 	cfg.Sync.Once = false
 
@@ -387,6 +394,7 @@ func TestChallenge_GracefulDrain_ContextCancelDuringInitialCycle(t *testing.T) {
 // racing directly against ticker events always stop cleanly without deadlocks or leaked goroutines.
 func TestChallenge_RapidContextCancelRaceWithTicker(t *testing.T) {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(2 * time.Millisecond)
 
 	for iter := 0; iter < 10; iter++ {
@@ -416,6 +424,7 @@ func TestChallenge_RapidContextCancelRaceWithTicker(t *testing.T) {
 // stopped and restarted sequentially without state corruption.
 func TestChallenge_SequentialStartSafety(t *testing.T) {
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(10 * time.Millisecond)
 
 	var cycleCount int32

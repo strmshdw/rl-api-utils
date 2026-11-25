@@ -596,6 +596,7 @@ func TestDaemon_AsyncStatsPoll_DoesNotDropManualTriggerSyncCycle(t *testing.T) {
 	}
 
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Web.Enabled = false
 	cfg.StatsAPI.Enabled = false
 	cfg.PlayerTracking.Enabled = false

@@ -131,6 +131,9 @@ func TestE2E_PlayerTrack_FullMatchLifecycle(t *testing.T) {
 
 	// 6. Initialize Daemon
 	cfg := &config.Config{
+		Web: config.WebConfig{
+			Host: "127.0.0.1",
+		},
 		Sync: config.SyncConfig{
 			PollInterval: config.Duration(1 * time.Hour),
 		},

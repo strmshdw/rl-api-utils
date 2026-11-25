@@ -28,6 +28,7 @@ func setupChallengerDaemon(t *testing.T, isJSON bool) (*daemon.Daemon, storage.S
 		},
 		Web: config.WebConfig{
 			Enabled: true,
+			Host:    "127.0.0.1",
 			Port:    49125,
 		},
 		Logging: config.LoggingConfig{
