@@ -119,6 +119,14 @@ func (s *Syncer) RateLimiter() *ballchasing.RateLimiter {
 	return s.rateLimiter
 }
 
+// DisconnectProvider terminates any idle primary PsyNet RPC session held by the match history provider.
+func (s *Syncer) DisconnectProvider() error {
+	if d, ok := s.provider.(interface{ Disconnect() error }); ok {
+		return d.Disconnect()
+	}
+	return nil
+}
+
 // RetryMatch serializes a manual retry for a single match GUID under cycleMu,
 // resetting retry counters and running download/upload/stats steps as eligible.
 func (s *Syncer) RetryMatch(ctx context.Context, matchGUID string) error {

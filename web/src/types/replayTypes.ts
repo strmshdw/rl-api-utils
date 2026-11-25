@@ -324,3 +324,18 @@ export interface BallchasingSyncStatus {
   ended_at?: string;
   last_error?: string;
 }
+
+export interface ReplaySyncStatus {
+  running: boolean;
+  reason?: string;
+  discovered_count: number;
+  downloaded_count: number;
+  uploaded_count: number;
+  duplicate_count: number;
+  skipped_count: number;
+  failed_count: number;
+  pending_count: number;
+  started_at?: string;
+  ended_at?: string;
+  last_error?: string;
+}

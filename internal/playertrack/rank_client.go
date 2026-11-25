@@ -354,11 +354,14 @@ func (c *PsyNetRankClient) connectLocked(ctx context.Context) error {
 		return fmt.Errorf("resolving polling credentials: %w", err)
 	}
 
-	primaryID := c.cfg.PrimaryAuth.Epic.AccountID
-	if strings.EqualFold(c.cfg.PrimaryAuth.Provider, "steam") {
-		primaryID = c.cfg.PrimaryAuth.Steam.SteamID64
+	primaryEpicID := strings.TrimSpace(c.cfg.PrimaryAuth.Epic.AccountID)
+	primarySteamID := strings.TrimSpace(c.cfg.PrimaryAuth.Steam.SteamID64)
+	if primaryEpicID != "" && (strings.EqualFold(strings.TrimSpace(creds.AccountID), primaryEpicID) ||
+		strings.EqualFold(strings.TrimSpace(creds.SteamAccountID), primaryEpicID)) {
+		return ErrCredentialCollision
 	}
-	if primaryID != "" && creds.AccountID == primaryID {
+	if primarySteamID != "" && (strings.EqualFold(strings.TrimSpace(creds.AccountID), primarySteamID) ||
+		strings.EqualFold(strings.TrimSpace(creds.SteamAccountID), primarySteamID)) {
 		return ErrCredentialCollision
 	}
 

@@ -369,13 +369,36 @@ func (d *Daemon) handleRetryMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = d.TriggerSync(r.Context(), "retry_match_"+guid)
+	if retrier, ok := d.syncer.(MatchRetrier); ok && retrier != nil {
+		d.startAsyncMatchRetry(d.daemonContext(), retrier, guid)
+	} else {
+		_ = d.enqueueSync("retry_match_"+guid, false)
+	}
 
 	d.writeJSONResponse(w, r, http.StatusOK, map[string]string{
 		"status":     "ok",
 		"message":    "match retry queued",
 		"match_guid": guid,
 	}, "error encoding match retry response")
+}
+
+func (d *Daemon) startAsyncMatchRetry(ctx context.Context, retrier MatchRetrier, guid string) {
+	if ctx == nil || ctx.Err() != nil {
+		return
+	}
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		if err := retrier.RetryMatch(ctx, guid); err != nil &&
+			!errors.Is(err, context.Canceled) &&
+			!errors.Is(err, context.DeadlineExceeded) &&
+			ctx.Err() == nil {
+			d.logger.Warn("background single-match retry failed",
+				slog.String("guid", guid),
+				slog.Any("error", err),
+			)
+		}
+	}()
 }
 
 // handleListMMRHistory handles GET /api/mmr-history.

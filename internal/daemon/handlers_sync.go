@@ -223,8 +223,8 @@ func (d *Daemon) handleUpdateSyncConfig(w http.ResponseWriter, r *http.Request) 
 	}, "error encoding updated sync config response")
 }
 
-// handleManualSyncNow handles POST /api/sync/now, immediately triggering a replay download & sync pass
-// from Rocket League's 20-game hosted replay buffer so no replays are lost.
+// handleManualSyncNow handles POST /api/sync/now, immediately triggering a forced replay download &
+// sync pass from Rocket League's 20-game hosted replay buffer (PsyNet) without crawling Ballchasing history.
 func (d *Daemon) handleManualSyncNow(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -238,9 +238,17 @@ func (d *Daemon) handleManualSyncNow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	st := d.buildStatusResponse(r.Context())
+	replaySt := d.ReplaySyncStatusSnapshot()
 	d.writeJSONResponse(w, r, http.StatusOK, map[string]any{
 		"status":             "sync_triggered",
+		"running":            replaySt.Running,
 		"pending_count":      st.PendingCount,
 		"max_hosted_replays": st.MaxHostedReplays,
 	}, "error encoding manual sync response")
+}
+
+// handleReplaySyncStatus handles GET /api/sync/now/status, returning live and most recent
+// PsyNet replay sync status without invoking or reporting Ballchasing historical backfill.
+func (d *Daemon) handleReplaySyncStatus(w http.ResponseWriter, r *http.Request) {
+	d.writeJSONResponse(w, r, http.StatusOK, d.ReplaySyncStatusSnapshot(), "error encoding replay sync status response")
 }

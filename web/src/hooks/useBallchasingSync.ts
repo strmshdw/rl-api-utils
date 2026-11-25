@@ -7,15 +7,13 @@ export interface UseBallchasingSyncOptions {
   pollIntervalMs?: number;
 }
 
-export interface TriggerSyncOptions { includeReplaySync?: boolean; }
-
 export interface UseBallchasingSyncResult {
   syncStatus: BallchasingSyncStatus | null;
   progress: SyncProgress | null;
   isSyncing: boolean;
   syncMessage: string | null;
   error: string | null;
-  triggerSync: (opts?: TriggerSyncOptions) => Promise<void>;
+  triggerSync: () => Promise<void>;
   refreshStatus: () => Promise<BallchasingSyncStatus | null>;
   dismissSyncMessage: () => void;
   clearError: () => void;
@@ -134,7 +132,7 @@ export function useBallchasingSync(options: UseBallchasingSyncOptions = {}): Use
 
   useSSEEvent<SyncProgress>('sync_progress', handleProgressEvent);
 
-  const triggerSync = useCallback(async (triggerOpts?: TriggerSyncOptions) => {
+  const triggerSync = useCallback(async () => {
     setError(null);
     setSyncMessage(null);
     setSyncStatus(null);
@@ -142,9 +140,6 @@ export function useBallchasingSync(options: UseBallchasingSyncOptions = {}): Use
     syncingRef.current = true;
     setIsSyncing(true);
     try {
-      if (triggerOpts?.includeReplaySync) {
-        await fetch('/api/sync/now', { method: 'POST' });
-      }
       const res = await fetch('/api/sync/ballchasing', { method: 'POST' });
       if (!res.ok && res.status !== 409) {
         const body = await res.json().catch(() => ({}));

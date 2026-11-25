@@ -221,16 +221,25 @@ describe('SessionView', () => {
     expect(onContinue).toHaveBeenCalledWith('past-session-001');
   });
 
-  it('syncs server trigger config after initial null mount and unpins RL BUFFER when new matches arrive', async () => {
+  it('syncs server trigger config after initial null mount, uses ONLY /api/sync/now (never Ballchasing history), and unpins RL BUFFER when new matches arrive', async () => {
+    const fetchCalls: string[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = typeof input === 'string' ? input : input.toString();
-        if (url.includes('/api/sync/ballchasing')) {
+        fetchCalls.push(`${init?.method ?? 'GET'} ${url}`);
+        if (url === '/api/sync/now' && init?.method === 'POST') {
           return {
             ok: true,
             status: 200,
-            json: async () => ({ running: false, synced_matches: 7, total_matches: 7, last_error: '' }),
+            json: async () => ({ status: 'sync_triggered', running: false, pending_count: 0 }),
+          } as Response;
+        }
+        if (url === '/api/sync/now/status') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ running: false, discovered_count: 7, downloaded_count: 7, uploaded_count: 7, pending_count: 0 }),
           } as Response;
         }
         return { ok: true, status: 200, json: async () => ({}) } as Response;
@@ -258,11 +267,13 @@ describe('SessionView', () => {
     expect(bufferBar.textContent).toContain('AUTO-SYNC @12G: ON');
     expect(bufferBar.textContent).toContain('RL BUFFER: 7/20 UNSYNCED');
 
-    // Trigger manual sync: optimistically clears to 0/20 while snapshot matches
+    // Trigger manual sync: calls ONLY POST /api/sync/now (never /api/sync/ballchasing) and optimistically clears to 0/20
     const syncBtn = mounted.container.querySelector<HTMLButtonElement>('[data-testid="session-sync-btn"]')!;
     await act(async () => {
       syncBtn.click();
     });
+    expect(fetchCalls).toContain('POST /api/sync/now');
+    expect(fetchCalls.some((c) => c.includes('/api/sync/ballchasing'))).toBe(false);
     expect(bufferBar.textContent).toContain('RL BUFFER: 0/20 UNSYNCED');
 
     // When new matches arrive and pending_count changes (even back to 7 later), RL BUFFER is never stuck at 0

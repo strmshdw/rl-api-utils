@@ -22,6 +22,18 @@ func CheckCredentialCollision(primary config.AuthConfig, polling config.PollingA
 	primaryProvider := strings.ToLower(strings.TrimSpace(primary.Provider))
 	pollingProvider := strings.ToLower(strings.TrimSpace(polling.Provider))
 
+	// Cross-provider Epic/Steam ID collision check (e.g. Steam primary linked to an Epic ID matching Epic polling account).
+	primEpic := strings.TrimSpace(primary.Epic.AccountID)
+	pollEpic := strings.TrimSpace(polling.Epic.AccountID)
+	if primEpic != "" && pollEpic != "" && strings.EqualFold(primEpic, pollEpic) {
+		return fmt.Errorf("%w: polling epic account_id %q matches primary account", ErrCredentialCollision, pollEpic)
+	}
+	primSteam := strings.TrimSpace(primary.Steam.SteamID64)
+	pollSteam := strings.TrimSpace(polling.Steam.SteamID64)
+	if primSteam != "" && pollSteam != "" && strings.EqualFold(primSteam, pollSteam) {
+		return fmt.Errorf("%w: polling steam steam_id_64 %q matches primary account", ErrCredentialCollision, pollSteam)
+	}
+
 	if primaryProvider == "" || pollingProvider == "" || primaryProvider != pollingProvider {
 		return nil
 	}

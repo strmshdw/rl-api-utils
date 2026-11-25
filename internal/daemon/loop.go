@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dank/rl-api-utils/internal/session"
+	"github.com/dank/rl-api-utils/internal/syncer"
 )
 
 func (d *Daemon) startStatsListener(ctx context.Context) {
@@ -118,7 +119,11 @@ func (d *Daemon) runEventLoop(ctx context.Context, pollInterval time.Duration) e
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	statusTicker := time.NewTicker(2 * time.Second)
+	statusInterval := d.statusTickInterval
+	if statusInterval <= 0 {
+		statusInterval = defaultStatusTickInterval
+	}
+	statusTicker := time.NewTicker(statusInterval)
 	defer statusTicker.Stop()
 	statsPollTicks := 0
 
@@ -126,6 +131,12 @@ func (d *Daemon) runEventLoop(ctx context.Context, pollInterval time.Duration) e
 		d.logger.Info("shutdown signal received; awaiting in-flight drain",
 			slog.Any("reason", ctx.Err()),
 		)
+		d.mu.Lock()
+		d.pendingManualTriggers = 0
+		if !d.inFlight {
+			d.replaySync.Running = false
+		}
+		d.mu.Unlock()
 		if d.statsListener != nil {
 			d.statsListener.Stop()
 		}
@@ -151,9 +162,12 @@ func (d *Daemon) runEventLoop(ctx context.Context, pollInterval time.Duration) e
 		case <-ctx.Done():
 			return drainAndStop()
 
-		case reason := <-d.manualTrigger:
-			d.logger.Info("executing on-demand sync cycle", slog.String("trigger_reason", reason))
-			if err := d.executeCycle(ctx); err != nil {
+		case req := <-d.manualTrigger:
+			d.logger.Info("executing on-demand sync cycle",
+				slog.String("trigger_reason", req.reason),
+				slog.Bool("force_override", req.force),
+			)
+			if err := d.executeCycle(ctx, req.force, req.reason); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 					return drainAndStop()
 				}
@@ -171,11 +185,11 @@ func (d *Daemon) runEventLoop(ctx context.Context, pollInterval time.Duration) e
 			}
 
 		case <-ticker.C:
-			if d.statsListener != nil && d.statsListener.IsConnected() {
-				d.logger.Debug("Rocket League is currently running; skipping routine 5m PsyNet polling to prevent duplicate login kicks (Stats API tracking active)")
+			if d.isGameActive() {
+				d.logger.Debug("Rocket League is currently active; skipping routine PsyNet polling to protect primary account")
 				continue
 			}
-			if err := d.executeCycle(ctx); err != nil {
+			if err := d.executeCycle(ctx, false, "scheduled_poll"); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 					d.logger.Info("daemon stopped during scheduled cycle", slog.Any("reason", err))
 					return drainAndStop()
@@ -187,25 +201,45 @@ func (d *Daemon) runEventLoop(ctx context.Context, pollInterval time.Duration) e
 }
 
 func (d *Daemon) handleGameStatusTick() {
-	if d.statsListener == nil {
+	if d.statsListener == nil && d.gameProcessRunning == nil && d.statsTracker == nil {
 		return
 	}
-	connected := d.statsListener.IsConnected()
-	if d.prevConnected && !connected {
-		if d.sessionTracker != nil {
-			d.sessionTracker.OnGameDisconnected()
+	active := d.isGameActive()
+	if active {
+		d.disconnectedSince = time.Time{}
+		if !d.prevGameActive {
+			// Ensure zero lingering primary-account PsyNet WebSocket stays open while playing.
+			d.disconnectPrimaryProvider()
 		}
-		if d.cfg.StatsAPI.AutoSyncOnExit && d.statsTracker != nil && d.statsTracker.PendingCount() > 0 {
-			d.logger.Info("Rocket League disconnected; auto-syncing pending replays upon game exit",
-				slog.Int("pending_matches", d.statsTracker.PendingCount()),
-			)
-			select {
-			case d.manualTrigger <- "game_exit_sync":
-			default:
-			}
-		}
+		d.prevGameActive = true
+		return
 	}
-	d.prevConnected = connected
+
+	if !d.prevGameActive {
+		return
+	}
+
+	// Confirm Rocket League genuinely exited (protects against transient Stats API reconnects/map loads).
+	now := time.Now()
+	if d.disconnectedSince.IsZero() {
+		d.disconnectedSince = now
+	}
+	if d.disconnectGrace > 0 && now.Sub(d.disconnectedSince) < d.disconnectGrace {
+		return
+	}
+
+	d.prevGameActive = false
+	d.disconnectedSince = time.Time{}
+
+	if d.sessionTracker != nil {
+		d.sessionTracker.OnGameDisconnected()
+	}
+	if d.isAutoSyncOnExitEnabled() && d.statsTracker != nil && d.statsTracker.PendingCount() > 0 {
+		d.logger.Info("Rocket League exited; auto-syncing pending replays upon game exit",
+			slog.Int("pending_matches", d.statsTracker.PendingCount()),
+		)
+		_ = d.enqueueSync("game_exit_sync", false)
+	}
 }
 
 func (d *Daemon) startAsyncStatsPoll(ctx context.Context, poller StatsPoller) {
@@ -251,28 +285,72 @@ func (d *Daemon) runStatsPoll(ctx context.Context, poller StatsPoller) error {
 
 // executeCycle runs a single synchronization cycle, tracking in-flight status,
 // recording execution duration, logging structured metrics, and reconciling pending matches.
-func (d *Daemon) executeCycle(ctx context.Context) error {
+// Non-forced cycles are strictly skipped whenever Rocket League is active to protect the primary account.
+func (d *Daemon) executeCycle(ctx context.Context, force bool, reason string) error {
+	if !force && d.isGameActive() {
+		d.logger.Info("skipping primary PsyNet sync while Rocket League is active",
+			slog.String("reason", reason),
+		)
+		return nil
+	}
+
+	start := time.Now()
 	d.mu.Lock()
+	if force && d.pendingManualTriggers > 0 {
+		d.pendingManualTriggers--
+	}
 	if d.inFlight {
 		d.mu.Unlock()
 		d.logger.Warn("previous sync cycle still in progress; skipping tick")
 		return nil
 	}
 	d.inFlight = true
+	d.replaySync = ReplaySyncStatus{
+		Running:   true,
+		Reason:    reason,
+		StartedAt: start.UTC(),
+	}
 	d.wg.Add(1)
 	d.mu.Unlock()
 
+	var (
+		cycleStats *syncer.SyncStats
+		cycleErr   error
+	)
+
 	defer func() {
+		d.disconnectPrimaryProvider()
+		pendingCount := 0
+		if d.statsTracker != nil {
+			pendingCount = d.statsTracker.PendingCount()
+		}
 		d.mu.Lock()
 		d.inFlight = false
+		d.replaySync.Running = d.pendingManualTriggers > 0
+		d.replaySync.EndedAt = time.Now().UTC()
+		d.replaySync.PendingCount = pendingCount
+		if cycleStats != nil {
+			d.replaySync.DiscoveredCount = cycleStats.DiscoveredCount
+			d.replaySync.DownloadedCount = cycleStats.DownloadedCount
+			d.replaySync.UploadedCount = cycleStats.UploadedCount
+			d.replaySync.DuplicateCount = cycleStats.DuplicateCount
+			d.replaySync.SkippedCount = cycleStats.SkippedCount
+			d.replaySync.FailedCount = cycleStats.FailedCount
+		}
+		if cycleErr != nil {
+			d.replaySync.LastError = cycleErr.Error()
+		} else {
+			d.replaySync.LastError = ""
+		}
 		d.wg.Done()
 		d.mu.Unlock()
 	}()
 
-	start := time.Now()
-	d.logger.Debug("sync cycle starting")
+	d.logger.Debug("sync cycle starting", slog.String("reason", reason), slog.Bool("force_override", force))
 
 	stats, err := d.syncer.RunCycle(ctx)
+	cycleStats = stats
+	cycleErr = err
 	duration := time.Since(start)
 
 	if err != nil {

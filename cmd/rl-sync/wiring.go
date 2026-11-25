@@ -101,7 +101,7 @@ func (r *Runner) initPlayerTracker(ctx context.Context, cfg *config.Config, stor
 
 	var rankClient playertrack.SkillFetcher = playertrack.NewNoOpRankClient()
 	if cfg.PollingAuth.Enabled {
-		rankClient = r.initPollingRankClient(ctx, cfg, store, logger)
+		rankClient = r.initPollingRankClient(ctx, cfg, store, authProvider, logger)
 	}
 
 	playerTracker, err := r.NewPlayerTracker(
@@ -132,7 +132,7 @@ func (r *Runner) initPlayerTracker(ctx context.Context, cfg *config.Config, stor
 	return playerTracker, cleanup, nil
 }
 
-func (r *Runner) initPollingRankClient(ctx context.Context, cfg *config.Config, store storage.StateStore, logger *slog.Logger) playertrack.SkillFetcher {
+func (r *Runner) initPollingRankClient(ctx context.Context, cfg *config.Config, store storage.StateStore, primaryAuthProvider auth.AuthProvider, logger *slog.Logger) playertrack.SkillFetcher {
 	tokenSaver := auth.NewConfigTokenSaver(cfg.ConfigPath)
 	prompter := auth.NewTerminalPrompter(r.Stdin, r.Stdout)
 	steamGen := auth.NewNodeSteamTicketGenerator("")
@@ -170,9 +170,40 @@ func (r *Runner) initPollingRankClient(ctx context.Context, cfg *config.Config, 
 		slog.String("account_id", pollToken.AccountID),
 		slog.String("display_name", pollToken.DisplayName),
 	)
+
+	// Enrich primary and polling auth copies with resolved token account IDs so collision
+	// detection catches identical accounts even when account_id is omitted from config.yaml
+	// or when a Steam primary account shares a linked Epic account ID with an Epic poller.
+	primaryAuthCfg := cfg.Auth
+	if primaryAuthProvider != nil {
+		if tok := primaryAuthProvider.TokenInfo(); tok != nil {
+			if primaryAuthCfg.Epic.AccountID == "" {
+				if tok.EpicAccountID != "" {
+					primaryAuthCfg.Epic.AccountID = tok.EpicAccountID
+				} else if primaryAuthProvider.Name() == "epic" && tok.AccountID != "" {
+					primaryAuthCfg.Epic.AccountID = tok.AccountID
+				}
+			}
+			if primaryAuthCfg.Steam.SteamID64 == "" && primaryAuthProvider.Name() == "steam" && tok.AccountID != "" {
+				primaryAuthCfg.Steam.SteamID64 = tok.AccountID
+			}
+		}
+	}
+	pollingAuthCfg := cfg.PollingAuth
+	if pollingAuthCfg.Epic.AccountID == "" {
+		if pollToken.EpicAccountID != "" {
+			pollingAuthCfg.Epic.AccountID = pollToken.EpicAccountID
+		} else if pollingAuth.Name() == "epic" && pollToken.AccountID != "" {
+			pollingAuthCfg.Epic.AccountID = pollToken.AccountID
+		}
+	}
+	if pollingAuthCfg.Steam.SteamID64 == "" && pollingAuth.Name() == "steam" && pollToken.AccountID != "" {
+		pollingAuthCfg.Steam.SteamID64 = pollToken.AccountID
+	}
+
 	rc, rcErr := r.NewRankClient(playertrack.RankClientConfig{
-		PrimaryAuth:  cfg.Auth,
-		PollingAuth:  cfg.PollingAuth,
+		PrimaryAuth:  primaryAuthCfg,
+		PollingAuth:  pollingAuthCfg,
 		AuthProvider: pollingAuth,
 		Logger:       logger,
 	})

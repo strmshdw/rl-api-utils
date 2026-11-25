@@ -140,6 +140,9 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	if playerTracker != nil {
 		daemonOpts = append(daemonOpts, daemon.WithPlayerTracker(playerTracker))
 	}
+	if !cfg.Sync.Once {
+		daemonOpts = append(daemonOpts, daemon.WithGameProcessChecker(daemon.IsRocketLeagueRunning))
+	}
 	daemonOpts = append(daemonOpts, buildStatsDaemonOptions(cfg, store, playerTracker, logger)...)
 
 	daemonEngine, err := r.NewDaemon(syncerEngine, cfg, daemonOpts...)

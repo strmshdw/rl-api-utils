@@ -74,6 +74,7 @@ export type {
   ReplayMatchStats,
   ReplayPlayer,
   ReplayPlayerStats,
+  ReplaySyncStatus,
   ReplayTeam,
   ServerInfo,
   TeamStats,

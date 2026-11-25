@@ -48,6 +48,7 @@ func (s *Syncer) runCycleLocked(ctx context.Context) (*SyncStats, error) {
 	}
 
 	discovered, err := s.provider.GetRecentMatches(ctx)
+	_ = s.DisconnectProvider()
 	if err != nil {
 		if isContextCanceled(ctx, err) {
 			return nil, contextCancelErr(ctx, err)

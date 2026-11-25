@@ -22,7 +22,7 @@ import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailM
 import { sessionMatchToHistoricalRecord } from '../historical/historyData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
 import { useMMRHistory } from '../../hooks/useMMRHistory';
-import { useBallchasingSync } from '../../hooks/useBallchasingSync';
+import { useReplaySync } from '../../hooks/useReplaySync';
 import { ContinueSessionBanner, SessionHistoryList } from './SessionHistorySection';
 import { OutcomeFilter, SessionMatchesSection } from './SessionMatchesSection';
 
@@ -119,9 +119,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
     });
   };
 
-  const { isSyncing, syncStatus, syncMessage, triggerSync } = useBallchasingSync({
-    onSyncComplete: () => {
-      markPendingClearedOptimistically();
+  const { isSyncing, syncMessage, error: syncError, triggerReplaySync } = useReplaySync({
+    onSyncComplete: (status) => {
+      if (!status?.last_error) {
+        markPendingClearedOptimistically();
+      }
       onRefreshSession?.();
     },
   });
@@ -189,9 +191,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   const handleSyncSessionNow = async () => {
     if (isSyncing) return;
-    await triggerSync({ includeReplaySync: true });
-    markPendingClearedOptimistically();
-    onRefreshSession?.();
+    const ok = await triggerReplaySync();
+    if (ok) {
+      markPendingClearedOptimistically();
+      onRefreshSession?.();
+    }
   };
 
   const handleSessionThresholdChange = async (nextThreshold: number) => {
@@ -301,10 +305,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
               type="button"
               disabled={isSyncing}
               onClick={handleSyncSessionNow}
+              title="Force-sync undownloaded replays from Rocket League (PsyNet) now without pulling full Ballchasing history"
               className="px-3.5 py-2 t-bg-blue-slab bg-blue-slab text-white font-extrabold text-sm uppercase tracking-wider hover:opacity-90 disabled:opacity-60 t-radius cursor-pointer"
             >
               {isSyncing
-                ? `SYNCING · ${syncStatus?.synced_matches ?? 0} MATCHES`
+                ? '⟳ SYNCING REPLAYS…'
+                : syncError
+                ? 'SYNC FAILED · ⟳ RETRY'
                 : syncMessage
                 ? '✓ SYNCED · ⟳ SYNC NOW'
                 : '⟳ SYNC NOW'}
