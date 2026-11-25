@@ -33,31 +33,76 @@ type StatsPoller interface {
 	PollAndSyncPendingStats(ctx context.Context) error
 }
 
+// ProviderDisconnector is an optional interface implemented by Syncer to immediately sever
+// any idle primary-account PsyNet WebSocket connection.
+type ProviderDisconnector interface {
+	DisconnectProvider() error
+}
+
+// MatchRetrier is an optional interface implemented by Syncer to retry a single match
+// (download/upload/stats) without logging into the primary PsyNet account.
+type MatchRetrier interface {
+	RetryMatch(ctx context.Context, matchGUID string) error
+}
+
+// ReplaySyncStatus describes the live or most recent PsyNet replay download/upload sync cycle.
+type ReplaySyncStatus struct {
+	Running         bool      `json:"running"`
+	Reason          string    `json:"reason,omitempty"`
+	DiscoveredCount int       `json:"discovered_count"`
+	DownloadedCount int       `json:"downloaded_count"`
+	UploadedCount   int       `json:"uploaded_count"`
+	DuplicateCount  int       `json:"duplicate_count"`
+	SkippedCount    int       `json:"skipped_count"`
+	FailedCount     int       `json:"failed_count"`
+	PendingCount    int       `json:"pending_count"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	EndedAt         time.Time `json:"ended_at,omitempty"`
+	LastError       string    `json:"last_error,omitempty"`
+}
+
+type syncTriggerReq struct {
+	reason string
+	force  bool
+}
+
+const (
+	defaultDisconnectGrace    = 6 * time.Second
+	defaultStatusTickInterval = 2 * time.Second
+)
+
 // Daemon coordinates the periodic execution of the synchronization engine.
 // It manages startup, immediate initial sync, ticker loop execution, single-run mode,
 // OS signal trapping (SIGINT/SIGTERM), Rocket League Stats API event tracking,
 // and graceful drain of in-flight cycles.
 type Daemon struct {
-	syncer         Syncer
-	cfg            *config.Config
-	logger         *slog.Logger
-	statsTracker   *statsapi.Tracker
-	statsListener  *statsapi.Listener
-	playerTracker  *playertrack.Tracker
-	sessionTracker *session.SessionTracker
-	stateStore     storage.StateStore
-	historySyncer  *syncer.BallchasingHistorySyncer
-	webHandler     http.Handler
-	manualTrigger  chan string
+	syncer             Syncer
+	cfg                *config.Config
+	logger             *slog.Logger
+	statsTracker       *statsapi.Tracker
+	statsListener      *statsapi.Listener
+	playerTracker      *playertrack.Tracker
+	sessionTracker     *session.SessionTracker
+	stateStore         storage.StateStore
+	historySyncer      *syncer.BallchasingHistorySyncer
+	webHandler         http.Handler
+	manualTrigger      chan syncTriggerReq
+	gameProcessRunning func() bool
+	disconnectGrace    time.Duration
+	disconnectGraceSet bool
+	statusTickInterval time.Duration
 
-	mu                 sync.Mutex
-	ctx                context.Context
-	replayLimit        int
-	inFlight           bool
-	statsPollInFlight  bool
-	historySyncRunning bool
-	wg                 sync.WaitGroup
-	prevConnected      bool
+	mu                    sync.Mutex
+	ctx                   context.Context
+	replayLimit           int
+	inFlight              bool
+	pendingManualTriggers int
+	replaySync            ReplaySyncStatus
+	statsPollInFlight     bool
+	historySyncRunning    bool
+	wg                    sync.WaitGroup
+	prevGameActive        bool
+	disconnectedSince     time.Time
 }
 
 // Option allows customizing Daemon configuration.
@@ -131,6 +176,34 @@ func WithHistorySyncer(s *syncer.BallchasingHistorySyncer) Option {
 	}
 }
 
+// WithGameProcessChecker injects a host process check (e.g. IsRocketLeagueRunning) so the daemon
+// avoids primary-account PsyNet syncs whenever Rocket League is running, even if Stats API is disconnected.
+func WithGameProcessChecker(fn func() bool) Option {
+	return func(d *Daemon) {
+		d.gameProcessRunning = fn
+	}
+}
+
+// WithDisconnectGrace sets the confirmation window before treating a Stats API drop as game exit.
+func WithDisconnectGrace(grace time.Duration) Option {
+	return func(d *Daemon) {
+		if grace < 0 {
+			grace = 0
+		}
+		d.disconnectGrace = grace
+		d.disconnectGraceSet = true
+	}
+}
+
+// WithStatusTickInterval overrides the game-status polling cadence (primarily for unit tests).
+func WithStatusTickInterval(interval time.Duration) Option {
+	return func(d *Daemon) {
+		if interval > 0 {
+			d.statusTickInterval = interval
+		}
+	}
+}
+
 // New constructs a new Daemon instance.
 // Returns an error if syncer or cfg is nil.
 func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
@@ -147,10 +220,12 @@ func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
 	}
 
 	d := &Daemon{
-		syncer:        s,
-		cfg:           cfg,
-		manualTrigger: make(chan string, 16),
-		replayLimit:   replayLimit,
+		syncer:             s,
+		cfg:                cfg,
+		manualTrigger:      make(chan syncTriggerReq, 16),
+		replayLimit:        replayLimit,
+		disconnectGrace:    defaultDisconnectGrace,
+		statusTickInterval: defaultStatusTickInterval,
 	}
 
 	for _, opt := range opts {
@@ -187,7 +262,7 @@ func New(s Syncer, cfg *config.Config, opts ...Option) (*Daemon, error) {
 	}
 
 	if d.statsTracker != nil {
-		d.statsTracker.SetSyncTrigger(d.TriggerSync)
+		d.statsTracker.SetSyncTrigger(d.triggerThresholdSync)
 	}
 
 	return d, nil
@@ -235,21 +310,97 @@ func (d *Daemon) IsInFlight() bool {
 	return d.inFlight
 }
 
-// TriggerSync requests an immediate synchronization cycle on demand.
+// TriggerSync requests an immediate forced synchronization cycle on demand (manual override).
 func (d *Daemon) TriggerSync(ctx context.Context, reason string) error {
-	d.logger.Info("triggering synchronization cycle on demand", slog.String("reason", reason))
+	return d.enqueueSync(reason, true)
+}
+
+func (d *Daemon) triggerThresholdSync(ctx context.Context, reason string) error {
+	if !d.isForceSyncOnTriggerEnabled() {
+		d.logger.Info("threshold sync skipped because force_sync_on_trigger is disabled", slog.String("reason", reason))
+		return nil
+	}
+	return d.enqueueSync(reason, true)
+}
+
+func (d *Daemon) enqueueSync(reason string, force bool) error {
+	d.logger.Info("triggering synchronization cycle on demand",
+		slog.String("reason", reason),
+		slog.Bool("force_override", force),
+	)
+	req := syncTriggerReq{reason: reason, force: force}
+	d.mu.Lock()
 	select {
-	case d.manualTrigger <- reason:
+	case d.manualTrigger <- req:
+		if force {
+			d.pendingManualTriggers++
+			if !d.inFlight {
+				d.replaySync = ReplaySyncStatus{
+					Running:   true,
+					Reason:    reason,
+					StartedAt: time.Now().UTC(),
+				}
+			}
+		}
+		d.mu.Unlock()
 		return nil
 	default:
+		d.mu.Unlock()
 		d.logger.Warn("sync trigger already queued; ignoring redundant request", slog.String("reason", reason))
 		return nil
 	}
 }
 
+func (d *Daemon) isForceSyncOnTriggerEnabled() bool {
+	if d.statsTracker != nil {
+		return d.statsTracker.Status().ForceSyncOnTrigger
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cfg != nil && d.cfg.StatsAPI.ForceSyncOnTrigger
+}
+
+func (d *Daemon) isAutoSyncOnExitEnabled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cfg != nil && d.cfg.StatsAPI.AutoSyncOnExit
+}
+
+// isGameActive reports whether Rocket League is currently running or connected via Stats API.
+func (d *Daemon) isGameActive() bool {
+	if d.statsListener != nil && d.statsListener.IsConnected() {
+		return true
+	}
+	if d.statsTracker != nil && d.statsTracker.IsGameConnected() {
+		return true
+	}
+	if d.gameProcessRunning != nil && d.gameProcessRunning() {
+		return true
+	}
+	return false
+}
+
+func (d *Daemon) disconnectPrimaryProvider() {
+	if disc, ok := d.syncer.(ProviderDisconnector); ok && disc != nil {
+		_ = disc.DisconnectProvider()
+	}
+}
+
+// ReplaySyncStatusSnapshot returns the live or most recent PsyNet replay sync status.
+func (d *Daemon) ReplaySyncStatusSnapshot() ReplaySyncStatus {
+	d.mu.Lock()
+	snap := d.replaySync
+	snap.Running = d.inFlight || d.pendingManualTriggers > 0
+	d.mu.Unlock()
+	if d.statsTracker != nil {
+		snap.PendingCount = d.statsTracker.PendingCount()
+	}
+	return snap
+}
+
 // Start begins daemon execution.
-// It executes an initial sync cycle immediately, then returns if Once mode is enabled,
-// or enters a ticker loop running at cfg.Sync.PollInterval.
+// It executes an initial sync cycle immediately (unless Rocket League is already active in daemon mode),
+// then returns if Once mode is enabled, or enters a ticker loop running at cfg.Sync.PollInterval.
 // Context cancellation and OS signals (SIGINT, SIGTERM) trigger a graceful shutdown
 // that awaits in-flight cycle drain before returning.
 func (d *Daemon) Start(ctx context.Context) error {
@@ -281,9 +432,16 @@ func (d *Daemon) Start(ctx context.Context) error {
 	if !d.cfg.Sync.Once {
 		d.startStatsListener(ctx)
 		d.startHTTPServer(ctx)
+		d.prevGameActive = d.isGameActive()
 	}
 
-	if err := d.executeCycle(ctx); err != nil {
+	initialReason := "startup"
+	initialForce := d.cfg.Sync.Once
+	if d.cfg.Sync.Once {
+		initialReason = "cli_once"
+	}
+
+	if err := d.executeCycle(ctx, initialForce, initialReason); err != nil {
 		if d.cfg.Sync.Once {
 			d.logger.Error("single-run mode sync cycle failed", slog.Any("error", err))
 			return err

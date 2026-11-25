@@ -325,3 +325,33 @@ func TestSyncer_StoreErrors(t *testing.T) {
 		t.Fatalf("expected list uploads failure, got: %v", err)
 	}
 }
+
+type disconnectTrackingProvider struct {
+	*mockHistoryProvider
+	disconnectCalls int
+}
+
+func (p *disconnectTrackingProvider) Disconnect() error {
+	p.disconnectCalls++
+	return nil
+}
+
+func TestSyncer_RunCycle_DisconnectsProviderAfterDiscovery(t *testing.T) {
+	store := newMockStore()
+	provider := &disconnectTrackingProvider{
+		mockHistoryProvider: newMockHistoryProvider(
+			DiscoveredMatch{MatchGUID: "m-disc", ReplayURL: "https://cdn.example.com/m-disc.replay"},
+		),
+	}
+	s, err := New(store, provider, newMockDownloader(), newMockUploader())
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	if _, err := s.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+	if provider.disconnectCalls != 1 {
+		t.Fatalf("expected Syncer.RunCycle to call provider Disconnect() once after discovery, got %d", provider.disconnectCalls)
+	}
+}

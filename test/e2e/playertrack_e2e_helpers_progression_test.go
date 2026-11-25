@@ -247,6 +247,9 @@ func TestE2E_PlayerTrack_MultiMatchProgression(t *testing.T) {
 	listener, _ := statsapi.NewListener(listenerCfg, statsTracker, logger, statsapi.WithPlayerEventHandler(tracker))
 
 	cfg := &config.Config{
+		Web: config.WebConfig{
+			Host: "127.0.0.1",
+		},
 		StatsAPI: config.StatsAPIConfig{
 			Enabled:  true,
 			Protocol: "websocket",

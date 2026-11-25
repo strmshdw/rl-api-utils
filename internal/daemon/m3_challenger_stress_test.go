@@ -39,7 +39,7 @@ func newDaemonChallengerInstance(t *testing.T, isJSON bool) (*daemon.Daemon, sto
 
 	cfg := &config.Config{
 		Sync: config.SyncConfig{Once: false},
-		Web:  config.WebConfig{Enabled: true, Port: 49125},
+		Web:  config.WebConfig{Enabled: true, Host: "127.0.0.1", Port: 49125},
 		Logging: config.LoggingConfig{
 			Level: "error",
 		},

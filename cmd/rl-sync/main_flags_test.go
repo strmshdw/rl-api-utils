@@ -134,6 +134,7 @@ func createTestRunner(stdout, stderr io.Writer) *Runner {
 
 	r.LoadConfig = func(cli config.CLIFlags) (*config.Config, error) {
 		cfg := config.NewDefaultConfig()
+		cfg.Web.Host = "127.0.0.1"
 		cfg.Ballchasing.APIKey = "test-api-key"
 		cfg.Auth.Epic.RefreshToken = "test-refresh-token"
 		cfg.Sync.Once = true

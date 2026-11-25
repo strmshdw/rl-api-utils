@@ -292,6 +292,7 @@ func TestTier5_Stress_Daemon_RapidStartStopCycles(t *testing.T) {
 
 	syncerMock := &mockStressSyncer{sleepDur: 2 * time.Millisecond}
 	cfg := config.NewDefaultConfig()
+	cfg.Web.Host = "127.0.0.1"
 	cfg.Sync.PollInterval = config.Duration(10 * time.Millisecond)
 	cfg.Sync.Once = false
 

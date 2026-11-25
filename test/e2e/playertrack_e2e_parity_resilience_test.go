@@ -85,6 +85,9 @@ func TestE2E_PlayerTrack_DualBackendParity(t *testing.T) {
 			listener, _ := statsapi.NewListener(listenerCfg, statsTracker, logger, statsapi.WithPlayerEventHandler(tracker))
 
 			cfg := &config.Config{
+				Web: config.WebConfig{
+					Host: "127.0.0.1",
+				},
 				StatsAPI: config.StatsAPIConfig{
 					Enabled:  true,
 					Protocol: "websocket",
@@ -211,6 +214,9 @@ func TestE2E_PlayerTrack_OfflineDegradation(t *testing.T) {
 	listener, _ := statsapi.NewListener(listenerCfg, statsTracker, logger, statsapi.WithPlayerEventHandler(tracker))
 
 	cfg := &config.Config{
+		Web: config.WebConfig{
+			Host: "127.0.0.1",
+		},
 		StatsAPI: config.StatsAPIConfig{
 			Enabled:  true,
 			Protocol: "websocket",
@@ -311,7 +317,7 @@ func TestE2E_PlayerTrack_StatePersistenceAcrossRestarts(t *testing.T) {
 		statsTracker1, _ := statsapi.NewTracker(store1, statsapi.TrackerConfig{}, statsapi.WithLogger(logger))
 		listener1, _ := statsapi.NewListener(statsapi.ListenerConfig{Address: exporter1.Address(), Protocol: "websocket"}, statsTracker1, logger, statsapi.WithPlayerEventHandler(tracker1))
 
-		d1, _ := daemon.New(&testSyncerStub{}, &config.Config{StatsAPI: config.StatsAPIConfig{Enabled: true, Address: exporter1.Address()}},
+		d1, _ := daemon.New(&testSyncerStub{}, &config.Config{Web: config.WebConfig{Host: "127.0.0.1"}, StatsAPI: config.StatsAPIConfig{Enabled: true, Address: exporter1.Address()}},
 			daemon.WithPlayerTracker(tracker1),
 			daemon.WithStateStore(store1),
 			daemon.WithStatsTracker(statsTracker1),
@@ -366,7 +372,7 @@ func TestE2E_PlayerTrack_StatePersistenceAcrossRestarts(t *testing.T) {
 		statsTracker2, _ := statsapi.NewTracker(store2, statsapi.TrackerConfig{}, statsapi.WithLogger(logger))
 		listener2, _ := statsapi.NewListener(statsapi.ListenerConfig{Address: exporter2.Address(), Protocol: "websocket"}, statsTracker2, logger, statsapi.WithPlayerEventHandler(tracker2))
 
-		d2, _ := daemon.New(&testSyncerStub{}, &config.Config{StatsAPI: config.StatsAPIConfig{Enabled: true, Address: exporter2.Address()}},
+		d2, _ := daemon.New(&testSyncerStub{}, &config.Config{Web: config.WebConfig{Host: "127.0.0.1"}, StatsAPI: config.StatsAPIConfig{Enabled: true, Address: exporter2.Address()}},
 			daemon.WithPlayerTracker(tracker2),
 			daemon.WithStateStore(store2),
 			daemon.WithStatsTracker(statsTracker2),

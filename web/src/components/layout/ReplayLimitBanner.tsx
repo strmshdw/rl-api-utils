@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { SessionResponse } from '../../types/api';
 import { useDashboard } from '../../context/DashboardContext';
+import { useReplaySync } from '../../hooks/useReplaySync';
 
 interface ReplayLimitBannerProps {
   session?: SessionResponse | null;
@@ -22,11 +23,27 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
   } = useDashboard();
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [localThreshold, setLocalThreshold] = useState<number>(session?.trigger_threshold ?? 15);
   const [localForceSync, setLocalForceSync] = useState<boolean>(session?.force_sync_on_trigger ?? false);
   const [localEnableToast, setLocalEnableToast] = useState<boolean>(session?.enable_toast ?? true);
   const [syncedClearOverride, setSyncedClearOverride] = useState<boolean>(false);
+
+  const {
+    isSyncing,
+    syncMessage: replaySyncMessage,
+    error: replaySyncError,
+    triggerReplaySync,
+  } = useReplaySync({
+    onSyncComplete: (status) => {
+      void onRefreshSession?.();
+      if (!status?.last_error) {
+        setSyncedClearOverride(true);
+        if (replayLimitPreview !== 'auto') {
+          setTimeout(() => setReplayLimitPreview('ok'), 900);
+        }
+      }
+    },
+  });
 
   useEffect(() => {
     if (session?.trigger_threshold && session.trigger_threshold > 0) {
@@ -75,24 +92,9 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
   const gamesRemaining = Math.max(0, maxHostedReplays - pendingCount);
 
   const handleSyncAndDownloadNow = async () => {
-    if (busyAction) return;
-    setBusyAction('sync');
-    setStatusMessage(`⟳ DOWNLOADING ${pendingCount} OUTSTANDING REPLAYS FROM ROCKET LEAGUE SERVERS...`);
-    try {
-      await fetch('/api/sync/now', { method: 'POST' });
-      await fetch('/api/sync/ballchasing', { method: 'POST' });
-      await onRefreshSession?.();
-      setSyncedClearOverride(true);
-      setStatusMessage('✓ ALL OUTSTANDING REPLAYS DOWNLOADED & QUEUED FOR BALLCHASING');
-      if (replayLimitPreview !== 'auto') {
-        setTimeout(() => setReplayLimitPreview('ok'), 900);
-      }
-    } catch {
-      setSyncedClearOverride(true);
-      setStatusMessage('✓ SYNC TRIGGERED · OUTSTANDING REPLAYS QUEUED FOR DOWNLOAD');
-    } finally {
-      setBusyAction(null);
-    }
+    if (isSyncing) return;
+    setStatusMessage(`⟳ DOWNLOADING ${pendingCount} OUTSTANDING REPLAYS FROM ROCKET LEAGUE (PSYNET)...`);
+    await triggerReplaySync();
   };
 
   const handleThresholdChange = async (nextThreshold: number) => {
@@ -187,8 +189,11 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
           </span>
 
           <span className="text-sm t-text-ink2 hidden 2xl:inline">
-            {statusMessage ||
-              'Rocket League only hosts 20 replays on its servers (normally synced on game exit). Any games over 20 not downloaded are lost forever.'}
+            {replaySyncError
+              ? `SYNC FAILED · ${replaySyncError}`
+              : replaySyncMessage ||
+                statusMessage ||
+                'Rocket League only hosts 20 replays on its servers (normally synced on game exit). Any games over 20 not downloaded are lost forever.'}
           </span>
         </div>
 
@@ -197,7 +202,7 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
           <button
             type="button"
             data-testid="banner-sync-now-btn"
-            disabled={busyAction !== null}
+            disabled={isSyncing}
             onClick={handleSyncAndDownloadNow}
             className={`px-3 py-1 t-font-display font-extrabold text-sm uppercase tracking-wider cursor-pointer whitespace-nowrap ${
               isExceeded
@@ -205,7 +210,7 @@ export const ReplayLimitBanner: React.FC<ReplayLimitBannerProps> = ({
                 : 'cartouche-gold hover:opacity-90'
             }`}
           >
-            {busyAction === 'sync'
+            {isSyncing
               ? '⟳ DOWNLOADING REPLAYS...'
               : `⟳ SYNC & DOWNLOAD ALL (${pendingCount}) NOW`}
           </button>

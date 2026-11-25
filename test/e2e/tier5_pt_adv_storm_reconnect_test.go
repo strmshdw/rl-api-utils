@@ -317,7 +317,7 @@ func TestTier5_PT_Adv4_StatsAPI_DropAndReconnect_Resilience(t *testing.T) {
 	}
 	listener, _ := statsapi.NewListener(listenerCfg, statsTracker, logger, statsapi.WithPlayerEventHandler(tracker))
 
-	d, _ := daemon.New(&testSyncerStub{}, &config.Config{StatsAPI: config.StatsAPIConfig{Enabled: true, Address: exporter.Address()}},
+	d, _ := daemon.New(&testSyncerStub{}, &config.Config{Web: config.WebConfig{Host: "127.0.0.1"}, StatsAPI: config.StatsAPIConfig{Enabled: true, Address: exporter.Address()}},
 		daemon.WithPlayerTracker(tracker),
 		daemon.WithStateStore(store),
 		daemon.WithStatsTracker(statsTracker),

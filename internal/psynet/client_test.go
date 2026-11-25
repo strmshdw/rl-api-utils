@@ -395,4 +395,52 @@ func TestClient_MockPsyNetServer_WireProtocol(t *testing.T) {
 	if psyServer.GetHistoryRequestCount() != 1 {
 		t.Errorf("expected 1 history request, got %d", psyServer.GetHistoryRequestCount())
 	}
+	if client.IsConnected() {
+		t.Errorf("expected managed primary PsyNet client to disconnect immediately after GetRecentMatches")
+	}
+}
+
+// --- Test 9: Managed Primary Connection Auto-Disconnects After Every Query ---
+func TestClient_AutoDisconnectsManagedSessionAfterQuery(t *testing.T) {
+	var created []*MockRPCClient
+	cfg := ClientConfig{
+		Credentials: &Credentials{
+			Platform:  "Epic",
+			AuthToken: "token-primary",
+			AccountID: "acc-primary",
+		},
+		RPCFactory: func(ctx context.Context, creds *Credentials) (RPCClient, error) {
+			rpc := NewMockRPCClient(rlapi.MatchEntry{
+				ReplayUrl: "https://example.com/replay.replay",
+				Match:     rlapi.Match{MatchGUID: "guid-ephemeral"},
+			})
+			created = append(created, rpc)
+			return rpc, nil
+		},
+	}
+
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	defer client.Close()
+
+	for cycle := 1; cycle <= 2; cycle++ {
+		matches, err := client.GetRecentMatches(context.Background())
+		if err != nil {
+			t.Fatalf("cycle %d GetRecentMatches failed: %v", cycle, err)
+		}
+		if len(matches) != 1 || matches[0].MatchGUID != "guid-ephemeral" {
+			t.Fatalf("cycle %d unexpected matches: %+v", cycle, matches)
+		}
+		if client.IsConnected() {
+			t.Fatalf("cycle %d: expected primary PsyNet client to disconnect after query to avoid Error 67", cycle)
+		}
+		if !created[cycle-1].closed {
+			t.Fatalf("cycle %d: expected underlying RPC WebSocket to be closed immediately after query", cycle)
+		}
+	}
+	if len(created) != 2 {
+		t.Fatalf("expected fresh short-lived RPC session per authorized cycle (2), got %d", len(created))
+	}
 }

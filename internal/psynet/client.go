@@ -19,6 +19,7 @@ type Client struct {
 	cfg            ClientConfig
 	psyNet         *rlapi.PsyNet
 	rpc            RPCClient
+	managedRPC     bool
 	closed         bool
 	logger         *slog.Logger
 	requestTimeout time.Duration
@@ -82,11 +83,17 @@ func NewClientWithRPC(rpc RPCClient, logger *slog.Logger) *Client {
 }
 
 // GetRecentMatches retrieves the recent match history from PsyNet.
-// If the connection is down, it attempts to connect or reconnect automatically.
+// When the client owns the underlying PsyNet WebSocket session (not injected via NewClientWithRPC),
+// it disconnects immediately once the query completes so no idle primary-account session or
+// heartbeat ping lingers while Rocket League is running.
 func (c *Client) GetRecentMatches(ctx context.Context) ([]DiscoveredMatch, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	defer func() {
+		_ = c.Disconnect()
+	}()
 
 	c.mu.Lock()
 	if c.closed {
@@ -156,6 +163,21 @@ func (c *Client) GetRecentMatches(ctx context.Context) ([]DiscoveredMatch, error
 	return c.mapMatches(entries), nil
 }
 
+// Disconnect closes any active managed PsyNet WebSocket session without permanently
+// closing the client, allowing future authorized sync cycles to reconnect on demand.
+func (c *Client) Disconnect() error {
+	c.mu.Lock()
+	if !c.managedRPC || c.rpc == nil {
+		c.mu.Unlock()
+		return nil
+	}
+	rpc := c.rpc
+	c.rpc = nil
+	c.managedRPC = false
+	c.mu.Unlock()
+	return rpc.Close()
+}
+
 // Close gracefully closes the PsyNet WebSocket connection and cancels in-flight handshakes.
 func (c *Client) Close() error {
 	if c.baseCancel != nil {
@@ -174,6 +196,7 @@ func (c *Client) Close() error {
 	if c.rpc != nil {
 		err = c.rpc.Close()
 		c.rpc = nil
+		c.managedRPC = false
 	}
 	return err
 }
@@ -268,6 +291,7 @@ func (c *Client) connectLocked(parentCtx context.Context) error {
 			return ErrClientClosed
 		}
 		c.rpc = rpc
+		c.managedRPC = true
 		return nil
 	}
 
@@ -310,6 +334,7 @@ func (c *Client) connectLocked(parentCtx context.Context) error {
 	}
 
 	c.rpc = rpc
+	c.managedRPC = true
 	c.logger.Info("connected to psynet websocket rpc",
 		slog.String("platform", creds.Platform),
 		slog.String("account_id", creds.AccountID),

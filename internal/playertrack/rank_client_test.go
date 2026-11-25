@@ -219,6 +219,46 @@ func TestPsyNetRankClient_RuntimeCollisionDetection(t *testing.T) {
 	}
 }
 
+func TestPsyNetRankClient_CrossProviderCollisionDetection(t *testing.T) {
+	// Primary is Steam linked to Epic ID "shared-epic-123"; polling is Epic using the same Epic ID.
+	primaryCfg := config.AuthConfig{
+		Provider: "steam",
+		Steam:    config.SteamConfig{SteamID64: "76561198000000999"},
+		Epic:     config.EpicConfig{AccountID: "shared-epic-123"},
+	}
+	pollingCfg := config.PollingAuthConfig{
+		Enabled:  true,
+		Provider: "epic",
+		Epic:     config.EpicConfig{AccountID: "shared-epic-123", RefreshToken: "different-tok"},
+	}
+
+	if err := CheckCredentialCollision(primaryCfg, pollingCfg); !errors.Is(err, ErrCredentialCollision) {
+		t.Fatalf("expected cross-provider CheckCredentialCollision to fail with ErrCredentialCollision, got %v", err)
+	}
+
+	client, err := NewPsyNetRankClient(RankClientConfig{
+		PrimaryAuth: primaryCfg,
+		PollingAuth: pollingCfg,
+		CredentialsSupplier: psynet.StaticCredentials{
+			Platform:  "Epic",
+			AuthToken: "tok",
+			AccountID: "shared-epic-123",
+		},
+		RPCFactory: func(ctx context.Context, creds *psynet.Credentials) (SkillRPCClient, error) {
+			return &testSkillRPC{connected: true}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewPsyNetRankClient failed: %v", err)
+	}
+	defer client.Close()
+
+	_, err = client.GetPlayersSkills(context.Background(), []rlapi.PlayerID{"Epic|p1|0"})
+	if !errors.Is(err, ErrCredentialCollision) {
+		t.Fatalf("expected runtime cross-provider ErrCredentialCollision, got %v", err)
+	}
+}
+
 func TestPsyNetRankClient_Concurrency(t *testing.T) {
 	mockRPC := &testSkillRPC{
 		connected: true,
