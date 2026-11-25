@@ -576,12 +576,13 @@ describe('App shell', () => {
     expect(warnPill.className).toContain('border-[#ff3b4e]');
     expect(warnPill.querySelector('[data-testid="header-sync-warning"]')?.textContent).toContain('SYNC WARN 16/20');
 
+    fetchCalls.length = 0;
     const syncBtn = warnPill.querySelector<HTMLButtonElement>('[data-testid="header-sync-now-btn"]')!;
     await act(async () => {
       syncBtn.click();
     });
     expect(fetchCalls).toContain('POST /api/sync/now');
-    expect(fetchCalls).toContain('POST /api/sync/ballchasing');
+    expect(fetchCalls.some((c) => c.includes('/api/sync/ballchasing'))).toBe(false);
     expect(warnPill.getAttribute('data-sync-warning')).toBe('false');
     expect(warnPill.querySelector('[data-testid="header-sync-warning"]')).toBeNull();
   });

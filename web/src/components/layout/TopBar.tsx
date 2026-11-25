@@ -11,7 +11,7 @@ import {
   playlistLabels,
 } from '../../utils/broadcast';
 import { isDemoMode } from '../../utils/sampleData';
-import { useBallchasingSync } from '../../hooks/useBallchasingSync';
+import { useReplaySync } from '../../hooks/useReplaySync';
 import { StatusDot } from '../common/ui';
 import { useDashboard } from '../../context/DashboardContext';
 import { ReplayLimitBanner } from './ReplayLimitBanner';
@@ -88,9 +88,11 @@ export const TopBar: React.FC<TopBarProps> = ({
     });
   };
 
-  const { isSyncing, triggerSync } = useBallchasingSync({
-    onSyncComplete: () => {
-      markPendingClearedOptimistically();
+  const { isSyncing, triggerReplaySync } = useReplaySync({
+    onSyncComplete: (status) => {
+      if (!status?.last_error) {
+        markPendingClearedOptimistically();
+      }
       void onRefreshSession?.();
     },
   });
@@ -116,7 +118,8 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   const handleHeaderSyncNow = async () => {
     if (isSyncing) return;
-    await triggerSync({ includeReplaySync: true });
+    const ok = await triggerReplaySync();
+    if (!ok) return;
     markPendingClearedOptimistically();
     if (isDevBuild && replayLimitPreview !== 'auto') {
       setReplayLimitPreview('ok');
@@ -284,7 +287,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                       ? 'bg-[#c81624] text-white border border-[#ff6b78] hover:bg-[#a8111d]'
                       : 't-bg-page border border-outline t-text-strong hover:border-blue-ink hover:t-text-blue'
                   }`}
-                  title="Download pending Rocket League replays and sync with Ballchasing now"
+                  title="Download pending Rocket League replays from PsyNet, upload to Ballchasing, and sync their stats now"
                 >
                   {isSyncing ? '⟳ SYNCING…' : '⟳ SYNC NOW'}
                 </button>
