@@ -11,8 +11,9 @@ import {
   onlineIdOf,
   summarizeSession,
 } from '../../utils/broadcast';
-import { useDashboard } from '../../context/DashboardContext';
+import { useAreaFilters } from '../../context/DashboardContext';
 import { EmptyLine, GhostButton, PageHeader, PrimaryButton } from '../common/ui';
+import { AreaFilterBar } from '../common/AreaFilterBar';
 import {
   SessionForAgainstTable,
   SessionKpiStrip,
@@ -59,10 +60,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
   onDismissContinueSession,
   onInspectPlayer,
 }) => {
-  const { activePlaylist: contextActivePlaylist } = useDashboard();
+  const sessionFilters = useAreaFilters('session');
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
   const [playlistFilter, setPlaylistFilter] = useState<string>(() =>
-    normalizeActiveModeKey(activePlaylist ?? contextActivePlaylist),
+    normalizeActiveModeKey(activePlaylist ?? sessionFilters.playlist),
   );
   const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
   const [inspectedSessionId, setInspectedSessionId] = useState<string | null>(null);
@@ -81,12 +82,15 @@ export const SessionView: React.FC<SessionViewProps> = ({
   useEffect(() => {
     if (activePlaylist !== undefined) {
       setPlaylistFilter(normalizeActiveModeKey(activePlaylist));
+    } else {
+      setPlaylistFilter(normalizeActiveModeKey(sessionFilters.playlist));
     }
-  }, [activePlaylist]);
+  }, [activePlaylist, sessionFilters.playlist]);
 
   const handlePlaylistSelect = (next: string) => {
     const normalized = normalizeActiveModeKey(next);
     setPlaylistFilter(normalized);
+    sessionFilters.setPlaylist(normalized);
     onSelectPlaylist?.(normalized);
   };
 
@@ -396,6 +400,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
         </div>
       )}
 
+      <AreaFilterBar
+        area="session"
+        ariaLabel="Session filters"
+        playlist={playlistFilter}
+        onPlaylistChange={handlePlaylistSelect}
+        statMode={sessionFilters.statMode}
+        onStatModeChange={sessionFilters.setStatMode}
+        showReset={playlistFilter !== '11' || sessionFilters.statMode !== 'avg'}
+        onReset={() => {
+          sessionFilters.resetFilters();
+          handlePlaylistSelect('11');
+        }}
+      />
+
       <SessionModeBreakdownStrip
         session={activeSession}
         activeFilter={playlistFilter}
@@ -408,9 +426,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
         playlists={playlists}
         mmrHistory={mmrByPlaylist}
         session={effectiveScopedSession}
+        scopeLabel={inspectedSession ? 'PAST SESSION' : 'CURRENT SESSION'}
       />
 
-      <SessionForAgainstTable session={effectiveScopedSession} />
+      <SessionForAgainstTable
+        session={effectiveScopedSession}
+        statMode={sessionFilters.statMode}
+        scopeLabel={inspectedSession ? 'PAST SESSION' : 'CURRENT SESSION'}
+      />
 
       <SessionMatchesSection
         totalMatchCount={matches.length}

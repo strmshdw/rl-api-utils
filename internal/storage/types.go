@@ -17,6 +17,7 @@ var (
 	ErrPlayerNotFound        = errors.New("player not found")
 	ErrMatchAlreadyProcessed = errors.New("match outcome already processed")
 	ErrSessionNotFound       = errors.New("session not found")
+	ErrGroupNotFound         = errors.New("ballchasing group not found")
 )
 
 // DownloadStatus represents the synchronization status of a replay download.
@@ -82,6 +83,12 @@ type MatchRecord struct {
 	SyncedAt             *time.Time      `json:"synced_at,omitempty"`
 	StatsSyncStatus      StatsSyncStatus `json:"stats_sync_status"`
 	StatsRetryCount      int             `json:"stats_retry_count"`
+	ReplayName           string          `json:"replay_name,omitempty"`
+	ReplayDateKey        string          `json:"replay_date_key,omitempty"`
+	DailyGameNum         int             `json:"daily_game_num,omitempty"`
+	GameMode             string          `json:"game_mode,omitempty"`
+	SessionID            string          `json:"session_id,omitempty"`
+	BallchasingGroupID   string          `json:"ballchasing_group_id,omitempty"`
 	CreatedAt            time.Time       `json:"created_at"`
 	UpdatedAt            time.Time       `json:"updated_at"`
 }
@@ -430,4 +437,52 @@ type StateStore interface {
 // pruning the oldest stored match/replay records to enforce replay history limits.
 type MatchPruner interface {
 	PruneOldestMatches(ctx context.Context, count int) (int, error)
+}
+
+// DailyCounterRecord persists monotonic daily sequence counters (e.g. "game", "session") keyed by YYYY_MM_DD.
+type DailyCounterRecord struct {
+	CounterType string    `json:"counter_type"`
+	DateKey     string    `json:"date_key"`
+	LastValue   int       `json:"last_value"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// SessionSequenceRecord persists the daily autonumber assigned to a session ID.
+type SessionSequenceRecord struct {
+	SessionID  string    `json:"session_id"`
+	DateKey    string    `json:"date_key"`
+	SessionNum int       `json:"session_num"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// BallchasingGroupRecord persists a Ballchasing replay group created for a (session_id, game_mode) pair.
+type BallchasingGroupRecord struct {
+	SessionID           string    `json:"session_id"`
+	GameMode            string    `json:"game_mode"`
+	DateKey             string    `json:"date_key"`
+	SessionNum          int       `json:"session_num"`
+	GroupName           string    `json:"group_name"`
+	BallchasingGroupID  string    `json:"ballchasing_group_id"`
+	BallchasingGroupURL string    `json:"ballchasing_group_url,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
+// ReplayNamingAssignment describes the persisted daily autonumber and canonical filename assigned to a match.
+type ReplayNamingAssignment struct {
+	MatchGUID    string `json:"match_guid"`
+	DateKey      string `json:"date_key"`
+	DailyGameNum int    `json:"daily_game_num"`
+	GameMode     string `json:"game_mode"`
+	Result       string `json:"result"`
+	ReplayName   string `json:"replay_name"`
+	Reused       bool   `json:"reused"`
+}
+
+// ResolvedMatchSession describes the play session resolved for a match GUID from persisted sessions.
+type ResolvedMatchSession struct {
+	SessionID   string    `json:"session_id"`
+	StartedAt   time.Time `json:"started_at"`
+	MatchResult string    `json:"match_result,omitempty"` // "WIN", "LOSS", or ""
+	PlaylistID  int       `json:"playlist_id,omitempty"`
+	ExactMatch  bool      `json:"exact_match"`
 }

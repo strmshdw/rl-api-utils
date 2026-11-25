@@ -9,37 +9,42 @@ import {
   formatSigned,
   hasSyncedRoleTelemetry,
   matchesPlaylistFilter,
-  platformLabel,
   playlistFilterToParam,
   recordInk,
   shortRank,
 } from '../../utils/broadcast';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { RecordCells } from '../common/ui';
-import { useDashboard } from '../../context/DashboardContext';
+import { StatMode, useDashboard } from '../../context/DashboardContext';
 import type { ScopedLivePlayerHistory } from '../../hooks/useLiveLobbyHistories';
+import { parsePlatform } from '../../utils/platforms';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 export type StatKey = keyof PlayerStatsSummary;
 export type StatLeaders = Record<StatKey, number>;
 
-export const STRIP_STATS: ReadonlyArray<{ key: StatKey; label: string }> = [
-  { key: 'score', label: 'SCORE' },
-  { key: 'goals', label: 'G' },
-  { key: 'assists', label: 'A' },
-  { key: 'saves', label: 'SV' },
-  { key: 'shots', label: 'SH' },
-  { key: 'demos', label: 'D' },
+export const STRIP_STATS: ReadonlyArray<{ key: StatKey; label: string; colorClass: string }> = [
+  { key: 'score', label: 'SCORE', colorClass: STAT_LABEL_CLASS.score },
+  { key: 'goals', label: 'GOALS', colorClass: STAT_LABEL_CLASS.goals },
+  { key: 'assists', label: 'ASSISTS', colorClass: STAT_LABEL_CLASS.assists },
+  { key: 'saves', label: 'SAVES', colorClass: STAT_LABEL_CLASS.saves },
+  { key: 'shots', label: 'SHOTS', colorClass: STAT_LABEL_CLASS.shots },
+  { key: 'demos', label: 'DEMOS', colorClass: STAT_LABEL_CLASS.demos },
 ];
 
 const EMPTY_STATS: PlayerStatsSummary = { score: 0, goals: 0, assists: 0, saves: 0, shots: 0, demos: 0 };
 
 const HIST_GRID_COLS =
-  'grid grid-cols-[minmax(96px,1.95fr)_minmax(34px,0.9fr)_minmax(44px,1.2fr)_repeat(3,minmax(26px,0.82fr))_minmax(38px,1fr)_repeat(2,minmax(26px,0.82fr))] gap-x-1.5 min-w-[420px] px-3 py-1 items-center min-h-[28px]';
+  'grid grid-cols-[minmax(96px,1.95fr)_minmax(34px,0.9fr)_minmax(54px,1.35fr)_repeat(3,minmax(26px,0.82fr))_minmax(38px,1fr)_repeat(2,minmax(26px,0.82fr))] gap-x-1.5 min-w-[430px] px-3 py-1 items-center min-h-[28px]';
 
 const STAMP_PILL_BASE = 'inline-flex items-center leading-tight min-h-[22px] text-[11px] px-2 py-0.5';
 
-/** Lobby leader (value > 0) is white, other non-zero values ink-3, zeros faint. */
-export function statInk(value: number, leader: number): string {
+/** Colors non-zero stat values to match their attribute color (bolding lobby leaders); zeros stay faint. */
+export function statInk(value: number, leader: number, colorClass?: string): string {
   if (!value) return 'text-faint';
+  if (colorClass) {
+    return value === leader ? `${colorClass} font-black` : `${colorClass} font-bold`;
+  }
   return value === leader ? 'text-ink-strong' : 'text-ink-3';
 }
 
@@ -69,6 +74,7 @@ interface LivePlayerCardProps {
   opposingTeamPlayers?: LobbyPlayer[];
   activePlaylistId?: number;
   playlistScope?: string;
+  statMode?: StatMode;
   scopedHistory?: ScopedLivePlayerHistory;
   subgridPlacement?: LiveCardSubgridPlacement;
   onInspectPlayer?: (playerId: string, playerName?: string) => void;
@@ -85,12 +91,13 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
   opposingTeamPlayers = [],
   activePlaylistId = 11,
   playlistScope = '11',
+  statMode: statModeProp,
   scopedHistory,
   subgridPlacement,
   onInspectPlayer,
 }) => {
-  const { statMode, showLiveHistData, stampingConfig } = useDashboard();
-  const isAvg = statMode === 'avg';
+  const { statMode: contextStatMode, showLiveHistData, stampingConfig } = useDashboard();
+  const isAvg = (statModeProp ?? contextStatMode) === 'avg';
 
   const param = playlistFilterToParam(playlistScope);
   const parsedId = Number(param);
@@ -145,7 +152,14 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
 
   const meta: React.ReactNode[] = [];
   if (columns.platform) {
-    meta.push(<span key="platform">{platformLabel(player.platform, player.is_bot)}</span>);
+    meta.push(
+      <PlatformBadge
+        key="platform"
+        platform={player.platform}
+        isBot={player.is_bot}
+        size="sm"
+      />,
+    );
   } else {
     if (columns.rank) meta.push(<span key="rank">{rank?.rank_name || 'UNRANKED'}</span>);
     if (columns.mmr) meta.push(<span key="mmr">{formatMmr(rank?.mmr)}</span>);
@@ -185,13 +199,16 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         Boolean(scopedMatchup) &&
         scopedMatchup?.playlist_id === activePlaylistId));
 
+  const inlineRoleStatsMatchPlaylist =
+    !player.matchup_record?.playlist_id || player.matchup_record.playlist_id === activePlaylistId;
+
   const withStats: PlayerRoleStatsSummary = scopedHistory?.withYouStats
     ? scopedHistory.withYouStats
     : isLocal
     ? canUseLocalRoleStats && player.in_wins_stats
       ? player.in_wins_stats
       : emptyRoleStats(Math.max(0, sessionRecord.wins), sessionRecord.wins, 0)
-    : canUsePlayerRoleStats && player.with_you_stats
+    : canUsePlayerRoleStats && inlineRoleStatsMatchPlaylist && tw + tl > 0 && player.with_you_stats
     ? player.with_you_stats
     : emptyRoleStats(tw + tl, tw, tl);
 
@@ -201,7 +218,7 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
     ? canUseLocalRoleStats && player.in_losses_stats
       ? player.in_losses_stats
       : emptyRoleStats(Math.max(0, sessionRecord.losses), 0, sessionRecord.losses)
-    : canUsePlayerRoleStats && player.against_you_stats
+    : canUsePlayerRoleStats && inlineRoleStatsMatchPlaylist && ow + ol > 0 && player.against_you_stats
     ? player.against_you_stats
     : emptyRoleStats(ow + ol, ow + ol > 0 ? ow : 0, ow + ol > 0 ? ol : 0);
 
@@ -214,11 +231,11 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
       return (
         <div
           key={roleLabel}
-          className={`${HIST_GRID_COLS} border-t border-line text-xs t-font-mono opacity-45`}
+          className={`${HIST_GRID_COLS} border-t border-line text-xs t-font-mono`}
         >
           <div className="font-bold t-text-muted uppercase whitespace-nowrap">{roleLabel}</div>
           <div className="text-right t-text-faint tabular-nums">0G</div>
-          <div className="col-span-7 text-center text-xs t-font-display tracking-wider t-text-faint uppercase">
+          <div className="col-span-7 text-center text-xs t-font-display tracking-wider t-text-muted2 uppercase">
             — NO MATCHES IN SELECTED RANGE —
           </div>
         </div>
@@ -256,19 +273,25 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         <div className={`t-font-display font-bold text-xs uppercase tracking-wider whitespace-nowrap ${roleColor}`}>
           {roleLabel}
         </div>
-        <div className="text-right font-bold t-text-ink2 tabular-nums">{s.games}G</div>
-        <div className="text-right font-bold t-text-strong tabular-nums">{pts}</div>
-        <div className="text-right font-bold t-text-win tabular-nums">{g}</div>
-        <div className="text-right t-text-ink tabular-nums">{a}</div>
-        <div className="text-right t-text-ink tabular-nums">{sv}</div>
-        <div className="text-right t-text-ink2 tabular-nums">{shPct}</div>
-        <div className="text-right t-text-orange tabular-nums">{dem}</div>
-        <div className="text-right t-text-muted tabular-nums">{bst}</div>
+        <div className={`text-right font-bold tabular-nums ${STAT_LABEL_CLASS.games}`}>{s.games}G</div>
+        <div className={`text-right font-bold tabular-nums ${STAT_LABEL_CLASS.score}`}>{pts}</div>
+        <div className={`text-right font-bold tabular-nums ${STAT_LABEL_CLASS.goals}`}>{g}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.assists}`}>{a}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.saves}`}>{sv}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.shotpct}`}>{shPct}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.demos}`}>{dem}</div>
+        <div className={`text-right tabular-nums ${STAT_LABEL_CLASS.boost}`}>{bst}</div>
       </div>
     );
   };
 
   const isBlueTeam = player.team_num === 0;
+  const isBotPlayer = Boolean(
+    player.is_bot || parsePlatform(player.platform || player.player_id, player.is_bot).code === 'bot',
+  );
+  const formattedRank = rank
+    ? shortRank(rank.rank_name, rank.division, rank.short_rank, rank.tier)
+    : '';
   const subgridStyle = subgridPlacement
     ? ({
         '--live-card-col': String(subgridPlacement.col),
@@ -283,58 +306,80 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
       data-player-id={player.player_id}
       style={subgridStyle}
       onClick={() => {
-        if (onInspectPlayer && !player.is_bot) {
+        if (onInspectPlayer && !isBotPlayer) {
           onInspectPlayer(player.player_id, isLocal ? 'You' : player.name);
         }
       }}
       className={`live-player-subgrid surface-plaque flex flex-col border font-display t-radius overflow-hidden transition-colors min-w-0 ${
         isLocal ? 'border-blue-ink border-outline' : 'border-outline'
       } ${player.is_disconnected ? 'opacity-60' : ''} ${
-        onInspectPlayer && !player.is_bot ? 'cursor-pointer t-hover-panel' : ''
+        onInspectPlayer && !isBotPlayer ? 'cursor-pointer t-hover-panel' : ''
       }`}
     >
-      {/* Band 1: Full-Bleed Team Monolith Header Slab */}
+      {/* Band 1: Compact Single-Row Player Header */}
       <div
-        className={`px-4 py-2.5 flex items-center justify-between gap-3 border-b border-line min-w-0 ${
-          isBlueTeam ? 't-bg-blue-slab bg-blue-slab t-on-slab' : 't-bg-orange-slab bg-orange-slab text-white'
-        }`}
+        data-testid="live-player-header"
+        className="surface-card-header t-text-strong px-3.5 py-2 flex items-center justify-between gap-3 border-b border-line min-w-0"
       >
-        <div className="flex flex-col min-w-0 flex-1">
-          <span className="t-font-mono text-[10px] font-bold tracking-widest uppercase opacity-80">
-            {isBlueTeam ? 'BLUE TEAM // PLAYER' : 'ORANGE TEAM // PLAYER'}
-          </span>
-          <div className="flex items-baseline gap-2.5 flex-wrap min-w-0">
-            <div
-              title={player.name}
-              className="font-bold text-2xl sm:text-[26px] tracking-wider leading-none uppercase max-w-full min-w-0 truncate"
-            >
-              {isLocal ? 'You' : player.name}
-            </div>
-            {meta.length > 0 && (
-              <div
-                data-testid="player-meta"
-                className="t-font-mono font-bold text-[11px] tracking-wider uppercase opacity-85 max-w-full min-w-0 truncate"
-              >
-                {meta.map((m, i) => (
-                  <React.Fragment key={i}>
-                    {i > 0 && ' · '}
-                    {m}
-                  </React.Fragment>
-                ))}
-              </div>
-            )}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div
+            data-testid="live-player-name"
+            title={player.name}
+            className={`font-bold text-xl sm:text-[22px] tracking-wider leading-none uppercase max-w-full min-w-0 truncate ${
+              isBlueTeam ? 't-text-blue text-blue-ink' : 't-text-orange text-orange-ink'
+            }`}
+          >
+            {isLocal ? 'You' : player.name}
           </div>
+          {meta.length > 0 && (
+            <div
+              data-testid="player-meta"
+              className="inline-flex items-center gap-1.5 t-font-mono font-bold text-[11px] tracking-wider uppercase opacity-90 shrink-0"
+            >
+              {meta.map((m, i) => (
+                <React.Fragment key={i}>
+                  {i > 0 && <span aria-hidden="true">·</span>}
+                  {m}
+                </React.Fragment>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Prominent 4-Digit Tabular MMR + Rank on the Right of the Header Slab */}
-        <div className="text-right shrink-0">
-          <div className="t-font-mono font-extrabold text-xl leading-none">
-            {rank?.mmr ? `${formatMmr(rank.mmr)} MMR` : 'UNRANKED'}
-          </div>
-          {rank && (
-            <div className="t-font-display font-bold text-[11px] tracking-widest uppercase opacity-90 mt-0.5">
-              {shortRank(rank.rank_name, rank.division, rank.short_rank, rank.tier)}
-            </div>
+        {/* Inline Rank + Tabular MMR (Rank in front, MMR label same size as rank, no space after value) */}
+        <div
+          data-testid="live-player-rank-mmr"
+          className="flex items-baseline justify-end gap-2 shrink-0 leading-none"
+        >
+          {rank?.mmr ? (
+            <>
+              {formattedRank && (
+                <span
+                  data-testid="live-player-rank"
+                  className="t-font-display font-bold text-xs tracking-widest uppercase opacity-90"
+                >
+                  {formattedRank}
+                </span>
+              )}
+              <span data-testid="live-player-mmr" className="inline-flex items-baseline whitespace-nowrap">
+                <span className="t-font-mono font-extrabold text-lg sm:text-xl leading-none">
+                  {formatMmr(rank.mmr)}
+                </span>
+                <span
+                  data-testid="live-player-mmr-label"
+                  className="t-font-display font-bold text-xs tracking-widest uppercase opacity-90"
+                >
+                  MMR
+                </span>
+              </span>
+            </>
+          ) : (
+            <span
+              data-testid="live-player-rank"
+              className="t-font-display font-bold text-xs tracking-widest uppercase opacity-90"
+            >
+              {formattedRank || 'UNRANKED'}
+            </span>
           )}
         </div>
       </div>
@@ -344,9 +389,6 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         <div className="flex flex-wrap items-center gap-1.5 min-w-[180px] flex-1">
           {isLocal && (
             <>
-              <span className={`${STAMP_PILL_BASE} uppercase t-font-display font-bold cartouche-monolith tracking-wider`}>
-                ◆ YOU · ACTIVE SESSION
-              </span>
               <span className={`${STAMP_PILL_BASE} uppercase t-font-mono font-bold cartouche-mono`}>
                 IN RANGE {wins}W–{losses}L
               </span>
@@ -361,7 +403,16 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
               )}
             </>
           )}
-          {!isLocal && threatBadges.length === 0 && (!player.tags || player.tags.length === 0) && !player.notes && (
+          {!isLocal && isBotPlayer && (
+            <span
+              data-testid="badge-bot"
+              title="Automated AI Bot player"
+              className={`${STAMP_PILL_BASE} uppercase t-font-mono font-extrabold cartouche-gold tracking-wider`}
+            >
+              ◆ AI/BOT
+            </span>
+          )}
+          {!isLocal && !isBotPlayer && threatBadges.length === 0 && (!player.tags || player.tags.length === 0) && !player.notes && (
             <span className={`${STAMP_PILL_BASE} uppercase t-font-mono font-bold cartouche-mono`}>
               {isTeammate ? '◆ TEAMMATE' : '◆ OPPONENT'}
             </span>
@@ -422,26 +473,39 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         )}
       </div>
 
-      {/* Band 3: Compact Architectural Live Match Scoreboard Strip */}
+      {/* Band 3: Current Game Live Match Scoreboard Strip (Full Stat Names) */}
       {strip.length > 0 && (
         <div
           data-testid="stat-strip"
-          className="grid divide-x divide-line border-b border-line min-w-0"
+          className={`grid divide-x divide-line min-w-0 ${showLiveHistData ? 'border-b border-line' : ''}`}
           style={{
             gridTemplateColumns: strip
-              .map((s) => (s.key === 'score' ? 'minmax(0,1.65fr)' : 'minmax(0,1fr)'))
+              .map((s) =>
+                s.key === 'score'
+                  ? 'minmax(0,1.4fr)'
+                  : s.key === 'assists'
+                  ? 'minmax(0,1.15fr)'
+                  : 'minmax(0,1fr)',
+              )
               .join(' '),
           }}
         >
-          {strip.map(({ key, label }) => (
-            <div key={key} data-stat={key} className="px-2.5 py-1.5 flex items-baseline justify-between gap-1 min-w-0">
-              <span className="font-bold text-[10px] sm:text-[11px] tracking-wider text-muted uppercase shrink-0">
+          {strip.map(({ key, label, colorClass }) => (
+            <div
+              key={key}
+              data-stat={key}
+              className="px-2 sm:px-2.5 py-1.5 flex items-baseline justify-between gap-1 min-w-0"
+            >
+              <span
+                className={`font-extrabold text-[10px] sm:text-[11px] tracking-wider uppercase shrink-0 ${colorClass}`}
+              >
                 {label}
               </span>
               <span
-                className={`font-extrabold text-xl xl:text-2xl leading-none t-font-mono tabular-nums truncate ${statInk(
+                className={`text-xl xl:text-2xl leading-none t-font-mono tabular-nums truncate ${statInk(
                   stats[key] || 0,
                   leaders[key],
+                  colorClass,
                 )}`}
               >
                 {stats[key] || 0}
@@ -451,37 +515,44 @@ export const LivePlayerCard: React.FC<LivePlayerCardProps> = ({
         </div>
       )}
 
-      {/* Band 4: Collapsible Shared-Header Historical Split Table */}
+      {/* Band 4: Visually Separated Historical Split Table */}
       {showLiveHistData && (
         <div
           data-testid="live-player-hist-split"
           role="region"
           aria-label={`Historical role split for ${isLocal ? 'You' : player.name}`}
           tabIndex={0}
-          className="live-hist-section surface-plaque overflow-x-auto min-w-0"
+          className="live-hist-section min-w-0"
         >
-          <div className={`${HIST_GRID_COLS} text-[11px] t-font-display font-bold uppercase tracking-wider t-text-muted`}>
-            <div className="whitespace-nowrap">HIST ({isAvg ? 'AVG/G' : 'TOTAL'})</div>
-            <div className="text-right">GMS</div>
-            <div className="text-right">PTS</div>
-            <div className="text-right">G</div>
-            <div className="text-right">A</div>
-            <div className="text-right">SV</div>
-            <div className="text-right">SH%</div>
-            <div className="text-right">DEM</div>
-            <div className="text-right">BST</div>
+          <div
+            data-testid="live-hist-spacer"
+            aria-hidden="true"
+            className="h-2 t-bg-page bg-page border-b border-line"
+          />
+          <div className="surface-plaque overflow-x-auto min-w-0">
+            <div className={`${HIST_GRID_COLS} text-[11px] t-font-display font-bold uppercase tracking-wider t-text-muted`}>
+              <div className="whitespace-nowrap">HIST ({isAvg ? 'AVG/G' : 'TOTAL'})</div>
+              <div className={`text-right ${STAT_LABEL_CLASS.games}`}>GMS</div>
+              <div className={`text-right ${STAT_LABEL_CLASS.score}`}>PTS</div>
+              <div className={`text-right ${STAT_LABEL_CLASS.goals}`}>G</div>
+              <div className={`text-right ${STAT_LABEL_CLASS.assists}`}>A</div>
+              <div className={`text-right ${STAT_LABEL_CLASS.saves}`}>SV</div>
+              <div className={`text-right ${STAT_LABEL_CLASS.shotpct}`}>SH%</div>
+              <div className={`text-right ${STAT_LABEL_CLASS.demos}`}>DEM</div>
+              <div className={`text-right ${STAT_LABEL_CLASS.boost}`}>BST</div>
+            </div>
+            {isLocal ? (
+              <>
+                {renderHistRow('IN WINS', 't-text-win', withStats)}
+                {renderHistRow('IN LOSSES', 't-text-loss', againstStats)}
+              </>
+            ) : (
+              <>
+                {renderHistRow('WITH YOU', 't-text-strong', withStats)}
+                {renderHistRow('AGAINST', 't-text-orange', againstStats)}
+              </>
+            )}
           </div>
-          {isLocal ? (
-            <>
-              {renderHistRow('IN WINS', 't-text-win', withStats)}
-              {renderHistRow('IN LOSSES', 't-text-loss', againstStats)}
-            </>
-          ) : (
-            <>
-              {renderHistRow('WITH YOU', 't-text-strong', withStats)}
-              {renderHistRow('AGAINST', 't-text-orange', againstStats)}
-            </>
-          )}
         </div>
       )}
     </article>

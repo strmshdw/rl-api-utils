@@ -18,7 +18,8 @@ import {
 import { PlayerRoleStatsSummary } from '../../types/api';
 import { PANEL_LABEL, RecordCells } from '../common/ui';
 import { Sparkline } from '../common/Sparkline';
-import { useDashboard } from '../../context/DashboardContext';
+import { StatMode, useDashboard } from '../../context/DashboardContext';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 interface SessionKpiStripProps {
   kpis: SessionKpi[];
@@ -27,6 +28,7 @@ interface SessionKpiStripProps {
   playlists?: PlaylistSessionStats[];
   mmrHistory?: Record<number, MMRHistoryEntry[]>;
   session?: SessionResponse | null;
+  scopeLabel?: string;
 }
 
 function reconcileScopedKpis(kpis: SessionKpi[], session?: SessionResponse | null): SessionKpi[] {
@@ -51,8 +53,9 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
   playlists = [],
   mmrHistory,
   session,
+  scopeLabel,
 }) => {
-  const { dateRangeLabel } = useDashboard();
+  const effectiveScopeLabel = scopeLabel ?? 'SESSION';
   const page = variant === 'page';
   const effectiveKpis = React.useMemo(() => reconcileScopedKpis(kpis, session), [kpis, session]);
 
@@ -98,7 +101,7 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
           >
             <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 min-w-0">
               <span className={`${PANEL_LABEL} leading-tight break-words`}>
-                {isRecord ? `${k.label} (${dateRangeLabel})` : isMmr ? 'NET MMR' : k.label}
+                {isRecord ? `${k.label} (${effectiveScopeLabel})` : isMmr ? 'NET MMR' : k.label}
               </span>
               {isMmr && mostPlayed && (
                 <span className="text-[11px] t-font-display font-bold px-1.5 py-0 t-bg-page t-border t-text-blue uppercase leading-tight break-words">
@@ -167,8 +170,12 @@ export const SessionKpiStrip: React.FC<SessionKpiStripProps> = ({
  */
 export const SessionForAgainstTable: React.FC<{
   session: SessionResponse | null;
-}> = ({ session }) => {
-  const { statMode, dateRangeLabel } = useDashboard();
+  statMode?: StatMode;
+  scopeLabel?: string;
+}> = ({ session, statMode: statModeProp, scopeLabel }) => {
+  const { statMode: contextStatMode } = useDashboard();
+  const statMode = statModeProp ?? contextStatMode;
+  const effectiveScopeLabel = scopeLabel ?? 'CURRENT SESSION';
   const isAvg = statMode === 'avg';
 
   const games = session?.total_matches ?? session?.matches?.length ?? 0;
@@ -189,8 +196,6 @@ export const SessionForAgainstTable: React.FC<{
   const renderSplitRow = (
     rowLabel: string,
     labelColor: string,
-    goalsColor: string,
-    tailColor: string,
     s: PlayerRoleStatsSummary,
     borderBottom: boolean
   ) => {
@@ -204,7 +209,7 @@ export const SessionForAgainstTable: React.FC<{
         <div className={`col-span-2 t-font-display font-extrabold text-sm uppercase tracking-wider leading-tight break-words ${labelColor}`}>
           {rowLabel}
         </div>
-        <div className="col-span-1 text-right font-bold t-text-ink2">{s.games}G</div>
+        <div className={`col-span-1 text-right font-bold ${STAT_LABEL_CLASS.games}`}>{s.games}G</div>
         {!synced ? (
           <div className="col-span-9 flex items-center justify-between gap-2 pl-4 text-xs t-font-display t-text-faint">
             <span>{games === 0 ? 'No matches recorded yet' : 'No synced role telemetry'}</span>
@@ -212,31 +217,31 @@ export const SessionForAgainstTable: React.FC<{
           </div>
         ) : (
           <>
-            <div className="col-span-1 text-right font-bold t-text-strong">
+            <div className={`col-span-1 text-right font-bold ${STAT_LABEL_CLASS.score}`}>
               {fmtVal(synced, s.avg_score, s.total_score, 0)}
             </div>
-            <div className={`col-span-1 text-right font-bold ${goalsColor}`}>
+            <div className={`col-span-1 text-right font-bold ${STAT_LABEL_CLASS.goals}`}>
               {fmtVal(synced, s.avg_goals, s.total_goals, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink">
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.assists}`}>
               {fmtVal(synced, s.avg_assists, s.total_assists, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink">
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.saves}`}>
               {fmtVal(synced, s.avg_saves, s.total_saves, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink2">
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.shotpct}`}>
               {`${Math.round(s.shooting_pct)}%`}
             </div>
-            <div className="col-span-1 text-right font-bold t-text-orange">
+            <div className={`col-span-1 text-right font-bold ${STAT_LABEL_CLASS.demos}`}>
               {fmtVal(synced, s.avg_demos_inflicted, s.total_demos_inflicted, 1)}
             </div>
-            <div className="col-span-1 text-right t-text-ink2">
+            <div className={`col-span-1 text-right ${s.avg_bpm > 0 ? STAT_LABEL_CLASS.bpm : 'text-faint'}`}>
               {s.avg_bpm > 0 ? Math.round(s.avg_bpm) : '—'}
             </div>
-            <div className="col-span-1 text-right t-text-muted">
+            <div className={`col-span-1 text-right ${s.avg_boost > 0 ? STAT_LABEL_CLASS.boost : 'text-faint'}`}>
               {s.avg_boost > 0 ? Math.round(s.avg_boost) : '—'}
             </div>
-            <div className={`col-span-1 text-right ${tailColor}`}>
+            <div className={`col-span-1 text-right ${s.avg_supersonic_pct > 0 ? STAT_LABEL_CLASS.speed : 'text-faint'}`}>
               {s.avg_supersonic_pct > 0 ? `${s.avg_supersonic_pct.toFixed(1)}%` : '—'}
             </div>
           </>
@@ -253,7 +258,7 @@ export const SessionForAgainstTable: React.FC<{
       <div className="px-4 py-2 border-b t-border border-line flex flex-wrap items-center justify-between gap-2 t-bg-page">
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="t-font-display font-bold text-xs uppercase tracking-widest t-text-strong">
-            ◆ HISTORICAL PERFORMANCE SPLIT ({dateRangeLabel})
+            ◆ SESSION PERFORMANCE SPLIT ({effectiveScopeLabel})
           </span>
           <span className="text-xs t-font-mono font-bold px-2 py-0.5 cartouche-mono">
             {isAvg ? 'SHOWING PER-GAME AVERAGES' : 'SHOWING CUMULATIVE TOTALS'}
@@ -271,20 +276,20 @@ export const SessionForAgainstTable: React.FC<{
           {/* Shared Column Header */}
           <div className="grid grid-cols-12 px-4 py-1.5 border-b t-border border-line text-sm t-font-display font-bold uppercase tracking-wider t-text-muted">
             <div className="col-span-2">TEAM SPLIT</div>
-            <div className="col-span-1 text-right">GAMES</div>
-            <div className="col-span-1 text-right">{isAvg ? 'PTS/G' : 'PTS'}</div>
-            <div className="col-span-1 text-right">{isAvg ? 'GOALS/G' : 'GOALS'}</div>
-            <div className="col-span-1 text-right">{isAvg ? 'ASSISTS/G' : 'ASSISTS'}</div>
-            <div className="col-span-1 text-right">{isAvg ? 'SAVES/G' : 'SAVES'}</div>
-            <div className="col-span-1 text-right">SHOT %</div>
-            <div className="col-span-1 text-right">{isAvg ? 'DEMOS/G' : 'DEMOS'}</div>
-            <div className="col-span-1 text-right">BPM</div>
-            <div className="col-span-1 text-right">BOOST</div>
-            <div className="col-span-1 text-right">SUPER %</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.games}`}>GAMES</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.score}`}>{isAvg ? 'PTS/G' : 'PTS'}</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.goals}`}>{isAvg ? 'GOALS/G' : 'GOALS'}</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.assists}`}>{isAvg ? 'ASSISTS/G' : 'ASSISTS'}</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.saves}`}>{isAvg ? 'SAVES/G' : 'SAVES'}</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.shotpct}`}>SHOT %</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.demos}`}>{isAvg ? 'DEMOS/G' : 'DEMOS'}</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.bpm}`}>BPM</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.boost}`}>BOOST</div>
+            <div className={`col-span-1 text-right ${STAT_LABEL_CLASS.speed}`}>SUPER %</div>
           </div>
 
-          {renderSplitRow('YOUR STATS (FOR)', 't-text-blue', 't-text-win', 't-text-blue', forStats, true)}
-          {renderSplitRow('OPPONENTS (AGAINST)', 't-text-orange', 't-text-loss', 't-text-orange', againstStats, false)}
+          {renderSplitRow('YOUR STATS (FOR)', 't-text-blue', forStats, true)}
+          {renderSplitRow('OPPONENTS (AGAINST)', 't-text-orange', againstStats, false)}
         </div>
       </div>
     </div>

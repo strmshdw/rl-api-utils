@@ -2,9 +2,11 @@ import React from 'react';
 import {
   ColorMode,
   FontScale,
+  PlatformDisplayMode,
   THEME_STYLES,
   ThemeStyleKey,
 } from '../../context/DashboardContext';
+import { PlatformIcon } from '../common/PlatformBadge';
 import { SectionLabel } from '../common/ui';
 
 export const THEME_OPTIONS: ReadonlyArray<{
@@ -18,37 +20,47 @@ export const THEME_OPTIONS: ReadonlyArray<{
   { id: 'swiss', label: '03 · Deco Monolith: Carved Inkstone', shortName: '03 · INKSTONE', core: true },
   { id: 'arashi', label: '04 · Deco Monolith: Warm Parchment (Light)', shortName: '04 · PARCHMENT', core: true },
   { id: 'classic', label: '05 · Classic Broadcast (Original RL/SYNC)', shortName: '05 · CLASSIC', core: true },
-  { id: 'arena', label: '06 · Glassmorphic Arena (Frosted HUD)', shortName: '06 · ARENA' },
-  { id: 'carbon', label: '07 · Carbon Paddock (Motorsport Telemetry)', shortName: '07 · CARBON' },
-  { id: 'synthwave', label: '08 · Mannfield Night (Neon Violet)', shortName: '08 · MANNFIELD' },
-  { id: 'editorial', label: '09 · Editorial Gazette (Fraunces Serif)', shortName: '09 · GAZETTE' },
-  { id: 'nordic', label: '10 · Nordic Frost (Arctic Slate & Ice)', shortName: '10 · NORDIC' },
-  { id: 'terminal', label: '11 · Retro CRT Phosphor (Monospace)', shortName: '11 · RETRO CRT' },
-  { id: 'solar', label: '12 · Utopia Daylight (Warm Sand & Blue)', shortName: '12 · UTOPIA' },
-  { id: 'industrial', label: '13 · Cobalt Blueprint (CAD Grid)', shortName: '13 · BLUEPRINT' },
-  { id: 'oled', label: '14 · Pure OLED Pitch (True Zero Black)', shortName: '14 · PURE OLED' },
+  { id: 'classicOled', label: '06 · Classic Broadcast OLED (Pure Black)', shortName: '06 · CLASSIC OLED', core: true },
+  { id: 'arena', label: '07 · Glassmorphic Arena (Frosted HUD)', shortName: '07 · ARENA' },
+  { id: 'carbon', label: '08 · Carbon Paddock (Motorsport Telemetry)', shortName: '08 · CARBON' },
+  { id: 'synthwave', label: '09 · Mannfield Night (Neon Violet)', shortName: '09 · MANNFIELD' },
+  { id: 'editorial', label: '10 · Editorial Gazette (Fraunces Serif)', shortName: '10 · GAZETTE' },
+  { id: 'nordic', label: '11 · Nordic Frost (Arctic Slate & Ice)', shortName: '11 · NORDIC' },
+  { id: 'terminal', label: '12 · Retro CRT Phosphor (Monospace)', shortName: '12 · RETRO CRT' },
+  { id: 'solar', label: '13 · Utopia Daylight (Warm Sand & Blue)', shortName: '13 · UTOPIA' },
+  { id: 'industrial', label: '14 · Cobalt Blueprint (CAD Grid)', shortName: '14 · BLUEPRINT' },
+  { id: 'oled', label: '15 · Pure OLED Pitch (True Zero Black)', shortName: '15 · PURE OLED' },
 ];
 
 interface ThemeAppearanceSectionProps {
   themeStyle: ThemeStyleKey;
   colorMode: ColorMode;
   fontScale: FontScale;
+  platformDisplay: PlatformDisplayMode;
   onSetTheme: (style: ThemeStyleKey, mode: ColorMode) => void;
   onSetFontScale: (scale: FontScale) => void;
+  onSetPlatformDisplay: (mode: PlatformDisplayMode) => void;
 }
 
 export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
   themeStyle,
   colorMode,
   fontScale,
+  platformDisplay,
   onSetTheme,
   onSetFontScale,
+  onSetPlatformDisplay,
 }) => {
   const applyThemeSelection = (next: ThemeStyleKey) => {
     if (!THEME_STYLES[next]) return;
     if (next === 'arashi') {
       onSetTheme(next, 'light');
-    } else if (next === 'broadcast' || next === 'tactical' || next === 'swiss') {
+    } else if (
+      next === 'broadcast' ||
+      next === 'tactical' ||
+      next === 'swiss' ||
+      next === 'classicOled'
+    ) {
       onSetTheme(next, 'dark');
     } else {
       onSetTheme(next, colorMode);
@@ -61,7 +73,7 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
     <section className="flex flex-col gap-3.5">
       <SectionLabel>01 · DESIGN SYSTEM &amp; APPEARANCE</SectionLabel>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {coreThemes.map((opt) => {
           const def = THEME_STYLES[opt.id];
           const pal = opt.id === 'arashi' ? def.light : def.dark;
@@ -71,7 +83,7 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
               key={opt.id}
               type="button"
               onClick={() => applyThemeSelection(opt.id)}
-              className={`p-2.5 text-left surface-plaque border transition-colors cursor-pointer flex flex-col justify-between gap-2 t-radius min-w-0 ${
+              className={`p-2.5 text-left t-bg-panel border transition-colors cursor-pointer flex flex-col justify-between gap-2 t-radius min-w-0 ${
                 active
                   ? 'border-blue-ink ring-1 ring-blue-ink t-bg-panel-hover'
                   : 'border-line hover:border-outline'
@@ -95,13 +107,13 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
         })}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
         <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
           <label
             htmlFor="theme-select"
             className="t-font-display font-bold text-xs uppercase tracking-wider text-muted"
           >
-            ALL DESIGN EXPRESSIONS (14)
+            ALL DESIGN EXPRESSIONS ({THEME_OPTIONS.length})
           </label>
           <select
             id="theme-select"
@@ -179,6 +191,57 @@ export const ThemeAppearanceSection: React.FC<ThemeAppearanceSectionProps> = ({
               title="Extra-Large Scale (+15% for 1440p/4K monitors)"
             >
               TEXT: XL (+15%)
+            </button>
+          </div>
+        </div>
+
+        <div className="surface-plaque border border-line p-3 flex flex-col justify-between gap-2 t-radius">
+          <div className="flex items-center justify-between gap-2">
+            <span className="t-font-display font-bold text-xs uppercase tracking-wider text-muted">
+              PLAYER PLATFORM DISPLAY
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-muted" aria-hidden="true">
+              <PlatformIcon code="steam" className="w-3.5 h-3.5" />
+              <PlatformIcon code="epic" className="w-3.5 h-3.5" />
+              <PlatformIcon code="psn" className="w-3.5 h-3.5" />
+              <PlatformIcon code="xbox" className="w-3.5 h-3.5" />
+              <PlatformIcon code="switch" className="w-3.5 h-3.5" />
+            </span>
+          </div>
+          <div
+            className="grid grid-cols-2 t-border t-radius overflow-hidden"
+            role="group"
+            aria-label="Player platform display"
+          >
+            <button
+              type="button"
+              id="btn-platform-icon"
+              data-testid="platform-display-icon"
+              aria-pressed={platformDisplay === 'icon'}
+              onClick={() => onSetPlatformDisplay('icon')}
+              className={`py-1.5 t-font-display font-bold text-xs uppercase tracking-wider cursor-pointer ${
+                platformDisplay === 'icon'
+                  ? 't-bg-blue-ink t-text-on-accent'
+                  : 't-bg-page t-text-muted hover:opacity-80'
+              }`}
+              title="Show compact platform icons (Steam, Epic, PlayStation, Xbox, Switch)"
+            >
+              ICONS
+            </button>
+            <button
+              type="button"
+              id="btn-platform-name"
+              data-testid="platform-display-name"
+              aria-pressed={platformDisplay === 'name'}
+              onClick={() => onSetPlatformDisplay('name')}
+              className={`py-1.5 t-font-display font-bold text-xs uppercase tracking-wider border-l t-border cursor-pointer ${
+                platformDisplay === 'name'
+                  ? 't-bg-blue-ink t-text-on-accent'
+                  : 't-bg-page t-text-muted hover:opacity-80'
+              }`}
+              title="Show platform text names (STEAM, EPIC, PLAYSTATION, XBOX, SWITCH)"
+            >
+              NAME
             </button>
           </div>
         </div>

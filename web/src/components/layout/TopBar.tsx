@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { DashboardTab, SessionResponse } from '../../types/api';
 import {
   deltaInk,
@@ -11,9 +11,9 @@ import {
   playlistLabels,
 } from '../../utils/broadcast';
 import { isDemoMode } from '../../utils/sampleData';
+import { useBallchasingSync } from '../../hooks/useBallchasingSync';
 import { StatusDot } from '../common/ui';
 import { useDashboard } from '../../context/DashboardContext';
-import { ContextFilterBar } from './ContextFilterBar';
 import { ReplayLimitBanner } from './ReplayLimitBanner';
 import { SettingsPanel } from './SettingsPanel';
 
@@ -25,11 +25,12 @@ interface TopBarProps {
   inMatch: boolean;
   session: SessionResponse | null;
   scopedSession?: SessionResponse | null;
+  /** Mode key ('11', '13', '10', etc.) governing the session status pill & count badge. */
+  statusMode?: string;
   /** Playlist whose MMR is shown on the right (current match, active mode, else most played). */
   playlistId?: number;
-  /** Shown while a live match is on screen; opens the column customiser. */
-  onOpenColumns?: () => void;
   onRefreshSession?: () => Promise<void> | void;
+  onOpenColumns?: () => void;
 }
 
 const TABS: ReadonlyArray<{ id: DashboardTab; label: string }> = [
@@ -48,26 +49,84 @@ export const TopBar: React.FC<TopBarProps> = ({
   inMatch,
   session,
   scopedSession,
+  statusMode,
   playlistId,
-  onOpenColumns,
   onRefreshSession,
+  onOpenColumns,
 }) => {
   const {
-    activePlaylist,
-    dateRange,
-    customFrom,
-    setCustomFrom,
-    customTo,
-    setCustomTo,
-    showCustomCalendar,
+    areaFilters,
+    replayLimitPreview,
+    setReplayLimitPreview,
     isDevBuild,
-    appVersion,
     previewMode,
   } = useDashboard();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [clearedPendingSnapshot, setClearedPendingSnapshot] = useState<{
+    sessionId: string | undefined;
+    count: number;
+    preview: string;
+  } | null>(null);
 
-  const activeParam = normalizeActiveModeKey(activePlaylist);
+  useEffect(() => {
+    if (
+      clearedPendingSnapshot !== null &&
+      (session?.session_id !== clearedPendingSnapshot.sessionId ||
+        (session?.pending_count ?? 0) !== clearedPendingSnapshot.count ||
+        replayLimitPreview !== clearedPendingSnapshot.preview)
+    ) {
+      setClearedPendingSnapshot(null);
+    }
+  }, [clearedPendingSnapshot, session?.session_id, session?.pending_count, replayLimitPreview]);
+
+  const markPendingClearedOptimistically = () => {
+    setClearedPendingSnapshot({
+      sessionId: session?.session_id,
+      count: session?.pending_count ?? 0,
+      preview: replayLimitPreview,
+    });
+  };
+
+  const { isSyncing, triggerSync } = useBallchasingSync({
+    onSyncComplete: () => {
+      markPendingClearedOptimistically();
+      void onRefreshSession?.();
+    },
+  });
+
+  const maxHostedReplays = session?.max_hosted_replays || 20;
+  const triggerThreshold =
+    session?.trigger_threshold && session.trigger_threshold > 0 ? session.trigger_threshold : 15;
+  const isOptimisticallyCleared =
+    clearedPendingSnapshot !== null &&
+    session?.session_id === clearedPendingSnapshot.sessionId &&
+    (session?.pending_count ?? 0) === clearedPendingSnapshot.count &&
+    replayLimitPreview === clearedPendingSnapshot.preview;
+
+  const activePreview = isDevBuild ? replayLimitPreview : 'auto';
+  let pendingCount = isOptimisticallyCleared ? 0 : (session?.pending_count ?? 0);
+  if (!isOptimisticallyCleared) {
+    if (activePreview === 'warn') pendingCount = Math.max(triggerThreshold, 16);
+    else if (activePreview === 'error') pendingCount = maxHostedReplays;
+    else if (activePreview === 'ok') pendingCount = 0;
+  }
+  const isOverSyncWarning = pendingCount >= triggerThreshold;
+  const isOverSyncLimit = pendingCount >= maxHostedReplays;
+
+  const handleHeaderSyncNow = async () => {
+    if (isSyncing) return;
+    await triggerSync({ includeReplaySync: true });
+    markPendingClearedOptimistically();
+    if (isDevBuild && replayLimitPreview !== 'auto') {
+      setReplayLimitPreview('ok');
+    }
+    await onRefreshSession?.();
+  };
+
+  const fallbackMode =
+    activeTab === 'live' ? areaFilters.live.playlist : areaFilters.session.playlist;
+  const activeParam = normalizeActiveModeKey(statusMode ?? fallbackMode);
   const effectiveScopedSession = scopedSession ?? filterSessionByPlaylist(session, activeParam);
   const matchCount =
     effectiveScopedSession?.matches?.length ?? effectiveScopedSession?.total_matches ?? 0;
@@ -104,12 +163,11 @@ export const TopBar: React.FC<TopBarProps> = ({
       {/* REPLAY HISTORY LIMIT WARNING / ERROR BANNER */}
       <ReplayLimitBanner session={session} onRefreshSession={onRefreshSession} />
 
-      {/* 2-TIER STICKY ARCHITECTURAL MASTHEAD (Tier 1 Nav + Tier 2 Context Filter Toolbar) */}
+      {/* SLIM SINGLE-TIER STICKY MASTHEAD (Per-Area Filters Live Locally Inside Each View) */}
       <header
         data-testid="app-header"
         className="sticky top-0 z-30 t-bg-page bg-page border-b t-border border-line font-display"
       >
-        {/* Tier 1: Primary Navigation, Session/Playlist MMR Readout, Overlay & Settings */}
         <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-2 flex flex-wrap 2xl:flex-nowrap items-center justify-between gap-x-3 gap-y-1.5">
           {/* Left: Brand Mark + Single-Row Primary Navigation Tabs */}
           <div className="flex items-center gap-3 sm:gap-4 min-w-0 max-w-full">
@@ -122,10 +180,6 @@ export const TopBar: React.FC<TopBarProps> = ({
               </span>
               <span className="t-font-display font-bold text-xl tracking-widest t-text-strong whitespace-nowrap">
                 RL<span className="t-text-orange text-orange-ink">/</span>SYNC
-              </span>
-              <span className="text-[11px] t-font-mono cartouche-mono px-1.5 py-0.5 hidden md:inline whitespace-nowrap">
-                v{appVersion}
-                {isDevBuild ? '-dev' : ''}
               </span>
             </div>
 
@@ -163,10 +217,18 @@ export const TopBar: React.FC<TopBarProps> = ({
             </nav>
           </div>
 
-          {/* Right: Active-Mode Session Status Pill, Overlay Link & Settings Button */}
+          {/* Right: Active-Mode Session Status Pill + Sync Now, Overlay Link & Settings Button */}
           <div className="flex flex-wrap items-center gap-1.5 text-xs shrink-0 ml-auto">
             {(session || playlist) && (
-              <div className="hidden sm:flex items-center gap-2.5 px-2.5 py-1 surface-plaque t-border font-semibold text-xs tracking-wider text-muted whitespace-nowrap">
+              <div
+                data-testid="header-session-pill"
+                data-sync-warning={isOverSyncWarning ? 'true' : 'false'}
+                className={`hidden sm:flex items-center gap-2 px-2.5 py-1 surface-plaque font-semibold text-xs tracking-wider text-muted whitespace-nowrap t-radius transition-colors ${
+                  isOverSyncWarning
+                    ? 'border-2 border-[#ff3b4e] shadow-[0_0_0_1px_rgba(255,59,78,0.35)]'
+                    : 't-border'
+                }`}
+              >
                 {playlist &&
                 (Number.isInteger(numericActiveId) && numericActiveId > 0
                   ? true
@@ -198,6 +260,34 @@ export const TopBar: React.FC<TopBarProps> = ({
                     </span>
                   </span>
                 )}
+
+                {isOverSyncWarning && (
+                  <span
+                    data-testid="header-sync-warning"
+                    role="status"
+                    className="px-1.5 py-0.5 bg-[#c81624] text-white font-extrabold text-[11px] t-font-mono uppercase tracking-wider leading-none"
+                    title={`${pendingCount} of ${maxHostedReplays} undownloaded Rocket League replays (warning threshold: ${triggerThreshold})`}
+                  >
+                    {isOverSyncLimit
+                      ? `⚠ SYNC CAP ${pendingCount}/${maxHostedReplays}`
+                      : `⚠ SYNC WARN ${pendingCount}/${maxHostedReplays}`}
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  data-testid="header-sync-now-btn"
+                  disabled={isSyncing}
+                  onClick={handleHeaderSyncNow}
+                  className={`px-2 py-0.5 t-font-display font-extrabold text-[11px] uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-60 t-radius ${
+                    isOverSyncWarning
+                      ? 'bg-[#c81624] text-white border border-[#ff6b78] hover:bg-[#a8111d]'
+                      : 't-bg-page border border-outline t-text-strong hover:border-blue-ink hover:t-text-blue'
+                  }`}
+                  title="Download pending Rocket League replays and sync with Ballchasing now"
+                >
+                  {isSyncing ? '⟳ SYNCING…' : '⟳ SYNC NOW'}
+                </button>
               </div>
             )}
 
@@ -243,49 +333,6 @@ export const TopBar: React.FC<TopBarProps> = ({
             </button>
           </div>
         </div>
-
-        {/* Tier 2: Unified Mode Switcher + Contextual Analytics Toolbar */}
-        <ContextFilterBar
-          activeTab={activeTab}
-          inMatch={inMatch}
-          onOpenColumns={onOpenColumns}
-        />
-
-        {/* On-Demand Custom Date Range Picker Strip (Only visible when Custom Range is active) */}
-        {(showCustomCalendar || dateRange === 'custom') && (
-          <div
-            id="custom-calendar-bar"
-            data-testid="custom-calendar-bar"
-            className="border-t border-line surface-plaque"
-          >
-            <div className="max-w-[1680px] mx-auto px-4 sm:px-6 py-1.5 flex flex-wrap items-center gap-2 text-xs">
-              <span className="t-font-display font-bold uppercase tracking-wider t-text-muted">
-                CUSTOM DATE FILTER:
-              </span>
-              <label htmlFor="custom-date-from" className="text-xs t-font-display font-bold t-text-muted uppercase">
-                FROM
-              </label>
-              <input
-                id="custom-date-from"
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="t-bg-page t-text-strong t-border px-2 py-0.5 text-xs t-font-mono t-radius focus:outline-none cursor-pointer"
-              />
-              <span className="t-text-muted font-bold">→</span>
-              <label htmlFor="custom-date-to" className="text-xs t-font-display font-bold t-text-muted uppercase">
-                TO
-              </label>
-              <input
-                id="custom-date-to"
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="t-bg-page t-text-strong t-border px-2 py-0.5 text-xs t-font-mono t-radius focus:outline-none cursor-pointer"
-              />
-            </div>
-          </div>
-        )}
       </header>
 
       {/* DEDICATED SETTINGS PANEL MODAL */}
@@ -296,6 +343,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         onSwitchToLive={() => {
           if (activeTab !== 'live') onTabChange('live');
         }}
+        onOpenColumns={onOpenColumns}
       />
     </>
   );

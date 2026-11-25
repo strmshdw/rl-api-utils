@@ -32,7 +32,10 @@ type Syncer struct {
 	rateLimiter            *ballchasing.RateLimiter
 	fetcherManagesRate     bool
 	maxConcurrentDownloads int
+	timeLoc                *time.Location
+	nowFunc                func() time.Time
 	cycleMu                sync.Mutex
+	orgMu                  sync.Mutex
 }
 
 // New creates a new Syncer instance with functional options.
@@ -62,6 +65,8 @@ func New(store StateStore, provider MatchHistoryProvider, downloader ReplayDownl
 		maxRetries:             storage.DefaultMaxRetries,
 		rateInterval:           ballchasing.DefaultRateInterval,
 		maxConcurrentDownloads: 1,
+		timeLoc:                time.Local,
+		nowFunc:                time.Now,
 	}
 
 	for _, opt := range opts {

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/dank/rl-api-utils/internal/ballchasing"
 	"github.com/dank/rl-api-utils/internal/storage"
 )
 
@@ -241,7 +243,26 @@ func (s *Syncer) downloadOneMatch(ctx context.Context, rec *storage.MatchRecord,
 		return err, nil
 	}
 
-	if err := s.store.MarkDownloaded(ctx, rec.MatchGUID, localPath); err != nil {
+	parsedInfo, syncErr := s.syncDownloadedReplayStatsWithMeta(ctx, rec.MatchGUID, localPath)
+	if syncErr != nil {
+		if isContextCanceled(ctx, syncErr) {
+			return nil, contextCancelErr(ctx, syncErr)
+		}
+		s.logger.Warn("failed to sync replay stats for downloaded replay",
+			slog.String("guid", rec.MatchGUID), slog.String("local_path", localPath), slog.Any("error", syncErr))
+	}
+
+	finalPath, orgErr := s.organizeDownloadedReplay(ctx, rec, localPath, parsedInfo)
+	if orgErr != nil {
+		if isContextCanceled(ctx, orgErr) {
+			return nil, contextCancelErr(ctx, orgErr)
+		}
+		s.logger.Warn("failed to organize/rename downloaded replay; retaining original path",
+			slog.String("guid", rec.MatchGUID), slog.String("local_path", localPath), slog.Any("error", orgErr))
+		finalPath = localPath
+	}
+
+	if err := s.store.MarkDownloaded(ctx, rec.MatchGUID, finalPath); err != nil {
 		if isContextCanceled(ctx, err) {
 			return nil, contextCancelErr(ctx, err)
 		}
@@ -251,15 +272,7 @@ func (s *Syncer) downloadOneMatch(ctx context.Context, rec *storage.MatchRecord,
 	}
 
 	withOptMutex(statsMu, func() { stats.DownloadedCount++ })
-	s.logger.Info("downloaded replay successfully", slog.String("guid", rec.MatchGUID), slog.String("local_path", localPath))
-
-	if syncErr := s.SyncDownloadedReplayStats(ctx, rec.MatchGUID, localPath); syncErr != nil {
-		if isContextCanceled(ctx, syncErr) {
-			return nil, contextCancelErr(ctx, syncErr)
-		}
-		s.logger.Warn("failed to sync replay stats for downloaded replay",
-			slog.String("guid", rec.MatchGUID), slog.String("local_path", localPath), slog.Any("error", syncErr))
-	}
+	s.logger.Info("downloaded replay successfully", slog.String("guid", rec.MatchGUID), slog.String("local_path", finalPath))
 
 	return nil, nil
 }
@@ -297,6 +310,39 @@ func (s *Syncer) uploadOneMatch(ctx context.Context, rec *storage.MatchRecord, s
 		if latest.UploadStatus == storage.UploadUploaded || latest.UploadStatus == storage.UploadDuplicate {
 			return nil, nil
 		}
+		rec = latest
+		if strings.TrimSpace(latest.LocalFilePath) != "" {
+			localPath = strings.TrimSpace(latest.LocalFilePath)
+		}
+	}
+
+	// If localPath was renamed on disk by a concurrent worker, resolve the canonical ReplayName sibling path.
+	if strings.TrimSpace(rec.ReplayName) != "" {
+		if _, statErr := os.Stat(localPath); os.IsNotExist(statErr) {
+			for _, cand := range []string{
+				filepath.Join(filepath.Dir(localPath), rec.ReplayName),
+				filepath.Join(s.replayDir, rec.ReplayName),
+			} {
+				if _, cErr := os.Stat(cand); cErr == nil {
+					localPath = cand
+					break
+				}
+			}
+		}
+	}
+
+	// Lazily organize/rename any previously downloaded pending replay file that lacks a canonical name.
+	if strings.TrimSpace(rec.ReplayName) == "" {
+		if _, statErr := os.Stat(localPath); statErr == nil {
+			if renamedPath, orgErr := s.organizeDownloadedReplay(ctx, rec, localPath, nil); orgErr == nil && renamedPath != "" {
+				localPath = renamedPath
+				if refreshed, getErr := s.store.GetMatch(ctx, rec.MatchGUID); getErr == nil && refreshed != nil {
+					rec = refreshed
+				}
+			} else if isContextCanceled(ctx, orgErr) {
+				return nil, contextCancelErr(ctx, orgErr)
+			}
+		}
 	}
 
 	if err := s.store.MarkUploading(ctx, rec.MatchGUID); err != nil {
@@ -307,7 +353,36 @@ func (s *Syncer) uploadOneMatch(ctx context.Context, rec *storage.MatchRecord, s
 		return err, nil
 	}
 
-	res, err := s.uploader.UploadReplay(ctx, rec.MatchGUID, localPath)
+	groupInfo, grpErr := s.resolveOrCreateUploadGroup(ctx, rec)
+	if grpErr != nil {
+		if isContextCanceled(ctx, grpErr) {
+			return nil, contextCancelErr(ctx, grpErr)
+		}
+		_ = s.store.MarkUploadFailed(ctx, rec.MatchGUID, grpErr.Error())
+		stats.FailedCount++
+		s.logger.Error("failed to resolve/create ballchasing group for replay upload",
+			slog.String("guid", rec.MatchGUID), slog.String("error", grpErr.Error()))
+		return grpErr, nil
+	}
+
+	uploadFilename := strings.TrimSpace(rec.ReplayName)
+	groupID := ""
+	if groupInfo != nil {
+		groupID = groupInfo.GroupID
+	}
+
+	var (
+		res *UploadResult
+		err error
+	)
+	if optsUploader, ok := s.uploader.(ReplayUploaderWithOptions); ok && (uploadFilename != "" || groupID != "") {
+		res, err = optsUploader.UploadReplayWithOptions(ctx, rec.MatchGUID, localPath, ballchasing.UploadOptions{
+			Filename: uploadFilename,
+			GroupID:  groupID,
+		})
+	} else {
+		res, err = s.uploader.UploadReplay(ctx, rec.MatchGUID, localPath)
+	}
 	if err != nil {
 		if isContextCanceled(ctx, err) {
 			return nil, contextCancelErr(ctx, err)
@@ -316,6 +391,17 @@ func (s *Syncer) uploadOneMatch(ctx context.Context, rec *storage.MatchRecord, s
 		stats.FailedCount++
 		s.logger.Error("failed to upload replay", slog.String("guid", rec.MatchGUID), slog.String("error", err.Error()))
 		return err, nil
+	}
+
+	// On 409 Conflict (duplicate), Ballchasing ignores the upload ?group= parameter on the existing replay;
+	// issue a best-effort PATCH to assign the existing replay to the resolved group and canonical title.
+	if res != nil && res.IsDuplicate && strings.TrimSpace(res.ID) != "" {
+		s.patchUploadedReplayMetadata(ctx, rec.MatchGUID, res.ID, uploadFilename, groupID)
+	}
+	if groupInfo != nil {
+		if orgStore, ok := s.store.(ReplayOrganizationStore); ok {
+			_ = orgStore.UpdateMatchGrouping(ctx, rec.MatchGUID, groupInfo.SessionID, groupInfo.GameMode, groupInfo.GroupID)
+		}
 	}
 
 	if res != nil && res.IsDuplicate {

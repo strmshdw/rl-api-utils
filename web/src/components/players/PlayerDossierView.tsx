@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { CurrentMatchResponse, HistoricalMatchRecord } from '../../types/api';
 import { COLUMN_HEADER, PANEL_LABEL, SectionLabel } from '../common/ui';
+import { AreaFilterBar } from '../common/AreaFilterBar';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { Sparkline } from '../common/Sparkline';
 import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
 import { PlayerNotesModal } from './PlayerNotesModal';
@@ -10,18 +12,12 @@ import {
   formatAgo,
   formatMmr,
   formatShortDate,
-  modeKeyFromPlaylistId,
-  normalizeActiveModeKey,
-  platformLabel,
-  playlistFilterToParam,
   playlistLabels,
   shortRank,
 } from '../../utils/broadcast';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 import {
   CompactRoleSplitCard,
-  CORE_PLAYLIST_SCOPE_BUTTONS,
-  EXTRA_PLAYLIST_SCOPE_OPTIONS,
-  ProfilePlaylistScope,
   RecordWithPct,
 } from './PlayerRoleSplitCard';
 import { PlayerMatchHistoryList } from './PlayerMatchHistoryList';
@@ -58,12 +54,9 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
   onSelectPlayer = () => {},
 }) => {
   const {
-    statMode,
-    setActivePlaylist,
     pinnedPlayerIds,
     togglePinPlayer,
   } = useDashboard();
-  const isAvg = statMode === 'avg';
 
   const internalDossier = usePlayerDossierData(playerId, playerName, localPlayerIds, {
     enabled: !externalDossier,
@@ -71,6 +64,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
     liveMatch,
   });
   const d = externalDossier ?? internalDossier;
+  const isAvg = d.statMode === 'avg';
 
   const [showAllRanks, setShowAllRanks] = useState(false);
   const [telemetryMatch, setTelemetryMatch] = useState<HistoricalMatchRecord | null>(null);
@@ -87,28 +81,21 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
     d.isLoadingMatches ||
     hasSecondaryFilter;
 
-  const handleSelectScope = (scope: ProfilePlaylistScope) => {
-    d.setStatPlaylist(scope);
-    if (!isDialog) {
-      setActivePlaylist(normalizeActiveModeKey(playlistFilterToParam(scope) || scope));
-    }
-  };
-
   const handleSelectPlaylistRow = (playlistId: number) => {
     if (playlistId <= 0) return;
     d.setPlaylistById(playlistId);
-    if (!isDialog) {
-      setActivePlaylist(modeKeyFromPlaylistId(playlistId));
-    }
   };
 
   const handleClearFilters = () => {
     d.clearFilters();
   };
 
-  const isExtraScopeSelected = EXTRA_PLAYLIST_SCOPE_OPTIONS.some(
-    (opt) => opt.scope === d.statPlaylist,
-  );
+  const activeModeKey = d.activePlaylistParam || '11';
+  const showScopeReset =
+    activeModeKey !== '11' ||
+    d.dateRange !== 'all' ||
+    d.showCustomCalendar ||
+    d.statMode !== 'avg';
 
   const activePlaylistLabel =
     d.activePlaylistId > 0
@@ -133,98 +120,57 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
         </div>
       ) : !d.profile && isDialog ? null : (
         <div className="flex flex-col font-display pb-4 gap-4">
-          {/* Scope Controls: MMR Trend Sparkline, Pin Toggle, Concrete Playlist Scope (.prof-pl-btn) */}
-          <div
-            className={`${padX} ${
-              isDialog ? 'pt-4' : ''
-            } flex flex-wrap items-center justify-between gap-2.5 text-sm font-extrabold`}
-          >
-            <div className="flex items-center gap-2">
-              {d.mmrSparkline.length > 0 && (
-                <div
-                  data-testid="dossier-mmr-sparkline"
-                  className="flex items-center gap-2 px-2.5 py-1 t-bg-panel bg-panel t-border border border-line t-radius"
-                >
-                  <span className="text-xs text-muted uppercase">MMR TREND</span>
-                  <Sparkline data={d.mmrSparkline} width={88} height={20} />
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2.5">
-              <button
-                type="button"
-                data-testid="pin-player-btn"
-                onClick={() => togglePinPlayer(d.id)}
-                className={`px-3.5 py-1.5 t-border border border-outline uppercase t-radius cursor-pointer ${
-                  isPinned
-                    ? 't-bg-ink bg-ink text-page'
-                    : 't-bg-panel bg-panel t-text-blue text-blue-ink'
-                }`}
-              >
-                {isPinned ? '★ PINNED' : '☆ PIN PLAYER'}
-              </button>
-
-              <div className="flex flex-wrap items-center t-border border border-outline t-bg-panel bg-panel t-radius overflow-hidden">
-                {CORE_PLAYLIST_SCOPE_BUTTONS.map((b) => {
-                  const isActive = d.statPlaylist === b.scope && d.activePlaylistId === (b.scope === '2v2' ? 11 : b.scope === '3v3' ? 13 : 10);
-                  return (
-                    <button
-                      key={b.scope}
-                      type="button"
-                      onClick={() => handleSelectScope(b.scope)}
-                      className={`prof-pl-btn px-3 py-1.5 uppercase cursor-pointer ${
-                        isActive
-                          ? 't-bg-ink bg-ink text-page'
-                          : 'text-muted hover:text-ink'
-                      }`}
-                    >
-                      {b.label}
-                    </button>
-                  );
-                })}
-
-                <select
-                  aria-label="Select extra mode scope"
-                  value={isExtraScopeSelected ? d.statPlaylist : ''}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      handleSelectScope(e.target.value as ProfilePlaylistScope);
-                    }
-                  }}
-                  className={`px-2.5 py-1.5 border-l border-r t-border border-line uppercase outline-none cursor-pointer ${
-                    isExtraScopeSelected
-                      ? 't-bg-ink bg-ink text-page'
-                      : 't-bg-panel bg-panel text-muted hover:text-ink'
-                  }`}
-                >
-                  <option value="" disabled>
-                    EXTRA ▾
-                  </option>
-                  {EXTRA_PLAYLIST_SCOPE_OPTIONS.map((opt) => (
-                    <option
-                      key={opt.scope}
-                      value={opt.scope}
-                      className="t-bg-panel bg-panel text-ink"
-                    >
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-
+          {/* Independent Dossier Scope Controls: Mode, Timeframe, AVG/TOTALS, MMR Trend & Pin */}
+          <div className={`${padX} ${isDialog ? 'pt-4' : ''}`}>
+            <AreaFilterBar
+              area="dossier"
+              ariaLabel="Player profile scope filters"
+              playlist={activeModeKey}
+              onPlaylistChange={(mode) => d.setPlaylistByModeKey(mode)}
+              dateRange={d.dateRange}
+              onDateRangeChange={d.setDateRange}
+              customFrom={d.customFrom}
+              onCustomFromChange={d.setCustomFrom}
+              customTo={d.customTo}
+              onCustomToChange={d.setCustomTo}
+              showCustomCalendar={d.showCustomCalendar}
+              onToggleCustomCalendar={() => {
+                if (!d.showCustomCalendar && d.dateRange !== 'custom') {
+                  d.setDateRange('custom');
+                } else {
+                  d.setShowCustomCalendar((prev) => !prev);
+                }
+              }}
+              statMode={d.statMode}
+              onStatModeChange={d.setStatMode}
+              showReset={showScopeReset}
+              onReset={d.resetScopeFilters}
+              leadingSlot={
+                d.mmrSparkline.length > 0 ? (
+                  <div
+                    data-testid="dossier-mmr-sparkline"
+                    className="flex items-center gap-2 px-2 py-0.5 t-bg-page bg-page t-border border border-line t-radius"
+                  >
+                    <span className="text-[11px] text-muted font-bold uppercase">MMR TREND</span>
+                    <Sparkline data={d.mmrSparkline} width={76} height={18} />
+                  </div>
+                ) : undefined
+              }
+              trailingSlot={
                 <button
                   type="button"
-                  onClick={() => handleSelectScope('casual')}
-                  className={`prof-pl-btn px-3 py-1.5 uppercase cursor-pointer ${
-                    d.statPlaylist === 'casual'
+                  data-testid="pin-player-btn"
+                  onClick={() => togglePinPlayer(d.id)}
+                  className={`toolbar-btn px-2.5 py-1 t-border border border-outline font-bold text-xs uppercase tracking-wider t-radius cursor-pointer whitespace-nowrap ${
+                    isPinned
                       ? 't-bg-ink bg-ink text-page'
-                      : 'text-muted hover:text-ink'
+                      : 't-bg-page bg-page t-text-blue text-blue-ink hover:border-ink'
                   }`}
                 >
-                  CASUAL
+                  {isPinned ? '★ PINNED' : '☆ PIN PLAYER'}
                 </button>
-              </div>
-            </div>
+              }
+            />
           </div>
 
           {/* Interactive WITH YOU & AGAINST YOU H2H Role Split Cards */}
@@ -435,9 +381,9 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                     style={{ gridTemplateColumns: PLAYLIST_GRID }}
                   >
                     <span>PLAYLIST</span>
-                    <span>WITH YOU</span>
-                    <span>VS YOU</span>
-                    <span className="text-right">GAMES</span>
+                    <span className={STAT_LABEL_CLASS.goals}>WITH YOU</span>
+                    <span className={STAT_LABEL_CLASS.demos}>VS YOU</span>
+                    <span className={`text-right ${STAT_LABEL_CLASS.games}`}>GAMES</span>
                     <span className="text-right">LAST MET</span>
                   </div>
                   {d.playlistBreakdown.map((m) => {
@@ -473,7 +419,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
                           wins={m.wins_as_opponent}
                           losses={m.losses_as_opponent}
                         />
-                        <span className="text-right font-bold text-xl t-font-mono">
+                        <span className={`text-right font-bold text-xl t-font-mono ${STAT_LABEL_CLASS.games}`}>
                           {m.total_matches}
                         </span>
                         <span className="text-right font-semibold text-sm tracking-t8 text-muted">
@@ -525,8 +471,8 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
               } border-t border-line font-semibold text-sm tracking-t12 text-muted-2 mt-2`}
             >
               <span>FIRST SEEN {formatShortDate(d.profile.first_seen_at)}</span>
-              <span>
-                {platformLabel(d.platform)} · LAST SEEN {formatAgo(d.profile.last_seen_at)}
+              <span className="inline-flex items-center gap-1.5">
+                <PlatformBadge platform={d.platform} size="sm" /> · LAST SEEN {formatAgo(d.profile.last_seen_at)}
               </span>
             </div>
           )}

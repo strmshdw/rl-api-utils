@@ -364,17 +364,37 @@ func TestTier5_Stress_RetryBudgetExhaustion_GracefulSurfacing(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
+			if r.Method == http.MethodPost && (r.URL.Path == "/groups" || r.URL.Path == "/api/groups") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"id":       "stress-group-1",
+					"location": "https://ballchasing.com/api/groups/stress-group-1",
+				})
+				return
+			}
+			if r.Method == http.MethodPatch && (strings.HasPrefix(r.URL.Path, "/replays/") || strings.HasPrefix(r.URL.Path, "/api/replays/")) {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 
-			// Parse multipart form to extract filename
+			// Parse multipart form to extract filename & embedded test GUID
 			_ = r.ParseMultipartForm(10 << 20)
 			file, header, fErr := r.FormFile("file")
 			if fErr != nil {
 				http.Error(w, "missing file", http.StatusBadRequest)
 				return
 			}
+			payloadBytes, _ := io.ReadAll(file)
 			_ = file.Close()
 
 			guid := strings.TrimSuffix(header.Filename, ".replay")
+			for _, candidate := range []string{"match-healthy", "match-rate-limited", "match-server-error", "match-duplicate"} {
+				if strings.Contains(string(payloadBytes), candidate) {
+					guid = candidate
+					break
+				}
+			}
 
 			switch guid {
 			case "match-healthy":

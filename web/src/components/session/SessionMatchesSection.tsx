@@ -12,6 +12,7 @@ import {
   zeroInk,
 } from '../../utils/broadcast';
 import { formatDuration } from '../../utils/formatters';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 import {
   COLUMN_HEADER,
   EmptyLine,
@@ -29,7 +30,7 @@ const OUTCOME_OPTIONS = [
   ['defeat', 'LOSSES'],
 ] as const;
 
-const ROW_GRID = '72px 120px minmax(0,1fr) repeat(4,64px) 90px 90px';
+const ROW_GRID = '72px 120px minmax(0,1fr) 58px 58px 58px 94px 92px 92px';
 
 const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void }> = ({
   match,
@@ -41,9 +42,9 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
   const local = match.players?.find((p) => p.is_local);
   const mvp = findMvp(match.players || [], match.winner_team, match.blue_score, match.orange_score);
   const isLocalMvp = !!local && mvp?.player_id === local.player_id;
-  const stat = (v: number | undefined) =>
+  const stat = (v: number | undefined, colorClass: string) =>
     local?.stats ? (
-      <span className={zeroInk(v || 0)}>{v || 0}</span>
+      <span className={zeroInk(v || 0, colorClass)}>{v || 0}</span>
     ) : (
       <span className="text-faint">—</span>
     );
@@ -60,7 +61,7 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
           onOpen();
         }
       }}
-      className="grid items-center h-[72px] bg-panel hover:bg-panel-hover cursor-pointer transition-colors duration-120 outline-none focus-visible:bg-panel-hover t-border border border-line"
+      className="grid gap-x-2 items-center h-[72px] bg-panel hover:bg-panel-hover cursor-pointer transition-colors duration-120 outline-none focus-visible:bg-panel-hover t-border border border-line"
       style={{ gridTemplateColumns: ROW_GRID }}
     >
       <ResultSlab outcome={outcomeOf(match.result)} className="text-[22px]" />
@@ -84,17 +85,17 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
         </div>
       </div>
       <span className="text-right font-bold text-[26px] t-font-mono">
-        {stat(local?.stats?.goals)}
+        {stat(local?.stats?.goals, STAT_LABEL_CLASS.goals)}
       </span>
       <span className="text-right font-bold text-[26px] t-font-mono">
-        {stat(local?.stats?.assists)}
+        {stat(local?.stats?.assists, STAT_LABEL_CLASS.assists)}
       </span>
       <span className="text-right font-bold text-[26px] t-font-mono">
-        {stat(local?.stats?.saves)}
+        {stat(local?.stats?.saves, STAT_LABEL_CLASS.saves)}
       </span>
       <span className="text-right font-bold text-[26px] t-font-mono">
         {local?.stats ? (
-          <span className="text-ink">{local.stats.score}</span>
+          <span className={STAT_LABEL_CLASS.score}>{local.stats.score}</span>
         ) : (
           <span className="text-faint">—</span>
         )}
@@ -164,19 +165,19 @@ export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
         tabIndex={0}
         className="overflow-x-auto"
       >
-        <div className="min-w-[780px]">
+        <div className="min-w-[820px]">
           <div
-            className={`grid pb-2 ${COLUMN_HEADER}`}
+            className={`grid gap-x-2 pb-2 ${COLUMN_HEADER}`}
             style={{ gridTemplateColumns: ROW_GRID }}
           >
             <span />
-            <span>SCORE</span>
+            <span className={STAT_LABEL_CLASS.score}>SCORE</span>
             <span>MATCH</span>
-            <span className="text-right">G</span>
-            <span className="text-right">A</span>
-            <span className="text-right">SV</span>
-            <span className="text-right">PTS</span>
-            <span className="text-right">MMR</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>G</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>A</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>SV</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.score}`}>PTS</span>
+            <span className={`text-right ${STAT_LABEL_CLASS.mmr}`}>MMR</span>
             <span className="text-right pr-[22px]">WHEN</span>
           </div>
           <div className="flex flex-col gap-1.5">

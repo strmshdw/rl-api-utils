@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { usePlayerSearch } from './usePlayerSearch';
-import { DashboardProvider, useDashboard } from '../context/DashboardContext';
+import { DashboardProvider, useAreaFilters } from '../context/DashboardContext';
 import { cleanup, flush, mount } from '../test/dom';
 
 interface RecordedFetch {
@@ -93,11 +93,14 @@ describe('usePlayerSearch connection & pagination lifecycle', () => {
       } as Response);
     }) as unknown as typeof fetch;
 
-    let setActivePlaylistFn!: (pl: string) => void;
+    let setPlayersPlaylistFn!: (pl: string) => void;
+    let setLivePlaylistFn!: (pl: string) => void;
     let latestApi!: ReturnType<typeof usePlayerSearch>;
     function PlaylistHarness() {
-      const { setActivePlaylist } = useDashboard();
-      setActivePlaylistFn = setActivePlaylist;
+      const playersFilters = useAreaFilters('players');
+      const liveFilters = useAreaFilters('live');
+      setPlayersPlaylistFn = playersFilters.setPlaylist;
+      setLivePlaylistFn = liveFilters.setPlaylist;
       const api = usePlayerSearch({ limit: 24 });
       latestApi = api;
       return <div data-testid="pl">{api.playlist}</div>;
@@ -115,12 +118,18 @@ describe('usePlayerSearch connection & pagination lifecycle', () => {
     expect(requests[0].url).toContain('playlist=11');
     expect(requests[0].signal.aborted).toBe(false);
 
-    // Move to page 2, then switch activePlaylist to '3v3' -> single fetch at offset=0&playlist=13
+    // Changing LIVE area playlist must NOT mutate or refetch the PLAYERS area
+    await act(async () => setLivePlaylistFn('10'));
+    await flush();
+    expect(requests).toHaveLength(1);
+    expect(latestApi.playlist).toBe('11');
+
+    // Move to page 2, then switch players playlist to '3v3' -> single fetch at offset=0&playlist=13
     await act(async () => latestApi.setPage(2));
     await flush();
     expect(requests).toHaveLength(2);
 
-    await act(async () => setActivePlaylistFn('3v3'));
+    await act(async () => setPlayersPlaylistFn('3v3'));
     await flush();
     expect(latestApi.page).toBe(1);
     expect(requests).toHaveLength(3);
@@ -129,7 +138,7 @@ describe('usePlayerSearch connection & pagination lifecycle', () => {
     expect(requests[2].signal.aborted).toBe(false);
 
     // Passing legacy 'all' normalizes to concrete '11' (Ranked 2v2) instead of cross-mode unfiltered query
-    await act(async () => setActivePlaylistFn('all'));
+    await act(async () => setPlayersPlaylistFn('all'));
     await flush();
     expect(requests).toHaveLength(4);
     expect(requests[3].url).toContain('playlist=11');

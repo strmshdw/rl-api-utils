@@ -3,6 +3,7 @@ import { STORAGE_KEYS, safeStorageGet, safeStorageSet } from './storage';
 import {
   ColorMode,
   FontScale,
+  PlatformDisplayMode,
   THEME_STYLES,
   ThemeStyleKey,
   applyFontScaleToDOM,
@@ -15,6 +16,8 @@ export interface ThemeContextValue {
   setTheme: (style: ThemeStyleKey, mode: ColorMode) => void;
   fontScale: FontScale;
   setFontScale: (scale: FontScale) => void;
+  platformDisplay: PlatformDisplayMode;
+  setPlatformDisplay: (mode: PlatformDisplayMode) => void;
 }
 
 const DEFAULT_THEME_CONTEXT: ThemeContextValue = {
@@ -23,6 +26,8 @@ const DEFAULT_THEME_CONTEXT: ThemeContextValue = {
   setTheme: () => {},
   fontScale: 'normal',
   setFontScale: () => {},
+  platformDisplay: 'icon',
+  setPlatformDisplay: () => {},
 };
 
 const ThemeContext = createContext<ThemeContextValue>(DEFAULT_THEME_CONTEXT);
@@ -41,6 +46,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [fontScale, setFontScaleState] = useState<FontScale>(() => {
     const saved = safeStorageGet(STORAGE_KEYS.fontScale);
     return saved === 'xl' ? 'xl' : 'normal';
+  });
+
+  const [platformDisplay, setPlatformDisplayState] = useState<PlatformDisplayMode>(() => {
+    const saved = safeStorageGet(STORAGE_KEYS.platformDisplay);
+    return saved === 'name' ? 'name' : 'icon';
   });
 
   useEffect(() => {
@@ -68,6 +78,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     applyFontScaleToDOM(validScale);
   }, []);
 
+  const setPlatformDisplay = useCallback((mode: PlatformDisplayMode) => {
+    const validMode: PlatformDisplayMode = mode === 'name' ? 'name' : 'icon';
+    setPlatformDisplayState(validMode);
+    safeStorageSet(STORAGE_KEYS.platformDisplay, validMode);
+  }, []);
+
   const value = useMemo<ThemeContextValue>(
     () => ({
       themeStyle,
@@ -75,8 +91,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setTheme,
       fontScale,
       setFontScale,
+      platformDisplay,
+      setPlatformDisplay,
     }),
-    [themeStyle, colorMode, setTheme, fontScale, setFontScale],
+    [themeStyle, colorMode, setTheme, fontScale, setFontScale, platformDisplay, setPlatformDisplay],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

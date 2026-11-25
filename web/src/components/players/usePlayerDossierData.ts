@@ -28,7 +28,14 @@ import {
   isDemoMode,
   SAMPLE_CURRENT_MATCH,
 } from '../../utils/sampleData';
-import { useDashboard } from '../../context/DashboardContext';
+import {
+  DateRangePreset,
+  StatMode,
+  buildDateRangeQueryParams,
+  useAreaFilters,
+  useDashboard,
+} from '../../context/DashboardContext';
+import { DEFAULT_CUSTOM_FROM, DEFAULT_CUSTOM_TO } from '../../context/dateRange';
 import { parseRanks, sumMatchups } from './playerData';
 import {
   PLAYLIST_SCOPE_IDS,
@@ -78,6 +85,18 @@ export interface PlayerDossierDataState {
   activePlaylistId: number;
   activePlaylistParam: string;
   setPlaylistById: (playlistId: number) => void;
+  setPlaylistByModeKey: (modeKey: string) => void;
+  dateRange: DateRangePreset;
+  setDateRange: (range: DateRangePreset) => void;
+  customFrom: string;
+  setCustomFrom: (date: string) => void;
+  customTo: string;
+  setCustomTo: (date: string) => void;
+  showCustomCalendar: boolean;
+  setShowCustomCalendar: React.Dispatch<React.SetStateAction<boolean>>;
+  statMode: StatMode;
+  setStatMode: (mode: StatMode) => void;
+  resetScopeFilters: () => void;
   roleFilter: ProfileRoleFilter;
   setRoleFilter: React.Dispatch<React.SetStateAction<ProfileRoleFilter>>;
   resultFilter: ProfileResultFilter;
@@ -166,7 +185,8 @@ export function usePlayerDossierData(
   options: { enabled?: boolean; pageSize?: number; liveMatch?: CurrentMatchResponse | null } = {},
 ): PlayerDossierDataState {
   const { enabled = true, pageSize = 20 } = options;
-  const { activePlaylist, dateRangeQueryParams, stampingConfig } = useDashboard();
+  const { stampingConfig } = useDashboard();
+  const playersArea = useAreaFilters('players');
 
   const [profileEntry, setProfileEntry] = useState<{
     reqPlayerId: string;
@@ -176,52 +196,73 @@ export function usePlayerDossierData(
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const initialScope = parseDashboardPlaylist(activePlaylist);
+  const initialScope = parseDashboardPlaylist(playersArea.playlist);
   const [scopeTracker, setScopeTracker] = useState<{
     playerId: string | null;
-    activePlaylist: string;
     statPlaylist: ProfilePlaylistScope;
     customPlaylistId: number | null;
   }>({
     playerId,
-    activePlaylist,
     statPlaylist: initialScope.scope,
     customPlaylistId: initialScope.customId,
   });
+
+  const [dateRange, setDateRangeState] = useState<DateRangePreset>('all');
+  const [customFrom, setCustomFromState] = useState<string>(DEFAULT_CUSTOM_FROM);
+  const [customTo, setCustomToState] = useState<string>(DEFAULT_CUSTOM_TO);
+  const [showCustomCalendar, setShowCustomCalendar] = useState<boolean>(false);
+  const [statMode, setStatMode] = useState<StatMode>('avg');
 
   const [roleFilter, setRoleFilter] = useState<ProfileRoleFilter>('all');
   const [resultFilter, setResultFilter] = useState<ProfileResultFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState<ProfileSortOption>('date-desc');
 
-  if (
-    scopeTracker.playerId !== playerId ||
-    scopeTracker.activePlaylist !== activePlaylist
-  ) {
-    const synced = parseDashboardPlaylist(activePlaylist);
-    const playerChanged = scopeTracker.playerId !== playerId;
+  if (scopeTracker.playerId !== playerId) {
+    const synced = parseDashboardPlaylist(playersArea.playlist);
     setScopeTracker({
       playerId,
-      activePlaylist,
       statPlaylist: synced.scope,
       customPlaylistId: synced.customId,
     });
-    if (playerChanged) {
-      setRoleFilter('all');
-      setResultFilter('all');
-      setSearchQuery('');
-      setSortOption('date-desc');
-    }
+    setRoleFilter('all');
+    setResultFilter('all');
+    setSearchQuery('');
+    setSortOption('date-desc');
   }
 
   const statPlaylist =
-    scopeTracker.playerId === playerId && scopeTracker.activePlaylist === activePlaylist
-      ? scopeTracker.statPlaylist
-      : initialScope.scope;
+    scopeTracker.playerId === playerId ? scopeTracker.statPlaylist : initialScope.scope;
   const customPlaylistId =
-    scopeTracker.playerId === playerId && scopeTracker.activePlaylist === activePlaylist
-      ? scopeTracker.customPlaylistId
-      : initialScope.customId;
+    scopeTracker.playerId === playerId ? scopeTracker.customPlaylistId : initialScope.customId;
+
+  const setDateRange = useCallback((range: DateRangePreset) => {
+    setDateRangeState(range);
+    setShowCustomCalendar(range === 'custom');
+  }, []);
+
+  const setCustomFrom = useCallback(
+    (date: string) => {
+      if (date && customTo && date > customTo) setCustomToState(date);
+      setCustomFromState(date);
+      setDateRangeState('custom');
+    },
+    [customTo],
+  );
+
+  const setCustomTo = useCallback(
+    (date: string) => {
+      if (customFrom && date && customFrom > date) setCustomFromState(date);
+      setCustomToState(date);
+      setDateRangeState('custom');
+    },
+    [customFrom],
+  );
+
+  const dateRangeQueryParams = useMemo(
+    () => buildDateRangeQueryParams(dateRange, customFrom, customTo),
+    [dateRange, customFrom, customTo],
+  );
 
   const activePlaylistId =
     customPlaylistId !== null ? customPlaylistId : PLAYLIST_SCOPE_IDS[statPlaylist];
@@ -269,7 +310,6 @@ export function usePlayerDossierData(
   const handleSetStatPlaylist = (next: ProfilePlaylistScope) => {
     setScopeTracker({
       playerId,
-      activePlaylist,
       statPlaylist: next,
       customPlaylistId: null,
     });
@@ -282,13 +322,28 @@ export function usePlayerDossierData(
     if (modeKey === 'private' || (mapped === '2v2' && playlistId !== 11)) {
       setScopeTracker({
         playerId,
-        activePlaylist,
         statPlaylist: '2v2',
         customPlaylistId: playlistId,
       });
       return;
     }
     handleSetStatPlaylist(mapped);
+  };
+
+  const setPlaylistByModeKey = (modeKey: string) => {
+    const parsed = parseDashboardPlaylist(modeKey);
+    setScopeTracker({
+      playerId,
+      statPlaylist: parsed.scope,
+      customPlaylistId: parsed.customId,
+    });
+  };
+
+  const resetScopeFilters = () => {
+    setScopeTracker({ playerId, statPlaylist: '2v2', customPlaylistId: null });
+    setDateRangeState('all');
+    setShowCustomCalendar(false);
+    setStatMode('avg');
   };
 
   const profileScopeKey = [
@@ -641,6 +696,18 @@ export function usePlayerDossierData(
     activePlaylistId,
     activePlaylistParam,
     setPlaylistById,
+    setPlaylistByModeKey,
+    dateRange,
+    setDateRange,
+    customFrom,
+    setCustomFrom,
+    customTo,
+    setCustomTo,
+    showCustomCalendar,
+    setShowCustomCalendar,
+    statMode,
+    setStatMode,
+    resetScopeFilters,
     roleFilter,
     setRoleFilter,
     resultFilter,

@@ -135,12 +135,17 @@ describe('HistoryView', () => {
     const calls = mockFetch([record({ match_guid: 'a', playlist: 11, upload_status: 'UPLOADED', ballchasing_url: 'https://ballchasing.com/replay/a' })]);
     const { container } = await mount(<HistoryView />);
     expect(calls.some((c) => c.startsWith('GET /api/matches?limit=20&offset=0&playlist=11'))).toBe(true);
-    const playlistFilterGroup = container.querySelector('[aria-label="Filter by playlist"]')!;
+    const playlistFilterGroup = container.querySelector('[aria-label="Game mode filter"]')!;
     const labels = Array.from(playlistFilterGroup.querySelectorAll('button')).map((b) => b.textContent?.trim());
     expect(labels).not.toContain('ALL MODES');
-    expect(labels).not.toContain('EXTRA');
     expect(labels).toContain('2V2');
-    expect(labels).toContain('HOOPS');
+    expect(labels).toContain('3V3');
+    expect(labels).toContain('1V1');
+    const extraBtn = playlistFilterGroup.querySelector<HTMLButtonElement>('[data-mode-btn="extra"]')!;
+    await act(async () => extraBtn.click());
+    const extraMenu = playlistFilterGroup.querySelector('[role="menu"]')!;
+    expect(extraMenu.textContent).toContain('HOOPS');
+    expect(extraMenu.textContent).not.toContain('ALL EXTRA');
     expect(container.querySelector('[role="region"][aria-label="Match history"]')).not.toBeNull();
     const [row] = rows(container);
     expect(row.textContent).toContain('RANKED DOUBLES');
@@ -155,7 +160,9 @@ describe('HistoryView', () => {
     expect(calls.some((c) => c.includes('playlist=13'))).toBe(true);
     await clickText(container, '1V1');
     expect(calls.some((c) => c.includes('playlist=10'))).toBe(true);
-    await clickText(container, 'HOOPS');
+    const extraBtn = container.querySelector<HTMLButtonElement>('[data-mode-btn="extra"]')!;
+    await act(async () => extraBtn.click());
+    await clickText(container.querySelector('[role="menu"]')!, 'HOOPS');
     expect(calls.some((c) => c.includes('playlist=27'))).toBe(true);
   });
 
@@ -213,9 +220,9 @@ describe('HistoryView', () => {
     await clickText(container, 'LOSSES');
     expect(rows(container).map((r) => r.dataset.guid)).toEqual(['local-dl']);
 
-    // Expanding row preserves short_rank division ("GC I · DIV II") when rank_name is tier-only
+    // Expanding row preserves short_rank division ("GC1-D2") when rank_name is tier-only
     await act(async () => (rows(container)[0].firstElementChild as HTMLElement).click());
-    expect(container.querySelector('[data-testid="history-box-score"]')!.textContent).toContain('GC I · DIV II');
+    expect(container.querySelector('[data-testid="history-box-score"]')!.textContent).toContain('GC1-D2');
   });
 
   it('expands one row at a time, and only rows with parsed stats', async () => {

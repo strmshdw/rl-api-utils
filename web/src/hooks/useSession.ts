@@ -51,7 +51,7 @@ function mergeBasePlaylistMmr(
 }
 
 export function useSession(playlistFilter?: string): UseSessionResult {
-  const { dateRangeQueryParams, previewMode, isDevBuild } = useDashboard();
+  const { previewMode, isDevBuild } = useDashboard();
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [sessionScopeKey, setSessionScopeKey] = useState<string>('');
   const [unfilteredSession, setUnfilteredSession] = useState<SessionResponse | null>(null);
@@ -81,8 +81,6 @@ export function useSession(playlistFilter?: string): UseSessionResult {
     const seq = ++fetchSeqRef.current;
     try {
       const baseParams = new URLSearchParams();
-      if (dateRangeQueryParams.from) baseParams.set('from', dateRangeQueryParams.from);
-      if (dateRangeQueryParams.to) baseParams.set('to', dateRangeQueryParams.to);
       const baseQs = baseParams.toString();
       const baseUrl = baseQs ? `/api/session?${baseQs}` : '/api/session';
 
@@ -151,8 +149,6 @@ export function useSession(playlistFilter?: string): UseSessionResult {
     }
   }, [
     fetchPastSessions,
-    dateRangeQueryParams.from,
-    dateRangeQueryParams.to,
     playlistParam,
     playlistFilter,
     demoFallbackEnabled,

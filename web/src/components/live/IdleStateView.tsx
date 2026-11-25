@@ -11,6 +11,7 @@ import {
   formatMmr,
   formatSigned,
   localTeamOf,
+  modeKeyFromPlaylistId,
   normalizeActiveModeKey,
   outcomeOf,
   playlistLabels,
@@ -31,6 +32,7 @@ interface IdleStateViewProps {
   session: SessionResponse | null;
   scopedSession?: SessionResponse | null;
   activePlaylist?: string;
+  onSelectPlaylist?: (playlist: string) => void;
   connection: ConnectionStatus;
   onShowSession: () => void;
   onContinueSession?: (sessionId?: string) => void;
@@ -143,7 +145,6 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
   onOpenMatchTelemetry,
 }) => {
   const {
-    activePlaylist: contextActivePlaylist,
     setLiveModeOverride,
     isDevBuild,
     previewMode,
@@ -151,10 +152,18 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
   const { byPlaylist: mmrByPlaylist } = useMMRHistory();
   const [showAllModes, setShowAllModes] = useState(false);
 
-  const resolvedPlaylist = useMemo(
-    () => normalizeActiveModeKey(activePlaylist ?? contextActivePlaylist),
-    [activePlaylist, contextActivePlaylist],
-  );
+  const resolvedPlaylist = useMemo(() => {
+    if (activePlaylist) return normalizeActiveModeKey(activePlaylist);
+    if (session?.active_match?.playlist_id) {
+      return modeKeyFromPlaylistId(session.active_match.playlist_id);
+    }
+    const latestMatch = chronological(session?.matches).pop();
+    if (latestMatch?.playlist_id) return modeKeyFromPlaylistId(latestMatch.playlist_id);
+    if (session?.most_played_playlist?.id) {
+      return modeKeyFromPlaylistId(session.most_played_playlist.id);
+    }
+    return '11';
+  }, [activePlaylist, session]);
 
   const effectiveScopedSession = useMemo(() => {
     if (!session) return null;
@@ -296,7 +305,12 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4">
             <div className="flex flex-col gap-2 min-w-0">
               <SectionLabel>THIS SESSION · {formatElapsed(session.started_at)}</SectionLabel>
-              <SessionKpiStrip kpis={summary.kpis} variant="idle" session={effectiveScopedSession} />
+              <SessionKpiStrip
+                kpis={summary.kpis}
+                variant="idle"
+                session={effectiveScopedSession}
+                scopeLabel="CURRENT SESSION"
+              />
             </div>
             {playlists.length > 0 && (
               <div className="flex flex-col gap-2 min-w-0">
@@ -305,7 +319,11 @@ export const IdleStateView: React.FC<IdleStateViewProps> = ({
               </div>
             )}
           </div>
-          <SessionForAgainstTable session={effectiveScopedSession} />
+          <SessionForAgainstTable
+            session={effectiveScopedSession}
+            statMode="avg"
+            scopeLabel="CURRENT SESSION"
+          />
 
           {/* Top-3 Core Playlist Rank Cards (3v3, 2v2, 1v1) + ALL 8 MODES Drawer */}
           <div data-testid="idle-core-ranks" className="surface-plaque border border-outline p-4 flex flex-col gap-3">

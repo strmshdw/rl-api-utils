@@ -5,11 +5,12 @@ import {
   emptyRoleStats,
   formatMmr,
   hasSyncedRoleTelemetry,
-  platformLabel,
   shortRank,
 } from '../../utils/broadcast';
 import { useDashboard } from '../../context/DashboardContext';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { isSoloDuelPlaylist, rankForPlaylist, Spotlight } from './playerData';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 export interface PinnedSlot {
   idx: number;
@@ -124,15 +125,18 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
           >
             {player.player_name}
           </div>
-          <div className="text-sm font-extrabold text-muted">
+          <div className="flex flex-wrap items-center gap-1.5 text-sm font-extrabold text-muted">
             <span className="t-text-blue text-blue-ink t-font-mono">
               {formatMmr(rank?.mmr)} MMR
-            </span>{' '}
-            ·{' '}
-            {rank?.rank_name
-              ? shortRank(rank.rank_name, rank.division, rank.short_rank, rank.tier)
-              : 'UNRANKED'}{' '}
-            · {platformLabel(player.platform || player.player_id)}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {rank?.rank_name
+                ? shortRank(rank.rank_name, rank.division, rank.short_rank, rank.tier)
+                : 'UNRANKED'}
+            </span>
+            <span aria-hidden="true">·</span>
+            <PlatformBadge platform={player.platform || player.player_id} size="sm" />
           </div>
         </div>
         <div className="text-right text-sm font-extrabold t-font-mono shrink-0">
@@ -149,17 +153,17 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
       <div className="t-bg-page bg-page border border-line text-sm font-extrabold t-font-mono">
         <div className="grid grid-cols-[64px_42px_repeat(5,1fr)] items-center px-2.5 py-1 text-muted font-sans border-b border-line">
           <span>ROLE</span>
-          <span className="text-right">GMS</span>
-          <span className="text-right">PTS</span>
-          <span className="text-right">G</span>
-          <span className="text-right">A</span>
-          <span className="text-right">SV</span>
-          <span className="text-right">DEM</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.games}`}>GMS</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.score}`}>PTS</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>G</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>A</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>SV</span>
+          <span className={`text-right ${STAT_LABEL_CLASS.demos}`}>DEM</span>
         </div>
         <div className="grid grid-cols-[64px_42px_repeat(5,1fr)] items-center px-2.5 py-1.5">
           <span className="text-win font-sans">WITH</span>
-          <span className="text-right text-muted">{wGames}G</span>
-          <span className="text-right text-ink-strong">
+          <span className={`text-right ${STAT_LABEL_CLASS.games}`}>{wGames}G</span>
+          <span className={`text-right ${wSynced ? STAT_LABEL_CLASS.score : 'text-faint'}`}>
             {wSynced
               ? (isAvg
                   ? Math.round(wStats.avg_score)
@@ -167,28 +171,28 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
                 ).toLocaleString()
               : '—'}
           </span>
-          <span className="text-right text-ink-strong">
+          <span className={`text-right ${wSynced ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>
             {wSynced
               ? isAvg
                 ? wStats.avg_goals.toFixed(1)
                 : wStats.goals || wStats.total_goals || 0
               : '—'}
           </span>
-          <span className="text-right text-ink-2">
+          <span className={`text-right ${wSynced ? STAT_LABEL_CLASS.assists : 'text-faint'}`}>
             {wSynced
               ? isAvg
                 ? wStats.avg_assists.toFixed(1)
                 : wStats.assists || wStats.total_assists || 0
               : '—'}
           </span>
-          <span className="text-right text-ink-2">
+          <span className={`text-right ${wSynced ? STAT_LABEL_CLASS.saves : 'text-faint'}`}>
             {wSynced
               ? isAvg
                 ? wStats.avg_saves.toFixed(1)
                 : wStats.saves || wStats.total_saves || 0
               : '—'}
           </span>
-          <span className="text-right text-orange-ink">
+          <span className={`text-right ${wSynced ? STAT_LABEL_CLASS.demos : 'text-faint'}`}>
             {wSynced
               ? isAvg
                 ? (wStats.avg_demos || wStats.avg_demos_inflicted || 0).toFixed(1)
@@ -198,8 +202,8 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
         </div>
         <div className="grid grid-cols-[64px_42px_repeat(5,1fr)] items-center px-2.5 py-1.5 border-t border-line">
           <span className="text-orange-ink font-sans">AGAINST</span>
-          <span className="text-right text-muted">{aGames}G</span>
-          <span className="text-right text-ink-strong">
+          <span className={`text-right ${STAT_LABEL_CLASS.games}`}>{aGames}G</span>
+          <span className={`text-right ${aSynced ? STAT_LABEL_CLASS.score : 'text-faint'}`}>
             {aSynced
               ? (isAvg
                   ? Math.round(aStats.avg_score)
@@ -207,28 +211,28 @@ export const PinnedPlayerCard: React.FC<PinnedPlayerCardProps> = ({
                 ).toLocaleString()
               : '—'}
           </span>
-          <span className="text-right text-ink-strong">
+          <span className={`text-right ${aSynced ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>
             {aSynced
               ? isAvg
                 ? aStats.avg_goals.toFixed(1)
                 : aStats.goals || aStats.total_goals || 0
               : '—'}
           </span>
-          <span className="text-right text-ink-2">
+          <span className={`text-right ${aSynced ? STAT_LABEL_CLASS.assists : 'text-faint'}`}>
             {aSynced
               ? isAvg
                 ? aStats.avg_assists.toFixed(1)
                 : aStats.assists || aStats.total_assists || 0
               : '—'}
           </span>
-          <span className="text-right text-ink-2">
+          <span className={`text-right ${aSynced ? STAT_LABEL_CLASS.saves : 'text-faint'}`}>
             {aSynced
               ? isAvg
                 ? aStats.avg_saves.toFixed(1)
                 : aStats.saves || aStats.total_saves || 0
               : '—'}
           </span>
-          <span className="text-right text-orange-ink">
+          <span className={`text-right ${aSynced ? STAT_LABEL_CLASS.demos : 'text-faint'}`}>
             {aSynced
               ? isAvg
                 ? (aStats.avg_demos || aStats.avg_demos_inflicted || 0).toFixed(1)

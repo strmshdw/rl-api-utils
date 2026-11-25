@@ -1,7 +1,10 @@
 import React from 'react';
+import { useDashboard } from '../../context/DashboardContext';
 import { ReplayPlayerStats } from '../../types/api';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { MvpChip } from '../common/ui';
 import { formatMmr, shortRank } from '../../utils/broadcast';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 interface MatchCoreOverviewTabProps {
   players: ReplayPlayerStats[];
@@ -20,7 +23,7 @@ export const TelemetryPendingBanner: React.FC = () => (
 );
 
 const CORE_GRID_COLS =
-  'grid-cols-[minmax(176px,1.7fr)_68px_minmax(112px,1.1fr)_repeat(8,minmax(56px,1fr))]';
+  'grid-cols-[minmax(170px,1.6fr)_68px_minmax(88px,0.85fr)_minmax(84px,1.25fr)_repeat(7,minmax(62px,1fr))] gap-x-2.5';
 
 export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
   players,
@@ -31,6 +34,7 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
   displayPlayerName,
   onPlayerClick,
 }) => {
+  const { platformDisplay } = useDashboard();
   const isInspected = (p: ReplayPlayerStats) => {
     if (!inspectedPlayerId) return false;
     const lower = inspectedPlayerId.toLowerCase();
@@ -83,6 +87,14 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
               }`}
             >
               <div className="flex items-center gap-2 min-w-0 font-sans font-extrabold">
+                {platformDisplay === 'icon' && (p.platform || p.is_bot) && (
+                  <PlatformBadge
+                    platform={p.platform}
+                    isBot={p.is_bot}
+                    size="sm"
+                    className="text-muted shrink-0"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => onPlayerClick?.(pKey, p.name)}
@@ -92,20 +104,28 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
                 >
                   {displayPlayerName(p)}
                 </button>
+                {platformDisplay === 'name' && (p.platform || p.is_bot) && (
+                  <PlatformBadge
+                    platform={p.platform}
+                    isBot={p.is_bot}
+                    size="sm"
+                    className="text-muted text-[11px] t-font-mono tracking-wider shrink-0"
+                  />
+                )}
                 {isMvp && <MvpChip />}
               </div>
-              <span className="text-right t-text-blue text-blue-ink">{formatMmr(p.mmr)}</span>
-              <span title={rankLabel} className="pl-2 text-sm t-text-ink2 text-ink-2 truncate">
+              <span className={`text-right ${p.mmr ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>{formatMmr(p.mmr)}</span>
+              <span title={rankLabel} className={`pl-2 text-sm truncate ${rankLabel && rankLabel !== '—' ? STAT_LABEL_CLASS.rank : 'text-faint'}`}>
                 {rankLabel}
               </span>
-              <span className="text-right t-text-strong text-ink-strong">{p.score || 0}</span>
-              <span className="text-right t-text-strong text-ink-strong">{p.goals || 0}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{p.assists || 0}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{p.saves || 0}</span>
-              <span className="text-right t-text-ink2 text-ink-2">{p.shots || 0}</span>
-              <span className="text-right t-text-win text-win">{pShPct}%</span>
-              <span className="text-right t-text-orange text-orange-ink">{demosInflicted}</span>
-              <span className="text-right t-text-muted text-muted">{demosTaken}</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.score}`}>{p.score || 0}</span>
+              <span className={`text-right ${p.goals ? STAT_LABEL_CLASS.goals : 'text-faint'}`}>{p.goals || 0}</span>
+              <span className={`text-right ${p.assists ? STAT_LABEL_CLASS.assists : 'text-faint'}`}>{p.assists || 0}</span>
+              <span className={`text-right ${p.saves ? STAT_LABEL_CLASS.saves : 'text-faint'}`}>{p.saves || 0}</span>
+              <span className={`text-right ${p.shots ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>{p.shots || 0}</span>
+              <span className={`text-right ${pShPct > 0 ? STAT_LABEL_CLASS.shotpct : 'text-faint'}`}>{pShPct}%</span>
+              <span className={`text-right ${demosInflicted ? STAT_LABEL_CLASS.demos : 'text-faint'}`}>{demosInflicted}</span>
+              <span className={`text-right ${demosTaken ? STAT_LABEL_CLASS.demod : 'text-faint'}`}>{demosTaken}</span>
             </div>
           );
         })}
@@ -121,14 +141,14 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
           </span>
           <span className="text-right t-text-muted text-muted">—</span>
           <span className="pl-2 t-text-muted text-muted">—</span>
-          <span title="Team total" className="text-right t-text-strong text-ink-strong">{totPts}</span>
-          <span title="Team total" className="text-right t-text-strong text-ink-strong">{totG}</span>
-          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totA}</span>
-          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totSv}</span>
-          <span title="Team total" className="text-right t-text-ink2 text-ink-2">{totSh}</span>
-          <span title="Team average" className="text-right t-text-win text-win">{shPct}%</span>
-          <span title="Team total" className="text-right t-text-orange text-orange-ink">{totD}</span>
-          <span title="Team total" className="text-right t-text-muted text-muted">{totTk}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.score}`}>{totPts}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.goals}`}>{totG}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.assists}`}>{totA}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.saves}`}>{totSv}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.shots}`}>{totSh}</span>
+          <span title="Team average" className={`text-right ${STAT_LABEL_CLASS.shotpct}`}>{shPct}%</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.demos}`}>{totD}</span>
+          <span title="Team total" className={`text-right ${STAT_LABEL_CLASS.demod}`}>{totTk}</span>
         </div>
       </div>
     );
@@ -147,21 +167,21 @@ export const MatchCoreOverviewTab: React.FC<MatchCoreOverviewTabProps> = ({
           tabIndex={0}
           className="t-bg-panel bg-panel t-border border border-line p-4 overflow-x-auto"
         >
-          <div className="min-w-[880px]">
+          <div className="min-w-[920px]">
             <div
               className={`grid ${CORE_GRID_COLS} text-sm font-extrabold t-text-muted text-muted pb-2 border-b t-border border-line uppercase`}
             >
               <span>PLAYER</span>
-              <span className="text-right">MMR</span>
-              <span className="pl-2">RANK · DIV</span>
-              <span className="text-right">SCORE</span>
-              <span className="text-right">GOALS</span>
-              <span className="text-right">ASSISTS</span>
-              <span className="text-right">SAVES</span>
-              <span className="text-right">SHOTS</span>
-              <span className="text-right">SHOT %</span>
-              <span className="text-right">DEMOS</span>
-              <span className="text-right">DEMO&apos;D</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.mmr}`}>MMR</span>
+              <span className={`pl-2 ${STAT_LABEL_CLASS.rank}`}>RANK · DIV</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.score}`}>SCORE</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>GOALS</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>ASSISTS</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>SAVES</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.shots}`}>SHOTS</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.shotpct}`}>SHOT %</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.demos}`}>DEMOS</span>
+              <span className={`text-right ${STAT_LABEL_CLASS.demod}`}>DEMO&apos;D</span>
             </div>
             {renderCoreTeamSection(bluePlayers, 'BLUE TEAM', true)}
             {renderCoreTeamSection(orangePlayers, 'ORANGE TEAM', false)}

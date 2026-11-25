@@ -68,6 +68,33 @@ type UploadResult struct {
 	IsDuplicate bool   `json:"is_duplicate"`
 }
 
+// UploadOptions configures per-upload overrides for multipart filename and Ballchasing group assignment.
+type UploadOptions struct {
+	Filename string // Optional replay filename sent in multipart form-data (e.g. "2026_11_21_001_2v2_WIN.replay")
+	GroupID  string // Optional Ballchasing group ID overriding ClientConfig.Group
+}
+
+// CreateGroupRequest defines the JSON payload for POST /api/groups.
+type CreateGroupRequest struct {
+	Name                 string `json:"name"`
+	Parent               string `json:"parent,omitempty"`
+	PlayerIdentification string `json:"player_identification"`
+	TeamIdentification   string `json:"team_identification"`
+}
+
+// CreateGroupResponse represents the created group response from POST /api/groups.
+type CreateGroupResponse struct {
+	ID       string `json:"id"`
+	Location string `json:"location"`
+}
+
+// PatchReplayRequest defines the JSON payload for PATCH /api/replays/{id}.
+type PatchReplayRequest struct {
+	Title      string `json:"title,omitempty"`
+	Group      string `json:"group,omitempty"`
+	Visibility string `json:"visibility,omitempty"`
+}
+
 // PingResponse represents the account metadata returned by GET / (ping).
 type PingResponse struct {
 	Chaser  bool   `json:"chaser"`

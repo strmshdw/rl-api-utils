@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
-import { DashboardProvider, useDashboard } from '../../context/DashboardContext';
+import { DashboardProvider } from '../../context/DashboardContext';
 import type { CurrentMatchResponse, SessionMatchDetail } from '../../types/api';
 import { emptyRoleStats } from '../../utils/roleStats';
 import { cleanup, flush, mount } from '../../test/dom';
@@ -171,18 +170,8 @@ describe('PlayerDossierView', () => {
       }),
     );
 
-    const DateSetter: React.FC = () => {
-      const { setDateRange } = useDashboard();
-      return (
-        <button type="button" data-testid="set-7d" onClick={() => setDateRange('7d')}>
-          SET 7D
-        </button>
-      );
-    };
-
     const { container } = await mount(
       <DashboardProvider>
-        <DateSetter />
         <PlayerDossierView playerId="Steam|TestPilot|0" playerName="TestPilot" />
       </DashboardProvider>,
     );
@@ -196,7 +185,9 @@ describe('PlayerDossierView', () => {
     expect(container.querySelector('[data-testid="profile-match-row"]')?.textContent).toContain('WIN');
 
     // No ALL or blended EXTRA buttons exist; initial mount is already scoped to 2v2 (playlist=11)
-    const scopeBtns = Array.from(container.querySelectorAll<HTMLButtonElement>('.prof-pl-btn')).map((b) =>
+    const dossierBar = container.querySelector('[data-testid="dossier-filter-bar"]')!;
+    expect(dossierBar).not.toBeNull();
+    const scopeBtns = Array.from(dossierBar.querySelectorAll<HTMLButtonElement>('.prof-pl-btn')).map((b) =>
       b.textContent?.trim(),
     );
     expect(scopeBtns).not.toContain('ALL');
@@ -204,14 +195,20 @@ describe('PlayerDossierView', () => {
     expect(container.querySelector('[data-testid="blended-modes-note"]')).toBeNull();
     expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0?playlist=11'))).toBe(true);
 
-    // Scope playlist to individual Extra mode (27 Hoops) and date range to 7D
-    const extraSelect = container.querySelector<HTMLSelectElement>('select[aria-label="Select extra mode scope"]')!;
-    expect(extraSelect).not.toBeNull();
+    // Scope playlist to individual Extra mode (27 Hoops) and date range to 7D locally inside the dossier filter bar
+    const extraBtn = dossierBar.querySelector<HTMLButtonElement>('[data-mode-btn="extra"]')!;
+    expect(extraBtn).not.toBeNull();
+    await act(async () => extraBtn.click());
+    const hoopsItem = Array.from(dossierBar.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find(
+      (b) => b.textContent?.includes('HOOPS'),
+    )!;
+    await act(async () => hoopsItem.click());
+
+    const dateSelect = dossierBar.querySelector<HTMLSelectElement>('[data-testid="dossier-date-range"]')!;
     await act(async () => {
-      extraSelect.value = '27';
-      extraSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      dateSelect.value = '7d';
+      dateSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="set-7d"]')!.click());
     await flush(10);
 
     expect(urls.some((u) => u.includes('/api/players/Steam%7CTestPilot%7C0?') && u.includes('playlist=27') && u.includes('from='))).toBe(true);
@@ -226,7 +223,7 @@ describe('PlayerDossierView', () => {
     await act(async () => clearBtn.click());
     await flush(10);
     expect(container.querySelector('[data-testid="active-filter-summary"]')).toBeNull();
-    expect(extraSelect.value).toBe('27');
+    expect(extraBtn.textContent).toContain('HOOPS');
   });
 
   it('computes live threat badges from liveMatch prop in non-demo mode and hides mock badges when null', async () => {

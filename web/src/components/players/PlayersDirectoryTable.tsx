@@ -9,13 +9,14 @@ import {
   formatPct,
   formatRecord,
   hasSyncedRoleTelemetry,
-  platformLabel,
   recordInk,
   shortRank,
 } from '../../utils/broadcast';
 import { useDashboard } from '../../context/DashboardContext';
+import { PlatformBadge } from '../common/PlatformBadge';
 import { COLUMN_HEADER, RecordCells } from '../common/ui';
 import { rankForPlaylist } from './playerData';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 interface DirectoryRowProps {
   player: PlayerSummary;
@@ -103,15 +104,15 @@ const DirectoryRow: React.FC<DirectoryRowProps> = ({
         </div>
       </th>
 
-      <td className="px-3 py-2.5 align-middle font-extrabold text-sm tracking-t10 text-muted whitespace-nowrap">
-        {platformLabel(player.platform || player.player_id)}
+      <td className="px-3 py-2.5 align-middle font-extrabold text-sm tracking-t10 text-ink-2 whitespace-nowrap">
+        <PlatformBadge platform={player.platform || player.player_id} size="md" />
       </td>
 
-      <td className="px-3 py-2.5 align-middle text-right font-extrabold text-base t-text-blue text-blue-ink t-font-mono whitespace-nowrap">
+      <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${rank?.mmr ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>
         {formatMmr(rank?.mmr)}
       </td>
 
-      <td className="px-3 py-2.5 align-middle font-extrabold text-sm text-ink-2 uppercase whitespace-nowrap t-font-mono">
+      <td className={`px-3 py-2.5 align-middle font-extrabold text-sm uppercase whitespace-nowrap t-font-mono ${rank ? STAT_LABEL_CLASS.rank : 'text-faint'}`}>
         {rank ? shortRank(rank.rank_name || 'UNRANKED', rank.division, rank.short_rank, rank.tier) : '—'}
         {rank?.rank_name && <span className="sr-only"> {rank.rank_name}</span>}
       </td>
@@ -158,15 +159,15 @@ const DirectoryRow: React.FC<DirectoryRowProps> = ({
         </div>
       </td>
 
-      <td className="px-3 py-2.5 align-middle text-right font-extrabold text-base text-ink-strong t-font-mono whitespace-nowrap">
+      <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${STAT_LABEL_CLASS.games}`}>
         {player.total_matches}
       </td>
 
-      <td className="px-3 py-2.5 align-middle text-right font-extrabold text-base text-win t-font-mono whitespace-nowrap">
+      <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${withPtsVal !== '—' ? STAT_LABEL_CLASS.score : 'text-faint'}`}>
         {withPtsVal}
       </td>
 
-      <td className="px-3 py-2.5 align-middle text-right font-extrabold text-base text-orange-ink t-font-mono whitespace-nowrap">
+      <td className={`px-3 py-2.5 align-middle text-right font-extrabold text-base t-font-mono whitespace-nowrap ${vsPtsVal !== '—' ? STAT_LABEL_CLASS.shots : 'text-faint'}`}>
         {vsPtsVal}
       </td>
 
@@ -280,19 +281,19 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('mmr')}
-                className={headerBtnClass('right')}
+                className={`${headerBtnClass('right')} ${STAT_LABEL_CLASS.mmr}`}
               >
                 MMR{sortIndicator('mmr')}
               </button>
             </th>
-            <th scope="col" className="px-3 py-2.5 whitespace-nowrap">
+            <th scope="col" className={`px-3 py-2.5 whitespace-nowrap ${STAT_LABEL_CLASS.rank}`}>
               RANK · DIV
             </th>
             <th scope="col" aria-sort={ariaSort('win_rate')} className="p-0 whitespace-nowrap">
               <button
                 type="button"
                 onClick={() => onToggleSort('win_rate')}
-                className={headerBtnClass('left')}
+                className={`${headerBtnClass('left')} ${STAT_LABEL_CLASS.goals}`}
               >
                 WITH YOU{sortIndicator('win_rate')}
               </button>
@@ -301,7 +302,7 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('vs_win_rate')}
-                className={headerBtnClass('left')}
+                className={`${headerBtnClass('left')} ${STAT_LABEL_CLASS.demos}`}
               >
                 AGAINST{sortIndicator('vs_win_rate')}
               </button>
@@ -310,7 +311,7 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('total_matches')}
-                className={headerBtnClass('right')}
+                className={`${headerBtnClass('right')} ${STAT_LABEL_CLASS.games}`}
               >
                 GAMES{sortIndicator('total_matches')}
               </button>
@@ -319,7 +320,7 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('with_pts')}
-                className={headerBtnClass('right')}
+                className={`${headerBtnClass('right')} ${STAT_LABEL_CLASS.score}`}
               >
                 {isAvg ? 'WITH PTS/G' : 'WITH PTS'}
                 {sortIndicator('with_pts')}
@@ -329,7 +330,7 @@ export const PlayersDirectoryTable: React.FC<PlayersDirectoryTableProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleSort('vs_pts')}
-                className={headerBtnClass('right')}
+                className={`${headerBtnClass('right')} ${STAT_LABEL_CLASS.shots}`}
               >
                 {isAvg ? 'VS PTS/G' : 'VS PTS'}
                 {sortIndicator('vs_pts')}

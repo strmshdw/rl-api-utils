@@ -474,6 +474,10 @@ func scanHistoricalMatchRows(ctx context.Context, rows *sql.Rows) ([]*Historical
 			blueScore, orangeScore   sql.NullInt64
 			replayStats, statsSync   sql.NullString
 			statsRetry               sql.NullInt64
+			replayName, replayDate   sql.NullString
+			dailyGameNum             sql.NullInt64
+			gameMode, sessionID      sql.NullString
+			bcGroupID                sql.NullString
 			createdAt, updatedAt     int64
 			outcome                  string
 		)
@@ -482,7 +486,9 @@ func scanHistoricalMatchRows(ctx context.Context, rows *sql.Rows) ([]*Historical
 			&mr.DownloadStatus, &mr.LocalFilePath, &downloadedAt, &mr.UploadStatus,
 			&mr.BallchasingID, &mr.BallchasingURL, &uploadedAt, &mr.RetryCount,
 			&mr.LastError, &blueScore, &orangeScore, &winnerTeam, &replayStats,
-			&syncedAt, &statsSync, &statsRetry, &createdAt, &updatedAt, &outcome,
+			&syncedAt, &statsSync, &statsRetry,
+			&replayName, &replayDate, &dailyGameNum, &gameMode, &sessionID, &bcGroupID,
+			&createdAt, &updatedAt, &outcome,
 		); err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, wrapContextErr(ctxErr)
@@ -490,6 +496,7 @@ func scanHistoricalMatchRows(ctx context.Context, rows *sql.Rows) ([]*Historical
 			return nil, fmt.Errorf("failed to scan match: %w", err)
 		}
 		hydrateScannedMatchRecord(&mr, downloadedAt, uploadedAt, winnerTeam, syncedAt, blueScore, orangeScore, replayStats, statsSync, statsRetry, createdAt, updatedAt)
+		hydrateMatchOrgFields(&mr, replayName, replayDate, dailyGameNum, gameMode, sessionID, bcGroupID)
 		hist := &HistoricalMatchRecord{MatchRecord: mr, Result: outcome}
 		if mr.ReplayStatsJSON != "" {
 			var st ReplayMatchStats

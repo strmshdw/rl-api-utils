@@ -26,7 +26,28 @@ type UploadedReplay struct {
 	Timestamp  time.Time
 }
 
-// MockBallchasingServer simulates the Ballchasing.com REST API (POST /v2/upload and GET /).
+// CreatedGroup captures a POST /groups request received by MockBallchasingServer.
+type CreatedGroup struct {
+	ID                   string
+	Name                 string
+	Parent               string
+	PlayerIdentification string
+	TeamIdentification   string
+	AuthHeader           string
+	Timestamp            time.Time
+}
+
+// ReplayPatch captures a PATCH /replays/{id} request received by MockBallchasingServer.
+type ReplayPatch struct {
+	ReplayID   string
+	Title      string
+	Group      string
+	Visibility string
+	AuthHeader string
+	Timestamp  time.Time
+}
+
+// MockBallchasingServer simulates the Ballchasing.com REST API (POST /v2/upload, POST /groups, PATCH /replays/{id}, and GET /).
 type MockBallchasingServer struct {
 	server *httptest.Server
 	mu     sync.RWMutex
@@ -34,6 +55,9 @@ type MockBallchasingServer struct {
 	expectedToken      string
 	uploads            []UploadedReplay
 	uploadsByGUID      map[string]*UploadedReplay
+	groups             []CreatedGroup
+	patches            []ReplayPatch
+	patchesByReplayID  map[string]*ReplayPatch
 	duplicateGUIDs     map[string]string // guid -> existing ballchasing ID
 	alwaysDuplicate    bool
 	alwaysUnauthorized bool
@@ -54,6 +78,9 @@ func NewMockBallchasingServer() *MockBallchasingServer {
 		expectedToken:     "test-ballchasing-token",
 		uploads:           make([]UploadedReplay, 0),
 		uploadsByGUID:     make(map[string]*UploadedReplay),
+		groups:            make([]CreatedGroup, 0),
+		patches:           make([]ReplayPatch, 0),
+		patchesByReplayID: make(map[string]*ReplayPatch),
 		duplicateGUIDs:    make(map[string]string),
 		retryAfterSeconds: 1,
 	}
@@ -147,12 +174,51 @@ func (m *MockBallchasingServer) GetUpload(guid string) *UploadedReplay {
 	return m.uploadsByGUID[guid]
 }
 
-// Reset clears all recorded uploads and fault configurations.
+// GetGroups returns a copy of all groups created via POST /groups.
+func (m *MockBallchasingServer) GetGroups() []CreatedGroup {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	res := make([]CreatedGroup, len(m.groups))
+	copy(res, m.groups)
+	return res
+}
+
+// GetGroupCount returns the number of groups created via POST /groups.
+func (m *MockBallchasingServer) GetGroupCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.groups)
+}
+
+// GetPatches returns a copy of all PATCH /replays/{id} requests received.
+func (m *MockBallchasingServer) GetPatches() []ReplayPatch {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	res := make([]ReplayPatch, len(m.patches))
+	copy(res, m.patches)
+	return res
+}
+
+// GetReplayPatch returns the most recent PATCH received for replayID, if any.
+func (m *MockBallchasingServer) GetReplayPatch(replayID string) *ReplayPatch {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if p, ok := m.patchesByReplayID[replayID]; ok {
+		cp := *p
+		return &cp
+	}
+	return nil
+}
+
+// Reset clears all recorded uploads, groups, patches, and fault configurations.
 func (m *MockBallchasingServer) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.uploads = make([]UploadedReplay, 0)
 	m.uploadsByGUID = make(map[string]*UploadedReplay)
+	m.groups = make([]CreatedGroup, 0)
+	m.patches = make([]ReplayPatch, 0)
+	m.patchesByReplayID = make(map[string]*ReplayPatch)
 	m.duplicateGUIDs = make(map[string]string)
 	m.alwaysDuplicate = false
 	m.alwaysUnauthorized = false
@@ -185,7 +251,147 @@ func (m *MockBallchasingServer) handleRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// 3. Handle Group Creation: POST /groups or POST /api/groups
+	if r.Method == http.MethodPost && (r.URL.Path == "/groups" || r.URL.Path == "/api/groups") {
+		m.handleCreateGroup(w, r)
+		return
+	}
+
+	// 4. Handle Replay Metadata Patch: PATCH /replays/{id} or PATCH /api/replays/{id}
+	if r.Method == http.MethodPatch && (strings.HasPrefix(r.URL.Path, "/replays/") || strings.HasPrefix(r.URL.Path, "/api/replays/")) {
+		m.handlePatchReplay(w, r)
+		return
+	}
+
 	http.NotFound(w, r)
+}
+
+func (m *MockBallchasingServer) checkMutateGates(w http.ResponseWriter, r *http.Request) (string, bool) {
+	auth := r.Header.Get("Authorization")
+	m.mu.Lock()
+	if m.forcedStatusCode != 0 {
+		code := m.forcedStatusCode
+		msg := m.forcedErrorMsg
+		if msg == "" {
+			msg = "forced error"
+		}
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+		return "", false
+	}
+	if m.alwaysUnauthorized || auth == "" || strings.HasPrefix(auth, "Bearer ") || (m.expectedToken != "" && auth != m.expectedToken) {
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid API key."})
+		return "", false
+	}
+	if m.rateLimitFailuresRemaining > 0 {
+		m.rateLimitFailuresRemaining--
+		retryAfter := strconv.Itoa(m.retryAfterSeconds)
+		if m.customRetryAfterHeader != "" {
+			retryAfter = m.customRetryAfterHeader
+		}
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", retryAfter)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "too many requests"})
+		return "", false
+	}
+	m.mu.Unlock()
+	return auth, true
+}
+
+func (m *MockBallchasingServer) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
+	auth, ok := m.checkMutateGates(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name                 string `json:"name"`
+		Parent               string `json:"parent"`
+		PlayerIdentification string `json:"player_identification"`
+		TeamIdentification   string `json:"team_identification"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json payload"})
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "group name is required"})
+		return
+	}
+
+	groupID := fmt.Sprintf("%s-%s", strings.ToLower(strings.ReplaceAll(strings.TrimSpace(req.Name), " ", "-")), generateUUID()[:8])
+	location := fmt.Sprintf("https://ballchasing.com/api/groups/%s", groupID)
+
+	m.mu.Lock()
+	m.groups = append(m.groups, CreatedGroup{
+		ID:                   groupID,
+		Name:                 req.Name,
+		Parent:               req.Parent,
+		PlayerIdentification: req.PlayerIdentification,
+		TeamIdentification:   req.TeamIdentification,
+		AuthHeader:           auth,
+		Timestamp:            time.Now(),
+	})
+	m.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Location", location)
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"id":       groupID,
+		"location": location,
+	})
+}
+
+func (m *MockBallchasingServer) handlePatchReplay(w http.ResponseWriter, r *http.Request) {
+	auth, ok := m.checkMutateGates(w, r)
+	if !ok {
+		return
+	}
+	replayID := strings.TrimPrefix(r.URL.Path, "/api/replays/")
+	replayID = strings.TrimPrefix(replayID, "/replays/")
+	replayID = strings.TrimSpace(replayID)
+	if replayID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	var req struct {
+		Title      string `json:"title"`
+		Group      string `json:"group"`
+		Visibility string `json:"visibility"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json payload"})
+		return
+	}
+
+	patch := ReplayPatch{
+		ReplayID:   replayID,
+		Title:      req.Title,
+		Group:      req.Group,
+		Visibility: req.Visibility,
+		AuthHeader: auth,
+		Timestamp:  time.Now(),
+	}
+	m.mu.Lock()
+	m.patches = append(m.patches, patch)
+	m.patchesByReplayID[replayID] = &patch
+	m.mu.Unlock()
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (m *MockBallchasingServer) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -300,8 +506,17 @@ func (m *MockBallchasingServer) handleUpload(w http.ResponseWriter, r *http.Requ
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check duplicate conditions (HTTP 409)
+	// Check duplicate conditions (HTTP 409) by filename GUID or payload-embedded GUID.
 	existingID, isDuplicate := m.duplicateGUIDs[guid]
+	if !isDuplicate && len(m.duplicateGUIDs) > 0 && len(payloadBytes) > 0 {
+		for dupKey, dupID := range m.duplicateGUIDs {
+			if dupKey != "" && strings.Contains(string(payloadBytes), dupKey) {
+				existingID = dupID
+				isDuplicate = true
+				break
+			}
+		}
+	}
 	if m.alwaysDuplicate || isDuplicate {
 		if existingID == "" {
 			existingID = generateUUID()

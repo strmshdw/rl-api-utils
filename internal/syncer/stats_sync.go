@@ -148,6 +148,11 @@ func (s *Syncer) syncSinglePendingStats(ctx context.Context, rec *storage.MatchR
 		return nil
 
 	case "ok", "":
+		// Ensure Ballchasing's display title matches our canonical replay name once processing finishes.
+		if wantTitle := strings.TrimSuffix(strings.TrimSpace(rec.ReplayName), ".replay"); wantTitle != "" && strings.TrimSpace(item.Title) != wantTitle {
+			s.patchUploadedReplayMetadata(ctx, rec.MatchGUID, bcID, rec.ReplayName, "")
+		}
+
 		if err := s.syncBallchasingReplayDetail(ctx, rec.MatchGUID, item); err != nil {
 			if isContextCanceled(ctx, err) {
 				return contextCancelErr(ctx, err)

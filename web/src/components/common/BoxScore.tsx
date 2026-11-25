@@ -1,4 +1,6 @@
 import React from 'react';
+import { useDashboard } from '../../context/DashboardContext';
+import { PlatformBadge } from './PlatformBadge';
 import { MvpChip, COLUMN_HEADER } from './ui';
 import { SessionMatchDetail } from '../../types/api';
 import {
@@ -11,11 +13,14 @@ import {
   shortRank,
   zeroInk,
 } from '../../utils/broadcast';
+import { STAT_LABEL_CLASS } from '../../utils/statColors';
 
 export interface BoxScoreRow {
   key: string;
   name: string;
   playerId?: string;
+  platform?: string;
+  isBot?: boolean;
   you?: boolean;
   inspected?: boolean;
   mvp?: boolean;
@@ -82,6 +87,8 @@ export function sessionMatchRows(match: SessionMatchDetail, team: number, mvpId?
     return {
       key: p.player_id,
       playerId: p.player_id,
+      platform: p.platform,
+      isBot: p.is_bot,
       name: p.is_local ? 'You' : p.name,
       you: p.is_local,
       mvp: p.player_id === mvpId,
@@ -103,8 +110,8 @@ export function sessionMatchRows(match: SessionMatchDetail, team: number, mvpId?
 }
 
 const WITH_RANKS =
-  'minmax(112px,1.55fr) minmax(44px,0.55fr) minmax(94px,1.05fr) minmax(42px,0.55fr) repeat(5,minmax(26px,0.38fr))';
-const STATS_ONLY = 'minmax(110px,1fr) minmax(44px,0.55fr) repeat(5,minmax(28px,0.42fr))';
+  'minmax(112px,1.45fr) minmax(48px,0.52fr) minmax(66px,0.72fr) minmax(66px,0.82fr) repeat(5,minmax(26px,0.36fr))';
+const STATS_ONLY = 'minmax(110px,1fr) minmax(66px,0.82fr) repeat(5,minmax(28px,0.42fr))';
 
 /** One team's box score panel with a 3px rule in the team slab colour. */
 export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
@@ -115,10 +122,11 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
   withH2H = false,
   onPlayerClick,
 }) => {
+  const { platformDisplay } = useDashboard();
   const gridTemplateColumns = `${withRanks ? WITH_RANKS : STATS_ONLY}${
     withH2H ? ' minmax(54px,0.65fr)' : ''
   }`;
-  const minGridWidth = withRanks ? (withH2H ? 'min-w-[490px]' : 'min-w-[432px]') : 'min-w-[320px]';
+  const minGridWidth = withRanks ? (withH2H ? 'min-w-[548px]' : 'min-w-[488px]') : 'min-w-[356px]';
   return (
     <div
       data-testid={`box-score-${team === 0 ? 'blue' : 'orange'}`}
@@ -127,31 +135,39 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
       tabIndex={0}
       className={`surface-plaque border border-outline px-4 sm:px-5 pt-3.5 pb-4 border-t-[3px] ${TEAM_SLAB_BORDER[team]} flex flex-col min-w-0 overflow-x-auto font-display t-radius`}
     >
-      <div className={`grid gap-x-2 pb-1.5 ${minGridWidth} ${COLUMN_HEADER}`} style={{ gridTemplateColumns }}>
+      <div className={`grid gap-x-2.5 pb-1.5 ${minGridWidth} ${COLUMN_HEADER}`} style={{ gridTemplateColumns }}>
         <span className={team === 0 ? 't-text-blue' : 't-text-orange'}>
           {label}
         </span>
-        {withRanks && <span className="text-right">MMR</span>}
-        {withRanks && <span className="pl-1">RANK · DIV</span>}
-        <span className="text-right">PTS</span>
-        <span className="text-right">G</span>
-        <span className="text-right">A</span>
-        <span className="text-right">SV</span>
-        <span className="text-right">SH</span>
-        <span className="text-right">D</span>
-        {withH2H && <span className="text-right">H2H</span>}
+        {withRanks && <span className={`text-right ${STAT_LABEL_CLASS.mmr}`}>MMR</span>}
+        {withRanks && <span className={`pl-1 ${STAT_LABEL_CLASS.rank}`}>RANK · DIV</span>}
+        <span className={`text-right ${STAT_LABEL_CLASS.score}`}>PTS</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.goals}`}>G</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.assists}`}>A</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.saves}`}>SV</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.shots}`}>SH</span>
+        <span className={`text-right ${STAT_LABEL_CLASS.demos}`}>D</span>
+        {withH2H && <span className={`text-right ${STAT_LABEL_CLASS.h2h}`}>H2H</span>}
       </div>
       {rows.map((p) => {
         const formattedRank = shortRank(p.rank, p.division, p.shortRank, p.tier);
         return (
           <div
             key={p.key}
-            className={`grid gap-x-2 ${minGridWidth} border-t border-line font-bold text-base sm:text-[18px] items-center py-2 t-hover-panel ${
+            className={`grid gap-x-2.5 ${minGridWidth} border-t border-line font-bold text-base sm:text-[18px] items-center py-2 t-hover-panel ${
               p.disconnected ? 'opacity-60' : ''
             }`}
             style={{ gridTemplateColumns }}
           >
-            <span className="flex items-center gap-2 min-w-0">
+            <span className="flex items-center gap-1.5 min-w-0">
+              {platformDisplay === 'icon' && (p.platform || p.isBot) && (
+                <PlatformBadge
+                  platform={p.platform}
+                  isBot={p.isBot}
+                  size="xs"
+                  className="text-muted shrink-0"
+                />
+              )}
               {onPlayerClick && (p.playerId || p.key) ? (
                 <button
                   type="button"
@@ -180,6 +196,14 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
                   {p.name}
                 </span>
               )}
+              {platformDisplay === 'name' && (p.platform || p.isBot) && (
+                <PlatformBadge
+                  platform={p.platform}
+                  isBot={p.isBot}
+                  size="xs"
+                  className="text-muted text-[10px] t-font-mono tracking-wider shrink-0"
+                />
+              )}
               {p.inspected && (
                 <span className="font-display font-bold text-xs tracking-wider bg-amber-500/20 text-amber-300 px-1.5 py-0.5 border border-amber-500/30">
                   INSPECTED
@@ -188,24 +212,26 @@ export const TeamBoxScore: React.FC<TeamBoxScoreProps> = ({
               {p.mvp && <MvpChip />}
             </span>
             {withRanks && (
-              <span className="text-right t-font-mono font-bold text-base text-ink-2">
+              <span className={`text-right t-font-mono font-bold text-base ${p.mmr ? STAT_LABEL_CLASS.mmr : 'text-faint'}`}>
                 {formatMmr(p.mmr)}
               </span>
             )}
             {withRanks && (
               <span
                 title={formattedRank}
-                className="pl-1 font-bold text-sm tracking-wider text-muted uppercase whitespace-nowrap overflow-hidden text-ellipsis"
+                className={`pl-1 font-bold text-sm tracking-wider uppercase whitespace-nowrap overflow-hidden text-ellipsis ${
+                  formattedRank && formattedRank !== '—' ? STAT_LABEL_CLASS.rank : 'text-faint'
+                }`}
               >
                 {formattedRank}
               </span>
             )}
-            <span className="text-right t-font-mono font-bold text-ink">{p.score}</span>
-            <span className={`text-right t-font-mono ${zeroInk(p.goals, 'text-win font-extrabold')}`}>{p.goals}</span>
-            <span className={`text-right t-font-mono ${zeroInk(p.assists)}`}>{p.assists}</span>
-            <span className={`text-right t-font-mono ${zeroInk(p.saves)}`}>{p.saves}</span>
-            <span className="text-right t-font-mono text-ink-3">{p.shots}</span>
-            <span className={`text-right t-font-mono ${zeroInk(p.demos, 'text-orange-ink font-extrabold')}`}>
+            <span className={`text-right t-font-mono font-bold ${STAT_LABEL_CLASS.score}`}>{p.score}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.goals, `${STAT_LABEL_CLASS.goals} font-extrabold`)}`}>{p.goals}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.assists, STAT_LABEL_CLASS.assists)}`}>{p.assists}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.saves, STAT_LABEL_CLASS.saves)}`}>{p.saves}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.shots, STAT_LABEL_CLASS.shots)}`}>{p.shots}</span>
+            <span className={`text-right t-font-mono ${zeroInk(p.demos, `${STAT_LABEL_CLASS.demos} font-extrabold`)}`}>
               {p.demos}
             </span>
             {withH2H && (

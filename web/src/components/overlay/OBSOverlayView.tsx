@@ -235,7 +235,7 @@ export const OBSOverlayView: React.FC = () => {
                 <div className="w-14 bg-ink text-page flex items-center justify-center font-extrabold text-[40px] leading-none">
                   {orangeScore}
                 </div>
-                <div className="bg-orange-slab text-page flex items-center px-4 font-extrabold text-[18px] tracking-t6 mr-[2px]">
+                <div className="bg-orange-slab t-on-slab text-white flex items-center px-4 font-extrabold text-[18px] tracking-t6 mr-[2px]">
                   ORANGE
                 </div>
               </>
