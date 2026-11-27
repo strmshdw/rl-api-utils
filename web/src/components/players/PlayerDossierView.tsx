@@ -4,7 +4,7 @@ import { COLUMN_HEADER, PANEL_LABEL, SectionLabel } from '../common/ui';
 import { AreaFilterBar } from '../common/AreaFilterBar';
 import { PlatformBadge } from '../common/PlatformBadge';
 import { Sparkline } from '../common/Sparkline';
-import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
+import { HistoricalMatchDetailModal, TelemetryTab } from '../historical/HistoricalMatchDetailModal';
 import { PlayerNotesModal } from './PlayerNotesModal';
 import { useDashboard } from '../../context/DashboardContext';
 import {
@@ -68,6 +68,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
 
   const [showAllRanks, setShowAllRanks] = useState(false);
   const [telemetryMatch, setTelemetryMatch] = useState<HistoricalMatchRecord | null>(null);
+  const [telemetryInitialTab, setTelemetryInitialTab] = useState<TelemetryTab>('core');
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
 
   const isDialog = variant === 'dialog';
@@ -459,7 +460,14 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
               localPlayerIds={localPlayerIds}
               variant={variant}
               onSelectPlayer={onSelectPlayer}
-              onSelectTelemetry={setTelemetryMatch}
+              onSelectTelemetry={(m) => {
+                setTelemetryInitialTab('core');
+                setTelemetryMatch(m);
+              }}
+              onWatchReplay={(m) => {
+                setTelemetryInitialTab('replay');
+                setTelemetryMatch(m);
+              }}
             />
           )}
 
@@ -482,6 +490,7 @@ export const PlayerDossierView: React.FC<PlayerDossierViewProps> = ({
       {telemetryMatch && (
         <HistoricalMatchDetailModal
           match={telemetryMatch}
+          initialTab={telemetryInitialTab}
           onClose={() => setTelemetryMatch(null)}
           localPlayerIds={localPlayerIds}
           onPlayerClick={onSelectPlayer}

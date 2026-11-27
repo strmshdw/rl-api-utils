@@ -299,6 +299,33 @@ func (s *SQLiteStore) MarkDuplicate(ctx context.Context, matchGUID, ballchasingI
 	return s.markUploadCompleted(ctx, UploadDuplicate, matchGUID, ballchasingID, ballchasingURL)
 }
 
+// UpdateMatchBallchasingLink non-destructively populates ballchasing_id and ballchasing_url
+// when currently empty, without mutating download_status, upload_status, or local_file_path.
+func (s *SQLiteStore) UpdateMatchBallchasingLink(ctx context.Context, matchGUID, ballchasingID, ballchasingURL string) error {
+	matchGUID = strings.TrimSpace(matchGUID)
+	ballchasingID = strings.TrimSpace(ballchasingID)
+	if matchGUID == "" {
+		return ErrInvalidGUID
+	}
+	if ballchasingID == "" {
+		return nil
+	}
+	ballchasingURL = NormalizeBallchasingURL(ballchasingID, ballchasingURL)
+	now := time.Now().UTC().Unix()
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE matches
+		SET ballchasing_id = CASE WHEN ballchasing_id = '' THEN ? ELSE ballchasing_id END,
+		    ballchasing_url = CASE WHEN ballchasing_url = '' THEN ? ELSE ballchasing_url END,
+		    updated_at = ?
+		WHERE match_guid = ?;`,
+		ballchasingID, ballchasingURL, now, matchGUID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to link ballchasing replay for %s: %w", matchGUID, err)
+	}
+	return checkRowsAffected(res)
+}
+
 // MarkUploadFailed transitions upload_status to FAILED and increments retry_count.
 func (s *SQLiteStore) MarkUploadFailed(ctx context.Context, matchGUID, errMsg string) error {
 	now := time.Now().UTC().Unix()

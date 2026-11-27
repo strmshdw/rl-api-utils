@@ -336,4 +336,70 @@ describe('HistoricalMatchDetailModal', () => {
 
     fetchSpy.mockRestore();
   });
+
+  it('defers /api/matches/{guid} fetch when opened directly on initialTab="replay" until a telemetry tab is selected', async () => {
+    const sessionOnlyMatch: HistoricalMatchRecord = {
+      ...SAMPLE_HISTORICAL_MATCH,
+      match_guid: 'session-only-guid',
+      stats: {
+        ...SAMPLE_HISTORICAL_MATCH.stats!,
+        match_guid: 'session-only-guid',
+        players: [],
+      },
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/matches/session-only-guid') {
+        return new Response(JSON.stringify(SAMPLE_HISTORICAL_MATCH), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          match_guid: 'session-only-guid',
+          available: false,
+          source: '',
+          local_available: false,
+          ballchasing_available: false,
+          ballchasing_configured: false,
+          ballchasing_id: '',
+          ballchasing_url: '',
+          filename: '',
+          size_bytes: 0,
+          download_url: '',
+          download_status: '',
+          upload_status: '',
+          reason: 'no_replay_source',
+          message: 'No replay',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    const { container } = await mount(
+      <HistoricalMatchDetailModal
+        match={sessionOnlyMatch}
+        initialTab="replay"
+        onClose={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Opening directly on replay tab MUST NOT hit /api/matches/{guid} (avoids 404 on session-only matches)
+    expect(fetchSpy).not.toHaveBeenCalledWith('/api/matches/session-only-guid');
+
+    // Switching to Core tab lazily hydrates match telemetry once
+    await clickText(container, '1. CORE & MECHANICS');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSpy).toHaveBeenCalledWith('/api/matches/session-only-guid');
+
+    fetchSpy.mockRestore();
+  });
 });

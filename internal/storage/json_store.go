@@ -365,3 +365,9 @@ func (s *JSONStore) ListBallchasingGroups(ctx context.Context) ([]*BallchasingGr
 func (s *JSONStore) FindSessionForMatch(ctx context.Context, matchGUID string, matchTime time.Time) (*ResolvedMatchSession, error) {
 	return withRead(s, func() (*ResolvedMatchSession, error) { return s.inner.FindSessionForMatch(ctx, matchGUID, matchTime) })
 }
+
+func (s *JSONStore) UpdateMatchBallchasingLink(ctx context.Context, matchGUID, ballchasingID, ballchasingURL string) error {
+	return s.withWrite(func() error {
+		return s.inner.UpdateMatchBallchasingLink(ctx, matchGUID, ballchasingID, ballchasingURL)
+	})
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HistoricalMatchRecord, ReplayPlayerStats } from '../../types/api';
 import { Modal } from '../common/Modal';
 import { OUTCOME_SLAB, formatAgo, formatArenaName, playlistLabels } from '../../utils/broadcast';
@@ -12,6 +12,7 @@ import {
   MatchPositioningTab,
   MatchRawJsonTab,
 } from './MatchTelemetryTabs';
+import { MatchReplayTab } from '../replay/MatchReplayTab';
 
 interface HistoricalMatchDetailModalProps {
   match: HistoricalMatchRecord | null;
@@ -20,12 +21,20 @@ interface HistoricalMatchDetailModalProps {
   onPlayerClick?: (playerId: string, playerName?: string) => void;
   inspectedPlayerId?: string;
   kickerPrefix?: string;
+  initialTab?: TelemetryTab;
 }
 
 const OUTCOME_WORD = { W: 'WIN', L: 'LOSS', D: 'DRAW' } as const;
 const NO_IDS = new Set<string>();
 
-export type TelemetryTab = 'core' | 'boost' | 'movement' | 'positioning' | 'teams' | 'raw_json';
+export type TelemetryTab =
+  | 'core'
+  | 'boost'
+  | 'movement'
+  | 'positioning'
+  | 'teams'
+  | 'replay'
+  | 'raw_json';
 
 export const TELEMETRY_TABS: ReadonlyArray<readonly [TelemetryTab, string]> = [
   ['core', '1. CORE & MECHANICS'],
@@ -33,6 +42,7 @@ export const TELEMETRY_TABS: ReadonlyArray<readonly [TelemetryTab, string]> = [
   ['movement', '3. SPEED & MOVEMENT'],
   ['positioning', '4. POSITIONING & ROTATION'],
   ['teams', '5. TEAM HEAD-TO-HEAD'],
+  ['replay', '▶ 3D REPLAY'],
   ['raw_json', 'RAW JSON'],
 ] as const;
 
@@ -83,15 +93,73 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
   onPlayerClick,
   inspectedPlayerId,
   kickerPrefix,
+  initialTab = 'core',
 }) => {
-  const [activeTab, setActiveTab] = useState<TelemetryTab>('core');
+  const [activeTab, setActiveTab] = useState<TelemetryTab>(initialTab);
+  const [theaterMode, setTheaterMode] = useState(false);
   const [copiedGuid, setCopiedGuid] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
   const [fetchedMatch, setFetchedMatch] = useState<HistoricalMatchRecord | null>(null);
+  const replayEscapeGuardRef = useRef<((event: Event) => boolean) | null>(null);
+  const tabButtonRefs = useRef<Partial<Record<TelemetryTab, HTMLButtonElement | null>>>({});
+  const fetchedGuidRef = useRef<string | null>(null);
+  const syncedGuidRef = useRef<string | null>(match?.match_guid ?? null);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+    setTheaterMode(false);
+    fetchedGuidRef.current = null;
+    syncedGuidRef.current = match?.match_guid ?? null;
+  }, [match?.match_guid, initialTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'replay' && theaterMode) {
+      setTheaterMode(false);
+    }
+  }, [activeTab, theaterMode]);
+
+  // Keep the active tab button scrolled cleanly into view (especially at 1280x720 XL).
+  useEffect(() => {
+    const btn = tabButtonRefs.current[activeTab];
+    if (btn && typeof btn.scrollIntoView === 'function') {
+      btn.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    }
+  }, [activeTab, match?.match_guid, theaterMode]);
+
+  const handleRegisterEscapeGuard = useCallback((guard: ((event: Event) => boolean) | null) => {
+    replayEscapeGuardRef.current = guard;
+  }, []);
+
+  const handleModalEscape = useCallback(
+    (e: Event) => {
+      if (activeTab !== 'replay') return false;
+      if (replayEscapeGuardRef.current?.(e)) {
+        return true;
+      }
+      if (theaterMode) {
+        e.preventDefault();
+        e.stopPropagation();
+        setTheaterMode(false);
+        return true;
+      }
+      return false;
+    },
+    [activeTab, theaterMode],
+  );
 
   useEffect(() => {
     if (!match?.match_guid) {
       setFetchedMatch(null);
+      return;
+    }
+    // Defer match-stats hydration while viewing the 3D Replay tab directly so
+    // session-only matches opened straight to 3D Replay don't trigger a 404.
+    const effectiveInitialTab =
+      syncedGuidRef.current !== match.match_guid ? initialTab : activeTab;
+    if (effectiveInitialTab === 'replay') {
+      return;
+    }
+    if (fetchedGuidRef.current === match.match_guid) {
       return;
     }
     const initialHasTelemetry = (match.stats?.players ?? []).some(
@@ -104,6 +172,7 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
       setFetchedMatch(null);
       return;
     }
+    fetchedGuidRef.current = match.match_guid;
     let cancelled = false;
     (async () => {
       try {
@@ -123,7 +192,7 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
     return () => {
       cancelled = true;
     };
-  }, [match]);
+  }, [match, activeTab]);
 
   const effectiveMatch =
     fetchedMatch && fetchedMatch.match_guid === match?.match_guid ? fetchedMatch : match;
@@ -204,13 +273,34 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
 
   const rawArena = effectiveMatch.map_name || effectiveMatch.stats?.map_name;
   const arenaTitle = rawArena ? formatArenaName(rawArena) : 'Unknown arena';
+  const matchTitle = `${arenaTitle} (BLUE ${effectiveMatch.blue_score} – ${effectiveMatch.orange_score} ORANGE)`;
+  const isReplayTab = activeTab === 'replay';
+  const isTheater = isReplayTab && theaterMode;
 
   return (
     <Modal
       isOpen
       onClose={onClose}
       kicker={kickerText}
-      title={`${arenaTitle} (BLUE ${effectiveMatch.blue_score} – ${effectiveMatch.orange_score} ORANGE)`}
+      title={matchTitle}
+      maxWidth={isReplayTab ? 1560 : 1180}
+      fullViewport={isTheater}
+      compactHeader={isTheater}
+      tightPadding={isReplayTab && !isTheater}
+      viewportBounded={isReplayTab && !isTheater}
+      onEscape={handleModalEscape}
+      headerActions={
+        !isReplayTab ? (
+          <button
+            type="button"
+            data-testid="modal-watch-replay-btn"
+            onClick={() => setActiveTab('replay')}
+            className="px-3.5 py-1.5 t-bg-blue-slab bg-blue-slab text-white font-extrabold text-sm uppercase tracking-wider hover:opacity-90 t-radius cursor-pointer shrink-0"
+          >
+            ▶ WATCH 3D REPLAY
+          </button>
+        ) : undefined
+      }
       meta={
         <>
           {outcome && (
@@ -261,23 +351,39 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
         </>
       }
     >
-      <div className="flex flex-col font-display">
-        <div className="px-7 pt-3.5 border-b t-border border-line flex flex-wrap gap-6 text-sm font-extrabold">
-          {TELEMETRY_TABS.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActiveTab(id)}
-              className={`pb-3 border-b-[3px] uppercase transition-colors ${
-                activeTab === id
-                  ? 'border-current t-text-strong text-ink-strong'
-                  : 'border-transparent t-text-muted text-muted hover:text-ink'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      <div className={`flex flex-col font-display ${isReplayTab ? 'flex-1 min-h-0 overflow-hidden' : ''}`}>
+        {!isTheater && (
+          <div
+            className={
+              isReplayTab
+                ? 'dashboard-nav-scroll px-4 pt-1.5 border-b t-border border-line flex flex-nowrap overflow-x-auto gap-3 lg:gap-4 text-[12px] leading-tight tracking-wide font-extrabold shrink-0 whitespace-nowrap'
+                : 'px-7 pt-3.5 border-b t-border border-line flex flex-wrap gap-6 text-sm font-extrabold'
+            }
+          >
+            {TELEMETRY_TABS.map(([id, label]) => (
+              <button
+                key={id}
+                ref={(el) => {
+                  tabButtonRefs.current[id] = el;
+                }}
+                type="button"
+                data-testid={`telemetry-tab-${id}`}
+                onClick={() => setActiveTab(id)}
+                className={`${
+                  isReplayTab ? 'pb-1.5 shrink-0 whitespace-nowrap' : 'pb-3'
+                } border-b-[3px] uppercase transition-colors cursor-pointer ${
+                  activeTab === id
+                    ? 'border-current t-text-strong text-ink-strong'
+                    : id === 'replay'
+                    ? 'border-transparent text-blue-ink hover:text-ink-strong'
+                    : 'border-transparent t-text-muted text-muted hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {activeTab === 'core' && (
           <MatchCoreOverviewTab
@@ -324,6 +430,16 @@ export const HistoricalMatchDetailModal: React.FC<HistoricalMatchDetailModalProp
 
         {activeTab === 'teams' && (
           <MatchH2HTab bluePlayers={bluePlayers} orangePlayers={orangePlayers} />
+        )}
+
+        {activeTab === 'replay' && (
+          <MatchReplayTab
+            match={effectiveMatch}
+            matchTitle={matchTitle}
+            theaterMode={theaterMode}
+            onToggleTheaterMode={() => setTheaterMode((v) => !v)}
+            onRegisterEscapeGuard={handleRegisterEscapeGuard}
+          />
         )}
 
         {activeTab === 'raw_json' && (

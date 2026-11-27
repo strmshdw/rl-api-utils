@@ -21,7 +21,7 @@ import {
 import { DashboardProvider, useAreaFilters, useDashboard } from './context/DashboardContext';
 import { NavigationProvider, useNavigation } from './context/NavigationContext';
 import { PlayerProfileDialog } from './components/players/PlayerProfileDialog';
-import { HistoricalMatchDetailModal } from './components/historical/HistoricalMatchDetailModal';
+import { HistoricalMatchDetailModal, TelemetryTab } from './components/historical/HistoricalMatchDetailModal';
 import { sessionMatchToHistoricalRecord } from './components/historical/historyData';
 import { SessionMatchDetail } from './types/api';
 
@@ -40,6 +40,7 @@ const DashboardShell: React.FC = () => {
 
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [telemetryMatch, setTelemetryMatch] = useState<SessionMatchDetail | null>(null);
+  const [telemetryInitialTab, setTelemetryInitialTab] = useState<TelemetryTab>('core');
   const columnCfg = useColumnConfig();
 
   const {
@@ -236,7 +237,10 @@ const DashboardShell: React.FC = () => {
                 onContinueSession={continueSession}
                 onDismissContinueSession={dismissContinueSession}
                 onInspectPlayer={handleInspectQuickPlayer}
-                onOpenMatchTelemetry={(m) => setTelemetryMatch(m)}
+                onOpenMatchTelemetry={(m, tab = 'core') => {
+                  setTelemetryInitialTab(tab);
+                  setTelemetryMatch(m);
+                }}
               />
             )}
             {activeTab === 'session' && (
@@ -296,6 +300,7 @@ const DashboardShell: React.FC = () => {
       {telemetryMatch && (
         <HistoricalMatchDetailModal
           match={sessionMatchToHistoricalRecord(telemetryMatch)}
+          initialTab={telemetryInitialTab}
           onClose={() => setTelemetryMatch(null)}
           localPlayerIds={localPlayerIds}
           onPlayerClick={handleInspectQuickPlayer}

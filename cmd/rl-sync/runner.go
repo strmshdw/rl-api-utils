@@ -135,7 +135,10 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 			cfg.PlayerTracking.LocalPlayerName,
 			logger,
 		)
-		daemonOpts = append(daemonOpts, daemon.WithHistorySyncer(historySyncer))
+		daemonOpts = append(daemonOpts,
+			daemon.WithHistorySyncer(historySyncer),
+			daemon.WithBallchasingClient(concreteBC),
+		)
 	}
 	if playerTracker != nil {
 		daemonOpts = append(daemonOpts, daemon.WithPlayerTracker(playerTracker))

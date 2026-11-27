@@ -1,0 +1,131 @@
+{
+  "version": "7.1.0",
+  "license": "MIT",
+  "totalBytes": 7534372,
+  "assets": [
+    {
+      "id": "stadium",
+      "file": "models/stadium.glb",
+      "bytes": 84860,
+      "sha256": "5783f467d2d055deea85cb0e1a5784310697af5bbf1d789fcfe5c76e60e6b934",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "car_octane",
+      "file": "models/car_octane.glb",
+      "bytes": 874560,
+      "sha256": "aa08a689c301e862acfd0d4215809137bd2dc401e8f1578aea0c2af33d2dad04",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "car_fennec",
+      "file": "models/car_fennec.glb",
+      "bytes": 986804,
+      "sha256": "138adc2f118fcf797eea20fa03f0e3a62c6156179998bd722322a302a3ad89ea",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "car_dominus",
+      "file": "models/car_dominus.glb",
+      "bytes": 786588,
+      "sha256": "23d3f6414dbe3bc655af42db2c35eea5e8f6d50355b2f6e5842a1a25e9ee2d9a",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "car_breakout",
+      "file": "models/car_breakout.glb",
+      "bytes": 521400,
+      "sha256": "99cf98912b87acea78f364b138b449097585d485bb45842091d993fa848f6ddb",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "car_plank",
+      "file": "models/car_plank.glb",
+      "bytes": 772428,
+      "sha256": "8c194e8c8914586c96562377aff940f0bf4392e2d4c2815dd16e27dc748f1407",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "car_hybrid",
+      "file": "models/car_hybrid.glb",
+      "bytes": 774880,
+      "sha256": "86afa79524e7b52466ff3ed64d691054350e081a2027111ef64a2bd77e4cebd6",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "car_merc",
+      "file": "models/car_merc.glb",
+      "bytes": 721152,
+      "sha256": "acfe3be8a7cb1a542fb9e0929ed14e46764eedb9fa86ccf55adaa5b249cab3aa",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "wheel_boog",
+      "file": "models/wheel_boog.glb",
+      "bytes": 42540,
+      "sha256": "b97ce1f2c374a38f67b66a4ff02bc0d261fde71ac986848c2c51e223163ba231",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "ball_geodesic",
+      "file": "models/ball_geodesic.glb",
+      "bytes": 138768,
+      "sha256": "0c64dd8c36c2388f8887b1214e19bdb2cf567d637e1522600f4b93007f71f942",
+      "license": "MIT",
+      "source": "@rlrml/player@1.5.1 (https://registry.npmjs.org/@rlrml/player/-/player-1.5.1.tgz)"
+    },
+    {
+      "id": "mannfield_grass",
+      "file": "models/mannfield_grass.glb",
+      "bytes": 592268,
+      "sha256": "46e1485616f99652b4e8e36bc8d0193a32f75e8974d51b2c389759ab41bdab30",
+      "license": "MIT",
+      "source": "manucabral/rl-replay-viewer (https://raw.githubusercontent.com/manucabral/rl-replay-viewer/main/assets)"
+    },
+    {
+      "id": "boost_pad_big",
+      "file": "models/boost_pad_big.glb",
+      "bytes": 127584,
+      "sha256": "ab49e14e4c78539e11324f51ea898f14fdacff66540f85aaf4a68ad4e2ec9bb4",
+      "license": "MIT",
+      "source": "manucabral/rl-replay-viewer (https://raw.githubusercontent.com/manucabral/rl-replay-viewer/main/assets)"
+    },
+    {
+      "id": "boost_pad_small",
+      "file": "models/boost_pad_small.glb",
+      "bytes": 46620,
+      "sha256": "ffd85f24a439a83ba8033d3e4d32eb73df41107bc3ad7831f7c63671c1c59842",
+      "license": "MIT",
+      "source": "manucabral/rl-replay-viewer (https://raw.githubusercontent.com/manucabral/rl-replay-viewer/main/assets)"
+    }
+  ],
+  "extendedAssets": [
+    {
+      "id": "draco_decoder_js",
+      "file": "draco/draco_decoder.js",
+      "bytes": 719410,
+      "sha256": "30e4d486fa020737af10e3c56197693e5b904bdc05b8bfa5d7b06751dec6da04"
+    },
+    {
+      "id": "draco_wasm_wrapper_js",
+      "file": "draco/draco_wasm_wrapper.js",
+      "bytes": 58763,
+      "sha256": "e8049906ef3f8f75d3456c22a3f31bfdfe5b5b5bd09ccdec613b9e9a49d554d8"
+    },
+    {
+      "id": "draco_decoder_wasm",
+      "file": "draco/draco_decoder.wasm",
+      "bytes": 285747,
+      "sha256": "c55a594e8ffd18426d36b27fea9618af3df5e173640a3e56d46f09d76f0574f2"
+    }
+  ]
+}

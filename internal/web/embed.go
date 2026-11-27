@@ -30,6 +30,20 @@ func init() {
 	_ = mime.AddExtensionType(".woff2", "font/woff2")
 	_ = mime.AddExtensionType(".woff", "font/woff")
 	_ = mime.AddExtensionType(".ttf", "font/ttf")
+	// 3D Replay Viewer SDK (@rl-replay/viewer-sdk) runtime binary and asset MIME types.
+	_ = mime.AddExtensionType(".wasm", "application/wasm")
+	_ = mime.AddExtensionType(".glb", "model/gltf-binary")
+	_ = mime.AddExtensionType(".gltf", "model/gltf+json")
+	_ = mime.AddExtensionType(".bin", "application/octet-stream")
+	_ = mime.AddExtensionType(".webp", "image/webp")
+	_ = mime.AddExtensionType(".avif", "image/avif")
+	_ = mime.AddExtensionType(".ktx2", "image/ktx2")
+	_ = mime.AddExtensionType(".dds", "application/octet-stream")
+	_ = mime.AddExtensionType(".env", "application/octet-stream")
+	_ = mime.AddExtensionType(".hdr", "application/octet-stream")
+	_ = mime.AddExtensionType(".replay", "application/octet-stream")
+	_ = mime.AddExtensionType(".rlbundle", "application/octet-stream")
+	_ = mime.AddExtensionType(".map", "application/json; charset=utf-8")
 }
 
 // DistFS returns the embedded filesystem rooted at the "dist" directory.
@@ -70,7 +84,12 @@ func DistHandler() http.Handler {
 	if err != nil {
 		sub = distFS
 	}
+	return NewStaticHandler(sub)
+}
 
+// NewStaticHandler builds an http.Handler serving static assets from sub with SPA fallback
+// to index.html for extensionless client routes. Exported for isolated static-asset testing.
+func NewStaticHandler(sub fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(sub))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -37,6 +37,7 @@ interface PlayerMatchHistoryListProps {
   variant: 'dialog' | 'page';
   onSelectPlayer: (playerId: string, playerName?: string) => void;
   onSelectTelemetry: (match: PlayerMatchDetail) => void;
+  onWatchReplay?: (match: PlayerMatchDetail) => void;
 }
 
 export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
@@ -58,6 +59,7 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
   variant,
   onSelectPlayer,
   onSelectTelemetry,
+  onWatchReplay,
 }) => {
   const [openMatchGuid, setOpenMatchGuid] = useState<string | null>(null);
   const padClass = variant === 'dialog' ? 'px-8 pt-6 pb-2' : '';
@@ -236,6 +238,20 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
                   </div>
 
                   <div className="flex items-center gap-3 shrink-0">
+                    {onWatchReplay && (
+                      <button
+                        type="button"
+                        data-testid="player-match-row-watch-replay-btn"
+                        title="Open 3D Replay Viewer for this match"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onWatchReplay(m);
+                        }}
+                        className="px-2 py-0.5 t-bg-page bg-page border border-blue-ink/60 text-blue-ink hover:bg-blue-slab hover:text-white hover:border-blue-slab text-xs font-extrabold uppercase tracking-wider t-radius cursor-pointer transition-colors whitespace-nowrap"
+                      >
+                        ▶ 3D
+                      </button>
+                    )}
                     <span
                       className={`text-sm font-bold px-2 py-0.5 rounded whitespace-nowrap ${
                         m.role === 'teammate'
@@ -274,13 +290,25 @@ export const PlayerMatchHistoryList: React.FC<PlayerMatchHistoryListProps> = ({
                           CLICK ANY PLAYER IN BOX SCORE FOR QUICK MODAL PROFILE (MMR SHOWN BEFORE RANK/DIV)
                         </span>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => onSelectTelemetry(m)}
-                        className="ml-auto px-3 py-1.5 bg-blue-slab text-white font-bold text-sm tracking-wider rounded uppercase hover:opacity-90 transition-colors cursor-pointer"
-                      >
-                        FULL TELEMETRY →
-                      </button>
+                      <div className="ml-auto flex flex-wrap items-center gap-2">
+                        {onWatchReplay && (
+                          <button
+                            type="button"
+                            data-testid="player-match-watch-replay-btn"
+                            onClick={() => onWatchReplay(m)}
+                            className="px-3 py-1.5 t-bg-page bg-page border border-blue-ink text-blue-ink hover:text-ink-strong hover:border-ink font-bold text-sm tracking-wider rounded uppercase transition-colors cursor-pointer"
+                          >
+                            ▶ 3D REPLAY
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onSelectTelemetry(m)}
+                          className="px-3 py-1.5 bg-blue-slab text-white font-bold text-sm tracking-wider rounded uppercase hover:opacity-90 transition-colors cursor-pointer"
+                        >
+                          FULL TELEMETRY →
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

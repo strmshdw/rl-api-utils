@@ -92,15 +92,17 @@ func (c *Client) doJSONGetWithRetry(ctx context.Context, reqURL, reqErrPrefix, n
 		case http.StatusOK:
 			return bodyBytes, nil
 		case http.StatusTooManyRequests:
-			if attempt >= c.maxRetries {
-				return nil, ErrRateLimitExhausted
-			}
 			retryAfter := c.resolveRetryAfter(resp.Header.Get("Retry-After"), attempt)
+			if attempt >= c.maxRetries {
+				return nil, &RateLimitError{RetryAfter: retryAfter, Message: extractErrorMessage(bodyBytes)}
+			}
 			if sleepErr := sleepWithContext(ctx, retryAfter); sleepErr != nil {
 				return nil, sleepErr
 			}
 		case http.StatusUnauthorized:
 			return nil, ErrInvalidAPIKey
+		case http.StatusForbidden:
+			return nil, fmt.Errorf("%w: %s", ErrForbidden, extractErrorMessage(bodyBytes))
 		case http.StatusNotFound:
 			if notFoundID != "" {
 				return nil, fmt.Errorf("%w: replay %s", ErrNotFound, notFoundID)

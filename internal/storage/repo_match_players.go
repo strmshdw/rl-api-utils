@@ -122,12 +122,14 @@ func (s *SQLiteStore) GetMatchPlayers(ctx context.Context, matchGUID string) ([]
 	}
 
 	const query = `
-	SELECT match_guid, player_id, team_num, is_local, won,
-	       score, goals, assists, saves, shots, demos,
-	       car_name, stats_json
-	FROM match_players
-	WHERE match_guid = ?
-	ORDER BY team_num ASC, score DESC;
+	SELECT mp.match_guid, mp.player_id, COALESCE(p.platform, ''), COALESCE(p.player_name, ''),
+	       mp.team_num, mp.is_local, mp.won,
+	       mp.score, mp.goals, mp.assists, mp.saves, mp.shots, mp.demos,
+	       mp.car_name, mp.stats_json
+	FROM match_players mp
+	LEFT JOIN players p ON mp.player_id = p.player_id
+	WHERE mp.match_guid = ?
+	ORDER BY mp.team_num ASC, mp.score DESC;
 	`
 	rows, err := s.db.QueryContext(ctx, query, matchGUID)
 	if err != nil {
@@ -143,7 +145,8 @@ func (s *SQLiteStore) GetMatchPlayers(ctx context.Context, matchGUID string) ([]
 			wonVal  sql.NullInt64
 		)
 		if err := rows.Scan(
-			&mp.MatchGUID, &mp.PlayerID, &mp.TeamNum, &isLocal, &wonVal,
+			&mp.MatchGUID, &mp.PlayerID, &mp.Platform, &mp.PlayerName,
+			&mp.TeamNum, &isLocal, &wonVal,
 			&mp.Score, &mp.Goals, &mp.Assists, &mp.Saves, &mp.Shots, &mp.Demos,
 			&mp.CarName, &mp.StatsJSON,
 		); err != nil {

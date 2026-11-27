@@ -8,7 +8,7 @@ import {
 import { isDemoMode, SAMPLE_HISTORICAL_MATCHES } from '../../utils/sampleData';
 import { COLUMN_HEADER, GhostButton, PageHeader, PrimaryButton, SearchInput, Segmented } from '../common/ui';
 import { AreaFilterBar } from '../common/AreaFilterBar';
-import { HistoricalMatchDetailModal } from './HistoricalMatchDetailModal';
+import { HistoricalMatchDetailModal, TelemetryTab } from './HistoricalMatchDetailModal';
 import { HISTORY_ROW_GRID, HistoryRow } from './HistoryRow';
 import { historyOutcome, isLocal, replayStatus } from './historyData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
@@ -72,6 +72,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [sortOption, setSortOption] = useState<HistorySortOption>('date-desc');
   const [openMatchGuid, setOpenMatchGuid] = useState<string | null>(null);
   const [detailMatch, setDetailMatch] = useState<HistoricalMatchRecord | null>(null);
+  const [detailInitialTab, setDetailInitialTab] = useState<TelemetryTab>('core');
 
   const [retryingGuids, setRetryingGuids] = useState<Set<string>>(new Set());
   const retryingRef = useRef<Set<string>>(new Set());
@@ -462,7 +463,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   onToggle={() =>
                     setOpenMatchGuid((cur) => (cur === m.match_guid ? null : m.match_guid))
                   }
-                  onDetail={() => setDetailMatch(m)}
+                  onDetail={() => {
+                    setDetailInitialTab('core');
+                    setDetailMatch(m);
+                  }}
+                  onWatchReplay={() => {
+                    setDetailInitialTab('replay');
+                    setDetailMatch(m);
+                  }}
                   onRetry={handleRetryMatch}
                   isRetrying={retryingGuids.has(m.match_guid)}
                   onPlayerClick={(pId, pName) => {
@@ -502,6 +510,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       {detailMatch && (
         <HistoricalMatchDetailModal
           match={detailMatch}
+          initialTab={detailInitialTab}
           onClose={() => setDetailMatch(null)}
           localPlayerIds={effectiveLocalIds}
           onPlayerClick={(pId, pName) => {

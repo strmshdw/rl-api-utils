@@ -19,7 +19,7 @@ import {
   SessionKpiStrip,
   SessionModeBreakdownStrip,
 } from './SessionKpis';
-import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
+import { HistoricalMatchDetailModal, TelemetryTab } from '../historical/HistoricalMatchDetailModal';
 import { sessionMatchToHistoricalRecord } from '../historical/historyData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
 import { useMMRHistory } from '../../hooks/useMMRHistory';
@@ -66,6 +66,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     normalizeActiveModeKey(activePlaylist ?? sessionFilters.playlist),
   );
   const [selectedMatch, setSelectedMatch] = useState<SessionMatchDetail | null>(null);
+  const [selectedMatchTab, setSelectedMatchTab] = useState<TelemetryTab>('core');
   const [inspectedSessionId, setInspectedSessionId] = useState<string | null>(null);
   const [clearedPendingSnapshot, setClearedPendingSnapshot] = useState<{
     sessionId: string | undefined;
@@ -441,7 +442,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
         rows={rows}
         outcomeFilter={outcomeFilter}
         onOutcomeChange={setOutcomeFilter}
-        onOpenMatch={setSelectedMatch}
+        onOpenMatch={(m) => {
+          setSelectedMatchTab('core');
+          setSelectedMatch(m);
+        }}
+        onWatchReplay={(m) => {
+          setSelectedMatchTab('replay');
+          setSelectedMatch(m);
+        }}
       />
 
       <SessionHistoryList
@@ -456,6 +464,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       {selectedMatch && (
         <HistoricalMatchDetailModal
           match={sessionMatchToHistoricalRecord(selectedMatch)}
+          initialTab={selectedMatchTab}
           onClose={() => setSelectedMatch(null)}
           localPlayerIds={localPlayerIds}
           kickerPrefix={`SESSION MATCH · ${formatAgo(selectedMatch.ended_at)}`}

@@ -4,13 +4,21 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "stage:viewer-sdk": "node scripts/stage-viewer-sdk-assets.mjs",
+    "predev": "npm run stage:viewer-sdk",
     "dev": "vite",
+    "prebuild": "npm run stage:viewer-sdk",
     "build": "tsc -b && vite build --mode production",
+    "prebuild:dev": "npm run stage:viewer-sdk",
     "build:dev": "tsc -b && vite build --mode development",
     "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@babylonjs/core": "9.36.0",
+    "@babylonjs/loaders": "9.36.0",
+    "@dimforge/rapier3d-compat": "0.12.0",
+    "@rl-replay/viewer-sdk": "file:./vendor/rl-replay-viewer-sdk-4.0.0.tgz",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
