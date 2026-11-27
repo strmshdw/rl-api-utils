@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dank/rl-api-utils/internal/ballchasing"
 	"github.com/dank/rl-api-utils/internal/config"
 	"github.com/dank/rl-api-utils/internal/playertrack"
 	"github.com/dank/rl-api-utils/internal/session"
@@ -43,6 +44,13 @@ type ProviderDisconnector interface {
 // (download/upload/stats) without logging into the primary PsyNet account.
 type MatchRetrier interface {
 	RetryMatch(ctx context.Context, matchGUID string) error
+}
+
+// ReplayFetcher abstracts Ballchasing replay lookup and binary download for the viewer API.
+// Satisfied by *ballchasing.Client so viewer downloads share the existing RateLimiter.
+type ReplayFetcher interface {
+	DownloadReplayFile(ctx context.Context, replayID, destPath string) (int64, error)
+	FindReplayByMetadata(ctx context.Context, q ballchasing.ReplaySearchQuery) (*ballchasing.ReplayItem, error)
 }
 
 // ReplaySyncStatus describes the live or most recent PsyNet replay download/upload sync cycle.
@@ -85,12 +93,18 @@ type Daemon struct {
 	sessionTracker     *session.SessionTracker
 	stateStore         storage.StateStore
 	historySyncer      *syncer.BallchasingHistorySyncer
+	ballchasingClient  ReplayFetcher
 	webHandler         http.Handler
 	manualTrigger      chan syncTriggerReq
 	gameProcessRunning func() bool
 	disconnectGrace    time.Duration
 	disconnectGraceSet bool
 	statusTickInterval time.Duration
+
+	replayFlightMu  sync.Mutex
+	replayInFlight  map[string]*replayDownloadCall
+	replayLinkMu    sync.RWMutex
+	replayLinkCache map[string]resolvedBallchasingLink
 
 	mu                    sync.Mutex
 	ctx                   context.Context
@@ -173,6 +187,13 @@ func WithStore(store storage.StateStore) Option {
 func WithHistorySyncer(s *syncer.BallchasingHistorySyncer) Option {
 	return func(d *Daemon) {
 		d.historySyncer = s
+	}
+}
+
+// WithBallchasingClient attaches a Ballchasing ReplayFetcher for on-demand 3D replay downloads.
+func WithBallchasingClient(client ReplayFetcher) Option {
+	return func(d *Daemon) {
+		d.ballchasingClient = client
 	}
 }
 

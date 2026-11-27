@@ -32,9 +32,14 @@ const OUTCOME_OPTIONS = [
 
 const ROW_GRID = '72px 120px minmax(0,1fr) 58px 58px 58px 94px 92px 92px';
 
-const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void }> = ({
+const SessionMatchRow: React.FC<{
+  match: SessionMatchDetail;
+  onOpen: () => void;
+  onWatchReplay?: () => void;
+}> = ({
   match,
   onOpen,
+  onWatchReplay,
 }) => {
   const localTeam = localTeamOf(match);
   const us = localTeam === 0 ? match.blue_score : match.orange_score;
@@ -79,6 +84,20 @@ const SessionMatchRow: React.FC<{ match: SessionMatchDetail; onOpen: () => void 
             {formatDuration(match.duration_seconds)}
           </span>
           {isLocalMvp && <MvpChip large />}
+          {onWatchReplay && (
+            <button
+              type="button"
+              data-testid="session-watch-replay-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onWatchReplay();
+              }}
+              className="px-2 py-0.5 text-xs font-extrabold uppercase tracking-wider border border-blue-ink/60 text-blue-ink hover:bg-blue-slab hover:text-white hover:border-blue-slab t-radius cursor-pointer transition-colors shrink-0"
+              title="Open 3D Replay Viewer for this match"
+            >
+              ▶ 3D
+            </button>
+          )}
         </div>
         <div className="font-medium text-sm tracking-t6 text-muted truncate">
           {rosterLine(match)}
@@ -121,6 +140,7 @@ interface SessionMatchesSectionProps {
   outcomeFilter: OutcomeFilter;
   onOutcomeChange: (next: OutcomeFilter) => void;
   onOpenMatch: (match: SessionMatchDetail) => void;
+  onWatchReplay?: (match: SessionMatchDetail) => void;
 }
 
 export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
@@ -130,6 +150,7 @@ export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
   outcomeFilter,
   onOutcomeChange,
   onOpenMatch,
+  onWatchReplay,
 }) => (
   <>
     <div className="flex flex-wrap justify-between items-center gap-4 pt-4 pb-2">
@@ -186,6 +207,7 @@ export const SessionMatchesSection: React.FC<SessionMatchesSectionProps> = ({
                 key={m.match_guid}
                 match={m}
                 onOpen={() => onOpenMatch(m)}
+                onWatchReplay={onWatchReplay ? () => onWatchReplay(m) : undefined}
               />
             ))}
           </div>

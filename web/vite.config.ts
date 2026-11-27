@@ -18,6 +18,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    optimizeDeps: {
+      exclude: ['@rl-replay/viewer-sdk'],
+    },
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
       __APP_BUILD_MODE__: JSON.stringify(isProd ? 'production' : 'development'),
@@ -26,6 +29,26 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: path.resolve(__dirname, '../internal/web/dist'),
       emptyOutDir: true,
+      chunkSizeWarningLimit: 3500,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('vite/preload-helper')) {
+              return 'vite-preload';
+            }
+            if (id.includes('node_modules/@babylonjs/') || id.includes('node_modules\\@babylonjs\\')) {
+              return 'babylon-vendor';
+            }
+            if (
+              id.includes('node_modules/@dimforge/rapier3d-compat') ||
+              id.includes('node_modules\\@dimforge\\rapier3d-compat')
+            ) {
+              return 'rapier-vendor';
+            }
+            return undefined;
+          },
+        },
+      },
       // Keep Vite's default content-hashed filenames (assets/[name]-[hash].ext).
       // The Go server serves /assets/* as immutable for a year and index.html as
       // no-cache, so a new build only reaches browsers if the hashes change.

@@ -15,6 +15,19 @@ interface ModalProps {
   children: React.ReactNode;
   /** Panel max width in px (default 1180). */
   maxWidth?: number;
+  /** Expand panel to fill the entire viewport without unmounting children (e.g. Theater mode). */
+  fullViewport?: boolean;
+  /** Render a compact single-row header strip (e.g. Theater mode). */
+  compactHeader?: boolean;
+  /** Use tighter outer vertical padding and leaner header spacing (e.g. inline 3D replay stage). */
+  tightPadding?: boolean;
+  /** Constrain modal height to the viewport as a flex column so children fill remaining space cleanly. */
+  viewportBounded?: boolean;
+  /**
+   * Optional capture-phase Escape / dialog-cancel interceptor.
+   * Return `true` to keep the outer modal open (the callback is responsible for handling its sub-layer).
+   */
+  onEscape?: (event: Event) => boolean | void;
 }
 
 /**
@@ -31,12 +44,20 @@ export const Modal: React.FC<ModalProps> = ({
   headerActions,
   children,
   maxWidth = 1180,
+  fullViewport = false,
+  compactHeader = false,
+  tightPadding = false,
+  viewportBounded = false,
+  onEscape,
 }) => {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const pointerDownOutsideRef = useRef(false);
   const pointerDownInsideRef = useRef(false);
+  const lastEscapeHandledAtRef = useRef(0);
   const titleId = useId();
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -53,21 +74,44 @@ export const Modal: React.FC<ModalProps> = ({
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    const handleCancel = (e: Event) => {
+
+    // When a nested broadcast modal (e.g. HistoricalMatchDetailModal inside PlayerProfileDialog)
+    // is open, yield Escape & cancel handling exclusively to the innermost modal.
+    const hasNestedOpenModal = () =>
+      Boolean(dialog.querySelector('dialog.broadcast-modal[open]'));
+
+    // Capture-phase Escape handler runs BEFORE Shadow DOM children (CommandPaletteDialog,
+    // ScopedHotkeyManager) so nested layers peel off strictly one-by-one without races.
+    const handleCaptureKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (hasNestedOpenModal()) return;
+      lastEscapeHandledAtRef.current = performance.now();
+      if (onEscapeRef.current?.(e) === true) {
+        return;
+      }
       e.preventDefault();
+      e.stopPropagation();
       onClose();
     };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
+
+    const handleCancel = (e: Event) => {
+      e.preventDefault();
+      if (hasNestedOpenModal()) return;
+      // Ignore native CloseWatcher cancel firing right after capture-phase Escape already ran.
+      if (performance.now() - lastEscapeHandledAtRef.current < 150) {
+        return;
       }
+      if (onEscapeRef.current?.(e) === true) {
+        return;
+      }
+      onClose();
     };
+
+    dialog.addEventListener('keydown', handleCaptureKeyDown, true);
     dialog.addEventListener('cancel', handleCancel);
-    dialog.addEventListener('keydown', handleKeyDown);
     return () => {
+      dialog.removeEventListener('keydown', handleCaptureKeyDown, true);
       dialog.removeEventListener('cancel', handleCancel);
-      dialog.removeEventListener('keydown', handleKeyDown);
     };
   }, [onClose, isOpen]);
 
@@ -127,25 +171,63 @@ export const Modal: React.FC<ModalProps> = ({
           }
           pointerDownInsideRef.current = false;
         }}
-        className="min-h-full flex items-start justify-center px-4 sm:px-6 py-8 sm:py-12 box-border"
+        className={
+          fullViewport
+            ? 'h-full w-full flex items-stretch justify-center p-0 box-border overflow-hidden'
+            : viewportBounded
+            ? 'h-full w-full flex items-stretch justify-center px-3 sm:px-4 py-2 box-border overflow-hidden'
+            : tightPadding
+            ? 'min-h-full flex items-start justify-center px-3 sm:px-4 py-2 sm:py-3 box-border'
+            : 'min-h-full flex items-start justify-center px-4 sm:px-6 py-8 sm:py-12 box-border'
+        }
       >
         <div
           ref={panelRef}
           onClick={(e) => e.stopPropagation()}
-          className="w-full t-bg-modal bg-modal border-t-4 border-ink t-border t-radius flex flex-col shadow-2xl"
-          style={{ maxWidth }}
+          data-full-viewport={fullViewport ? 'true' : 'false'}
+          data-viewport-bounded={viewportBounded ? 'true' : 'false'}
+          className={
+            fullViewport
+              ? 'w-screen h-screen max-w-none t-bg-modal bg-modal flex flex-col overflow-hidden'
+              : viewportBounded
+              ? 'w-full h-full max-h-[calc(100vh-16px)] t-bg-modal bg-modal border-t-4 border-ink t-border t-radius flex flex-col shadow-2xl overflow-hidden'
+              : 'w-full t-bg-modal bg-modal border-t-4 border-ink t-border t-radius flex flex-col shadow-2xl'
+          }
+          style={fullViewport ? undefined : { maxWidth }}
         >
-          <div className="flex flex-wrap justify-between items-start gap-4 px-6 pt-5 pb-4 border-b border-line t-bg-panel">
-            <div className="flex flex-col gap-1.5 min-w-0">
-              {kicker && <SectionLabel>{kicker}</SectionLabel>}
+          <div
+            className={
+              compactHeader
+                ? 'flex flex-wrap justify-between items-center gap-3 px-4 py-2 border-b border-line t-bg-panel shrink-0'
+                : tightPadding
+                ? 'flex flex-wrap justify-between items-center gap-3 px-5 pt-2.5 pb-2 border-b border-line t-bg-panel shrink-0'
+                : 'flex flex-wrap justify-between items-start gap-4 px-6 pt-5 pb-4 border-b border-line t-bg-panel'
+            }
+          >
+            <div
+              className={
+                compactHeader
+                  ? 'flex items-center gap-3 min-w-0'
+                  : tightPadding
+                  ? 'flex flex-col gap-1 min-w-0'
+                  : 'flex flex-col gap-1.5 min-w-0'
+              }
+            >
+              {!compactHeader && kicker && <SectionLabel>{kicker}</SectionLabel>}
               <h2
                 id={titleId}
-                className="t-font-display italic font-extrabold text-3xl sm:text-4xl leading-none uppercase tracking-wider t-text-strong"
+                className={
+                  compactHeader
+                    ? 't-font-display italic font-extrabold text-lg sm:text-xl leading-none uppercase tracking-wider t-text-strong truncate'
+                    : tightPadding
+                    ? 't-font-display italic font-extrabold text-xl sm:text-2xl leading-none uppercase tracking-wider t-text-strong truncate'
+                    : 't-font-display italic font-extrabold text-3xl sm:text-4xl leading-none uppercase tracking-wider t-text-strong'
+                }
               >
                 {title}
               </h2>
-              {meta && (
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 font-semibold text-sm tracking-wider text-muted uppercase">
+              {!compactHeader && meta && (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-semibold text-xs sm:text-sm tracking-wider text-muted uppercase">
                   {meta}
                 </div>
               )}

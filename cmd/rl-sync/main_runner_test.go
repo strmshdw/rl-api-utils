@@ -3,7 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -314,4 +318,77 @@ func TestCLI_NewDefaultRunner_Constructors(t *testing.T) {
 		r.NewPollingAuth == nil || r.NewRankClient == nil || r.NewPlayerTracker == nil {
 		t.Fatal("expected all factory functions to be non-nil")
 	}
+}
+
+func TestCLI_Run_WiresConcreteBallchasingClientToDaemon(t *testing.T) {
+	bcSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"chaser":true,"name":"Tester"}`))
+	}))
+	defer bcSrv.Close()
+
+	store, err := storage.NewSQLiteStore(filepath.Join(t.TempDir(), "wire.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.UpsertDiscoveredMatches(context.Background(), []*storage.MatchRecord{{
+		MatchGUID:            "wired-match-1",
+		RecordStartTimestamp: time.Now().UTC().Unix(),
+		BallchasingID:        "bc-wired-1",
+	}})
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	runner := createTestRunner(stdout, stderr)
+	runner.NewStore = func(path string) (storage.StateStore, error) { return store, nil }
+	runner.NewBallchasing = func(cfg ballchasing.ClientConfig) (ballchasing.ReplayUploader, error) {
+		return ballchasing.NewClient(ballchasing.ClientConfig{
+			BaseURL: bcSrv.URL,
+			APIKey:  "wired-api-key",
+		})
+	}
+
+	var wiredStatus daemon.ReplayAvailabilityResponse
+	var wiredCode int
+	runner.NewDaemon = func(s daemon.Syncer, cfg *config.Config, opts ...daemon.Option) (DaemonEngine, error) {
+		d, err := daemon.New(s, cfg, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return &callbackDaemonEngine{
+			startFn: func(runCtx context.Context) error {
+				rec := httptest.NewRecorder()
+				d.Handler(runCtx).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/matches/wired-match-1/replay/status", nil))
+				wiredCode = rec.Code
+				if rec.Code == http.StatusOK {
+					_ = json.Unmarshal(rec.Body.Bytes(), &wiredStatus)
+				}
+				return nil
+			},
+		}, nil
+	}
+
+	exitCode := runner.Run(context.Background(), []string{"--once"})
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr: %s)", exitCode, stderr.String())
+	}
+	if wiredCode != http.StatusOK {
+		t.Fatalf("status endpoint = %d, want 200", wiredCode)
+	}
+	if !wiredStatus.BallchasingConfigured || !wiredStatus.Available || wiredStatus.Source != "ballchasing" {
+		t.Fatalf("expected wired Ballchasing client on daemon, got %+v", wiredStatus)
+	}
+}
+
+type callbackDaemonEngine struct {
+	startFn func(ctx context.Context) error
+}
+
+func (c *callbackDaemonEngine) Start(ctx context.Context) error {
+	if c.startFn != nil {
+		return c.startFn(ctx)
+	}
+	return nil
 }

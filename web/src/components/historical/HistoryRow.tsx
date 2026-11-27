@@ -13,7 +13,7 @@ import {
 } from './historyData';
 
 export const HISTORY_ROW_GRID =
-  '72px 120px minmax(0,1.2fr) minmax(0,1fr) 90px 150px 140px';
+  '72px 120px minmax(0,1.2fr) minmax(0,1fr) 90px 200px 132px';
 
 interface HistoryRowProps {
   match: HistoricalMatchRecord;
@@ -21,6 +21,7 @@ interface HistoryRowProps {
   open: boolean;
   onToggle: () => void;
   onDetail: () => void;
+  onWatchReplay?: () => void;
   onRetry?: (guid: string, e: React.MouseEvent) => void;
   isRetrying?: boolean;
   onPlayerClick?: (playerId: string, playerName?: string) => void;
@@ -32,6 +33,7 @@ export const HistoryRow: React.FC<HistoryRowProps> = ({
   open,
   onToggle,
   onDetail,
+  onWatchReplay,
   onRetry,
   isRetrying = false,
   onPlayerClick,
@@ -101,6 +103,20 @@ export const HistoryRow: React.FC<HistoryRowProps> = ({
           )}
         </span>
         <div className="flex items-center justify-end gap-2 pr-2">
+          {onWatchReplay && (
+            <button
+              type="button"
+              data-testid="history-row-watch-replay-btn"
+              title="Open 3D Replay Viewer for this match"
+              onClick={(e) => {
+                e.stopPropagation();
+                onWatchReplay();
+              }}
+              className="px-2 py-0.5 t-bg-page bg-page border border-blue-ink/60 text-blue-ink hover:bg-blue-slab hover:text-white hover:border-blue-slab text-xs font-extrabold uppercase tracking-wider t-radius cursor-pointer transition-colors whitespace-nowrap shrink-0"
+            >
+              ▶ 3D
+            </button>
+          )}
           <span
             className={`text-right font-bold text-sm tracking-t10 whitespace-nowrap ${status.ink}`}
             title={status.title}
@@ -159,13 +175,25 @@ export const HistoryRow: React.FC<HistoryRowProps> = ({
             <span className="text-sm font-extrabold text-muted">
               CLICK ANY PLAYER IN BOX SCORE FOR QUICK MODAL PROFILE (MMR SHOWN BEFORE RANK/DIV)
             </span>
-            <button
-              type="button"
-              onClick={onDetail}
-              className="px-4 py-2 t-bg-blue-slab bg-blue-slab text-white font-extrabold text-sm uppercase tracking-wider hover:opacity-90 t-radius cursor-pointer"
-            >
-              FULL 5-TAB BALLCHASING TELEMETRY →
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {onWatchReplay && (
+                <button
+                  type="button"
+                  data-testid="history-watch-replay-btn"
+                  onClick={onWatchReplay}
+                  className="px-4 py-2 t-bg-page bg-page border border-blue-ink text-blue-ink hover:text-ink-strong hover:border-ink font-extrabold text-sm uppercase tracking-wider t-radius cursor-pointer transition-colors"
+                >
+                  ▶ 3D REPLAY
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onDetail}
+                className="px-4 py-2 t-bg-blue-slab bg-blue-slab text-white font-extrabold text-sm uppercase tracking-wider hover:opacity-90 t-radius cursor-pointer"
+              >
+                FULL MATCH TELEMETRY →
+              </button>
+            </div>
           </div>
         </div>
       )}

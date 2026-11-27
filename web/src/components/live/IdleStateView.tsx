@@ -27,6 +27,7 @@ import { PlaylistRows, SessionForAgainstTable, SessionKpiStrip } from '../sessio
 import { ContinueSessionBanner } from '../session/SessionView';
 import { useMMRHistory } from '../../hooks/useMMRHistory';
 import { useDashboard } from '../../context/DashboardContext';
+import type { TelemetryTab } from '../historical/HistoricalMatchDetailModal';
 
 interface IdleStateViewProps {
   session: SessionResponse | null;
@@ -38,7 +39,7 @@ interface IdleStateViewProps {
   onContinueSession?: (sessionId?: string) => void;
   onDismissContinueSession?: (sessionId?: string) => void;
   onInspectPlayer?: (playerId: string, playerName?: string) => void;
-  onOpenMatchTelemetry?: (match: SessionMatchDetail) => void;
+  onOpenMatchTelemetry?: (match: SessionMatchDetail, initialTab?: TelemetryTab) => void;
 }
 
 const OUTCOME_WORD = { W: 'WIN', L: 'LOSS', D: 'DRAW' } as const;
@@ -47,7 +48,7 @@ const LastMatch: React.FC<{
   match: SessionMatchDetail;
   onShowSession: () => void;
   onInspectPlayer?: (playerId: string, playerName?: string) => void;
-  onOpenMatchTelemetry?: (match: SessionMatchDetail) => void;
+  onOpenMatchTelemetry?: (match: SessionMatchDetail, initialTab?: TelemetryTab) => void;
 }> = ({ match, onShowSession, onInspectPlayer, onOpenMatchTelemetry }) => {
   const outcome = outcomeOf(match.result);
   const localTeam = localTeamOf(match);
@@ -65,13 +66,21 @@ const LastMatch: React.FC<{
     <div data-testid="last-match" className="flex flex-col gap-3 pt-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SectionLabel>LAST MATCH · {formatAgo(match.ended_at)}</SectionLabel>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={() => onOpenMatchTelemetry?.(match)}
+            data-testid="last-match-watch-replay-btn"
+            onClick={() => onOpenMatchTelemetry?.(match, 'replay')}
+            className="px-2.5 py-0.5 border border-blue-ink text-xs t-font-display font-extrabold uppercase tracking-wider t-text-blue text-blue-ink hover:bg-blue-slab hover:text-white t-radius cursor-pointer transition-colors"
+          >
+            ▶ 3D REPLAY
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenMatchTelemetry?.(match, 'core')}
             className="text-sm t-font-display font-bold uppercase tracking-wider t-text-blue hover:underline cursor-pointer"
           >
-            OPEN FULL 5-TAB BALLCHASING TELEMETRY →
+            OPEN MATCH TELEMETRY →
           </button>
         </div>
       </div>

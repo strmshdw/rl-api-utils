@@ -3,10 +3,12 @@ package web_test
 import (
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/dank/rl-api-utils/internal/web"
 )
@@ -322,4 +324,110 @@ func TestDistHandler_MissingAssetsReturn404(t *testing.T) {
 		})
 	}
 }
+
+func TestViewerSDK_MIMETypesAndStaticServing(t *testing.T) {
+	expectedMIMEs := map[string]string{
+		".wasm":     "application/wasm",
+		".glb":      "model/gltf-binary",
+		".gltf":     "model/gltf+json",
+		".bin":      "application/octet-stream",
+		".webp":     "image/webp",
+		".avif":     "image/avif",
+		".ktx2":     "image/ktx2",
+		".dds":      "application/octet-stream",
+		".env":      "application/octet-stream",
+		".hdr":      "application/octet-stream",
+		".replay":   "application/octet-stream",
+		".rlbundle": "application/octet-stream",
+		".map":      "application/json",
+	}
+	for ext, wantPrefix := range expectedMIMEs {
+		got := mime.TypeByExtension(ext)
+		if !strings.HasPrefix(got, wantPrefix) {
+			t.Errorf("mime.TypeByExtension(%q) = %q, want prefix %q", ext, got, wantPrefix)
+		}
+	}
+
+	mockDist := fstest.MapFS{
+		"index.html":                             &fstest.MapFile{Data: []byte(`<!doctype html><div id="root"></div>`)},
+		"assets/app-abc123.js":                   &fstest.MapFile{Data: []byte(`console.log("ok");`)},
+		"viewer-sdk/wasm/rl_boxcars_v4.wasm":     &fstest.MapFile{Data: []byte("\x00asm\x01\x00\x00\x00")},
+		"viewer-sdk/assets/models/octane.glb":    &fstest.MapFile{Data: []byte("glTF\x02\x00\x00\x00")},
+		"viewer-sdk/assets/draco/draco_dec.wasm": &fstest.MapFile{Data: []byte("\x00asm\x01\x00\x00\x00")},
+	}
+	handler := web.NewStaticHandler(mockDist)
+
+	cases := []struct {
+		path          string
+		wantStatus    int
+		wantCTPrefix  string
+		wantCC        string
+		disallowImmut bool
+	}{
+		{
+			path:          "/viewer-sdk/wasm/rl_boxcars_v4.wasm",
+			wantStatus:    http.StatusOK,
+			wantCTPrefix:  "application/wasm",
+			wantCC:        "public, max-age=3600",
+			disallowImmut: true,
+		},
+		{
+			path:          "/viewer-sdk/assets/models/octane.glb",
+			wantStatus:    http.StatusOK,
+			wantCTPrefix:  "model/gltf-binary",
+			wantCC:        "public, max-age=3600",
+			disallowImmut: true,
+		},
+		{
+			path:          "/viewer-sdk/assets/draco/draco_dec.wasm",
+			wantStatus:    http.StatusOK,
+			wantCTPrefix:  "application/wasm",
+			wantCC:        "public, max-age=3600",
+			disallowImmut: true,
+		},
+		{
+			path:         "/assets/app-abc123.js",
+			wantStatus:   http.StatusOK,
+			wantCTPrefix: "application/javascript",
+			wantCC:       "public, max-age=31536000, immutable",
+		},
+		{
+			path:       "/viewer-sdk/wasm/missing.wasm",
+			wantStatus: http.StatusNotFound,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			res := rec.Result()
+			defer res.Body.Close()
+
+			if res.StatusCode != tc.wantStatus {
+				t.Fatalf("GET %s status = %d, want %d", tc.path, res.StatusCode, tc.wantStatus)
+			}
+			if res.Header.Get("Cross-Origin-Opener-Policy") != "" || res.Header.Get("Cross-Origin-Embedder-Policy") != "" {
+				t.Errorf("unexpected COOP/COEP headers on %s", tc.path)
+			}
+			if tc.wantStatus != http.StatusOK {
+				body, _ := io.ReadAll(res.Body)
+				if strings.Contains(string(body), `<div id="root"></div>`) {
+					t.Errorf("missing SDK asset %s fell back to index.html", tc.path)
+				}
+				return
+			}
+			if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, tc.wantCTPrefix) {
+				t.Errorf("Content-Type for %s = %q, want prefix %q", tc.path, ct, tc.wantCTPrefix)
+			}
+			if cc := res.Header.Get("Cache-Control"); cc != tc.wantCC {
+				t.Errorf("Cache-Control for %s = %q, want %q", tc.path, cc, tc.wantCC)
+			}
+			if tc.disallowImmut && strings.Contains(res.Header.Get("Cache-Control"), "immutable") {
+				t.Errorf("unhashed SDK asset %s should not be marked immutable", tc.path)
+			}
+		})
+	}
+}
+
 

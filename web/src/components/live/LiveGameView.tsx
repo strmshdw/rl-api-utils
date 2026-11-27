@@ -17,7 +17,7 @@ import {
 } from '../../utils/broadcast';
 import { SAMPLE_CURRENT_MATCH } from '../../utils/sampleData';
 import { PlayerProfileDialog } from '../players/PlayerProfileDialog';
-import { HistoricalMatchDetailModal } from '../historical/HistoricalMatchDetailModal';
+import { HistoricalMatchDetailModal, TelemetryTab } from '../historical/HistoricalMatchDetailModal';
 import { sessionMatchToHistoricalRecord } from '../historical/historyData';
 
 const EMPTY_DATE_PARAMS: { from?: string; to?: string } = {};
@@ -36,7 +36,7 @@ interface LiveGameViewProps {
   onContinueSession?: (sessionId?: string) => void;
   onDismissContinueSession?: (sessionId?: string) => void;
   onInspectPlayer?: (playerId: string, playerName?: string) => void;
-  onOpenMatchTelemetry?: (match: SessionMatchDetail) => void;
+  onOpenMatchTelemetry?: (match: SessionMatchDetail, initialTab?: TelemetryTab) => void;
 }
 
 /** Local player, teammates and opponents, de-duplicated; spectators are excluded. */
@@ -86,6 +86,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
   const [localColumnsOpen, setLocalColumnsOpen] = useState(false);
   const [fallbackPlayer, setFallbackPlayer] = useState<{ id: string; name?: string } | null>(null);
   const [fallbackMatch, setFallbackMatch] = useState<SessionMatchDetail | null>(null);
+  const [fallbackMatchTab, setFallbackMatchTab] = useState<TelemetryTab>('core');
 
   const effectiveColumnsOpen = controlledColumnsOpen ?? localColumnsOpen;
   const closeColumnsModal = () => {
@@ -98,9 +99,12 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
     else setFallbackPlayer({ id: playerId, name: playerName });
   };
 
-  const handleOpenMatchTelemetry = (m: SessionMatchDetail) => {
-    if (onOpenMatchTelemetry) onOpenMatchTelemetry(m);
-    else setFallbackMatch(m);
+  const handleOpenMatchTelemetry = (m: SessionMatchDetail, initialTab: TelemetryTab = 'core') => {
+    if (onOpenMatchTelemetry) onOpenMatchTelemetry(m, initialTab);
+    else {
+      setFallbackMatchTab(initialTab);
+      setFallbackMatch(m);
+    }
   };
 
   const realDisplayable = !!match && (match.active_match || match.match_ended);
@@ -170,6 +174,7 @@ export const LiveGameView: React.FC<LiveGameViewProps> = ({
         {fallbackMatch && (
           <HistoricalMatchDetailModal
             match={sessionMatchToHistoricalRecord(fallbackMatch)}
+            initialTab={fallbackMatchTab}
             onClose={() => setFallbackMatch(null)}
             onPlayerClick={handleInspectPlayer}
           />

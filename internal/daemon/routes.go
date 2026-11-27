@@ -47,6 +47,8 @@ func (d *Daemon) setupRoutes(ctx context.Context) *http.ServeMux {
 	mux.HandleFunc("GET /api/matches", d.handleListMatches)
 	mux.HandleFunc("POST /api/matches/prune", d.handlePruneMatches)
 	mux.HandleFunc("POST /api/matches/{guid}/retry", d.handleRetryMatch)
+	mux.HandleFunc("GET /api/matches/{guid}/replay/status", d.handleGetMatchReplayStatus)
+	mux.HandleFunc("GET /api/matches/{guid}/replay", d.handleGetMatchReplay)
 	mux.HandleFunc("GET /api/matches/{guid...}", d.handleGetMatch)
 	mux.HandleFunc("GET /api/historical-matches", d.handleListMatches)
 	mux.HandleFunc("GET /api/mmr-history", d.handleListMMRHistory)

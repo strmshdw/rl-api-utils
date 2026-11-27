@@ -44,7 +44,46 @@ var (
 
 	// ErrInvalidVisibility is returned when an unsupported visibility string is configured.
 	ErrInvalidVisibility = errors.New("ballchasing: invalid visibility (must be 'public', 'unlisted', or 'private')")
+
+	// ErrForbidden is returned when Ballchasing rejects access to a private or restricted replay (HTTP 403).
+	ErrForbidden = errors.New("ballchasing: access forbidden (HTTP 403)")
+
+	// ErrInvalidPayload is returned when a replay download returns non-binary error content (e.g. HTML).
+	ErrInvalidPayload = errors.New("ballchasing: downloaded replay payload is invalid")
 )
+
+// RateLimitError wraps ErrRateLimitExhausted while preserving any upstream Retry-After hint.
+type RateLimitError struct {
+	RetryAfter time.Duration
+	Message    string
+}
+
+func (e *RateLimitError) Error() string {
+	if e == nil {
+		return ErrRateLimitExhausted.Error()
+	}
+	if e.Message != "" {
+		return ErrRateLimitExhausted.Error() + ": " + e.Message
+	}
+	return ErrRateLimitExhausted.Error()
+}
+
+// Unwrap exposes ErrRateLimitExhausted for errors.Is compatibility.
+func (e *RateLimitError) Unwrap() error {
+	return ErrRateLimitExhausted
+}
+
+// ReplaySearchQuery defines metadata criteria for locating a Ballchasing replay
+// when a match record does not yet store a cached ballchasing_id.
+type ReplaySearchQuery struct {
+	MatchGUID   string
+	Timestamp   time.Time
+	PlaylistID  int
+	MapName     string
+	BlueScore   int
+	OrangeScore int
+	PlayerNames []string
+}
 
 // Visibility represents the upload visibility setting on Ballchasing.com.
 type Visibility = string

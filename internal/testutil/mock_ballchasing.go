@@ -70,6 +70,10 @@ type MockBallchasingServer struct {
 	// Fault injection
 	forcedStatusCode int
 	forcedErrorMsg   string
+
+	// Replay file downloads and search fixtures
+	replayFiles map[string][]byte
+	replayList  []map[string]any
 }
 
 // NewMockBallchasingServer creates and starts a new MockBallchasingServer.
@@ -83,6 +87,8 @@ func NewMockBallchasingServer() *MockBallchasingServer {
 		patchesByReplayID: make(map[string]*ReplayPatch),
 		duplicateGUIDs:    make(map[string]string),
 		retryAfterSeconds: 1,
+		replayFiles:       make(map[string][]byte),
+		replayList:        make([]map[string]any, 0),
 	}
 
 	mock.server = httptest.NewServer(http.HandlerFunc(mock.handleRequest))
@@ -149,6 +155,22 @@ func (m *MockBallchasingServer) SetForcedStatus(code int, errMsg string) {
 	defer m.mu.Unlock()
 	m.forcedStatusCode = code
 	m.forcedErrorMsg = errMsg
+}
+
+// SetReplayFile registers a raw .replay payload served by GET /replays/{id}/file.
+func (m *MockBallchasingServer) SetReplayFile(replayID string, payload []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]byte, len(payload))
+	copy(cp, payload)
+	m.replayFiles[replayID] = cp
+}
+
+// SetReplayList configures the JSON replay items returned by GET /replays.
+func (m *MockBallchasingServer) SetReplayList(items []map[string]any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.replayList = items
 }
 
 // GetUploadCount returns the total number of successful or accepted uploads.
@@ -227,6 +249,8 @@ func (m *MockBallchasingServer) Reset() {
 	m.customRetryAfterHeader = ""
 	m.forcedStatusCode = 0
 	m.forcedErrorMsg = ""
+	m.replayFiles = make(map[string][]byte)
+	m.replayList = make([]map[string]any, 0)
 }
 
 func generateUUID() string {
@@ -263,7 +287,60 @@ func (m *MockBallchasingServer) handleRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// 5. Handle Replay Binary Download: GET /replays/{id}/file or GET /api/replays/{id}/file
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/file") &&
+		(strings.HasPrefix(r.URL.Path, "/replays/") || strings.HasPrefix(r.URL.Path, "/api/replays/")) {
+		m.handleDownloadReplayFile(w, r)
+		return
+	}
+
+	// 6. Handle Replay Search / List: GET /replays or GET /api/replays
+	if r.Method == http.MethodGet && (r.URL.Path == "/replays" || r.URL.Path == "/api/replays") {
+		m.handleListReplays(w, r)
+		return
+	}
+
 	http.NotFound(w, r)
+}
+
+func (m *MockBallchasingServer) handleDownloadReplayFile(w http.ResponseWriter, r *http.Request) {
+	if _, ok := m.checkMutateGates(w, r); !ok {
+		return
+	}
+	replayID := strings.TrimPrefix(r.URL.Path, "/api/replays/")
+	replayID = strings.TrimPrefix(replayID, "/replays/")
+	replayID = strings.TrimSuffix(replayID, "/file")
+	replayID = strings.Trim(replayID, "/")
+
+	m.mu.RLock()
+	payload, exists := m.replayFiles[replayID]
+	m.mu.RUnlock()
+	if !exists {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "replay not found"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+}
+
+func (m *MockBallchasingServer) handleListReplays(w http.ResponseWriter, r *http.Request) {
+	if _, ok := m.checkMutateGates(w, r); !ok {
+		return
+	}
+	m.mu.RLock()
+	items := m.replayList
+	m.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"count": len(items),
+		"list":  items,
+		"next":  "",
+	})
 }
 
 func (m *MockBallchasingServer) checkMutateGates(w http.ResponseWriter, r *http.Request) (string, bool) {
